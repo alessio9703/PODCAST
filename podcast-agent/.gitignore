@@ -1,0 +1,17 @@
+.env
+output/
+documenti/*
+!documenti/.gitkeep
+voci_disponibili/*
+!voci_disponibili/.gitkeep
+voices_registry.json
+musiche/intro/*
+!musiche/intro/.gitkeep
+musiche/outro/*
+!musiche/outro/.gitkeep
+musiche/sottofondo/*
+!musiche/sottofondo/.gitkeep
+__pycache__/
+*.pyc
+.venv/
+.claude/settings.local.json

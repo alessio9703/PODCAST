@@ -1,0 +1,341 @@
+# ---------------------------------------------------------------------------
+# Configurazione del podcast-agent
+# Cambiare provider qui (e SOLO qui) per sostituire il motore di voice cloning.
+# ---------------------------------------------------------------------------
+
+# Provider vocale attivo. Deve corrispondere a una chiave in `providers`.
+# Valori registrati: fish_audio
+active_provider: fish_audio
+
+providers:
+  fish_audio:
+    # Classe concreta: modulo:Classe (caricata dinamicamente, niente if/else nel codice)
+    class: src.providers.fish_audio_provider:FishAudioProvider
+    options:
+      base_url: https://api.fish.audio
+      # Nome della variabile d'ambiente che contiene la API key (mai la key qui dentro!)
+      api_key_env: FISH_AUDIO_API_KEY
+      # Modello TTS: s1 | s2-pro | s2.1-pro | s2.1-pro-free | drama-3-preview
+      #
+      # drama-3-preview e' tarato sulla recitazione: piu' gamma dinamica e, a
+      # differenza di s2.1-pro, distingue i tipi di domanda invece di applicare
+      # un rialzo finale a tutto cio' che finisce con "?". In cambio sulle
+      # domande si'/no tende a NON fare il rialzo, che li' invece serve: e' il
+      # caso in cui la tag esplicita ([dubbioso], [interrogativo]) va messa.
+      #
+      # ATTENZIONE: e' un modello PREVIEW. La documentazione dichiara che
+      # "behavior and availability may change": puo' cambiare resa da un giorno
+      # all'altro o sparire senza preavviso. Se la dizione peggiora senza che tu
+      # abbia toccato niente, o se la sintesi inizia a fallire, il fallback e'
+      # rimettere qui s2.1-pro, che e' stabile e non richiede nessun'altra
+      # modifica: stesso body, stessi parametri, stesso prezzo.
+      tts_model: drama-3-preview
+      # Formato dei segmenti audio scaricati: wav (consigliato) | mp3
+      # wav permette pause precise e montaggio senza perdita; mp3 evita la
+      # ri-codifica ma non consente inserire silenzi calibrati.
+      audio_format: wav
+      mp3_bitrate: 128
+      latency: normal
+      # Visibilita' dei modelli vocali creati sul provider
+      visibility: private
+      timeout_seconds: 180
+      max_retries: 3
+      # Costo indicativo per la stima (USD ogni 1M di caratteri sintetizzati).
+      # null = provider senza costo noto -> la stima mostra solo caratteri/durata.
+      cost_per_million_chars_usd: 15.0
+      # Velocita' di lettura del modello, per STIMARE la durata (la durata
+      # vera si sa solo dopo la sintesi). Sui caratteri e non sulle parole:
+      # le parole italiane variano in lunghezza fra un documento e l'altro
+      # (6,02 contro 6,35 caratteri di media sui due documenti gia' prodotti),
+      # e i caratteri delle inline tag [fra quadre] si possono togliere, visto
+      # che il provider non le pronuncia.
+      #
+      # ATTENZIONE: e' MISURATO su drama-3-preview, sulla media di 5 run reali
+      # (14,55 car/s; errore medio 5,9%, peggiore 10,1%). E' una proprieta' del
+      # modello: lo stesso copione con s2.1-pro esce a 16,77 car/s, cioe' il 10%
+      # piu' corto. Se cambi `tts_model` qui sopra, questo valore va RIMISURATO,
+      # altrimenti la stima sbaglia in modo sistematico.
+      chars_per_second: 14.5
+      # Parametri di sintesi passati tal quali a POST /v1/tts.
+      # Sono la leva "di macchina" sulla naturalezza; la leva "di scrittura"
+      # sono le inline tag [fra quadre] dentro il testo (vedi prompts/copione.md).
+      tts:
+        # normalize: normalizza numeri, date e sigle prima di leggerli.
+        # ATTENZIONE: se in futuro userai anche il paralinguaggio fra parentesi
+        # TONDE (pause, respiri), su quel turno normalize va messo a false.
+        # Le tag emotive fra [quadre] non sono in conflitto: qui resta true.
+        normalize: true
+        # 1.0 = velocita' naturale del campione. <1 rallenta, >1 accelera.
+        speed: 1.0
+        # Guadagno in dB rispetto al livello naturale. 0 = invariato.
+        volume: 0
+        # temperature / top_p: quanta varieta' espressiva concede il modello.
+        # Piu' alti = piu' vivo ma meno prevedibile.
+        temperature: 0.7
+        top_p: 0.7
+        # >1 scoraggia le cantilene e le cadenze ripetute fra turno e turno.
+        repetition_penalty: 1.2
+
+  # Esempio di come si aggiunge un provider alternativo in futuro:
+  # cartesia:
+  #   class: src.providers.cartesia_provider:CartesiaProvider
+  #   options:
+  #     api_key_env: CARTESIA_API_KEY
+
+paths:
+  # Cartella dove depositare i documenti di partenza (PDF, DOCX, TXT, MD).
+  # Un documento indicato per solo nome file viene cercato prima qui dentro.
+  documents_dir: ./documenti
+  # Cartella con le registrazioni originali: "Nome Cognome.wav"
+  voices_dir: ./voci_disponibili
+  # Registro locale delle voci gia' clonate (cache)
+  registry_file: ./voices_registry.json
+  # Cartella radice degli episodi generati
+  output_dir: ./output
+  # Cartella delle musiche opzionali (intro/, outro/, sottofondo/). Se manca
+  # o e' vuota la funzione musica e' semplicemente non disponibile: non e'
+  # un errore.
+  music_dir: ./musiche
+
+audio:
+  # Ritaglia il silenzio che il TTS mette in testa e in coda a ogni segmento
+  # PRIMA di montarlo. Senza, la pausa percepita fra due turni non e' quella
+  # configurata qui sotto ma "coda + pausa + testa", e cambia a ogni turno:
+  # su drama-3-preview la coda misura 905 ms mediani (da 160 a 1490), cioe' il
+  # vuoto reale era 3 volte quello configurato e mai costante.
+  trim_silence: true
+  # Soglia in % del 95esimo percentile del picco del segmento (relativa: le
+  # voci hanno livelli diversi). Sotto questa soglia e' silenzio.
+  trim_threshold_pct: 1.5
+  # Margini lasciati dentro il taglio, per non mangiare l'attacco di
+  # un'occlusiva ne' il rilascio finale. La coda e' piu' generosa di proposito.
+  trim_margin_head_ms: 30
+  trim_margin_tail_ms: 80
+  # Comprime i vuoti INTERNI a un turno (un punto fermo o una domanda a meta'
+  # testo) che superano cap_internal_silence_ms, senza toccare il parlato.
+  # A differenza del ritaglio dei bordi qui sopra, questo vuoto non ha un
+  # parametro che lo governa: il modello (specie in modalita' preview) decide
+  # da solo quanto durare, e puo' andare da poche centinaia di millisecondi a
+  # oltre un secondo e mezzo. Aggiunto il 16/09/2026 dopo un esperimento
+  # sull'episodio "Il costo della pioggia": su 42 turni, 36 avevano almeno un
+  # vuoto interno >=250ms, e capitava anche nei turni senza nessuna tag - non
+  # e' quindi la tag [fra quadre] a causarlo, e' la frase spezzata in due.
+  cap_internal_silence: true
+  # Tetto del vuoto interno. Tenuto sopra pause_between_turns_ms: un turno
+  # che continua con lo stesso speaker puo' permettersi un vuoto un po' piu'
+  # lungo di quello fra due turni senza sembrare innaturale.
+  cap_internal_silence_ms: 300
+  # Rileva segmenti in cui il provider ha smesso di parlare a meta' frase,
+  # restituendo un file lungo ma quasi tutto silenzio/rumore al posto del
+  # resto del testo (osservato su drama-3-preview, turno 33 dell'episodio
+  # "Il cuore elettrico", 18/09/2026: 2,2s di parlato reale dentro un file di
+  # 21,6s). cap_internal_silence comprime il vuoto risultante a
+  # cap_internal_silence_ms, quindi il turno finisce nel montaggio SENZA la
+  # seconda meta' del testo e senza nessun segnale — e' quello che l'utente
+  # ha sentito come "pausa insensata" col sottofondo che si alza. Con questo
+  # attivo, un segmento del genere viene rilevato PRIMA di finire in cache e
+  # ritentato (vedi dropout_max_retries). Richiede audio_format: wav (solo
+  # li' il segmento e' decodificabile) e chars_per_second dichiarato qui
+  # sotto (senza, non c'e' un tempo atteso con cui confrontare il parlato).
+  dropout_detection: true
+  # Sotto questa frazione del tempo di lettura atteso (spoken_chars /
+  # chars_per_second) un segmento e' sospetto. Tarata larga apposta: il
+  # parlato reale, pause fra le frasi comprese, non riempie mai il 100% del
+  # tempo atteso. Il turno difettoso del 18/09/2026 era al 21%.
+  dropout_min_ratio: 0.5
+  # Tentativi AGGIUNTIVI oltre al primo quando un segmento risulta sospetto.
+  # Il glitch e' probabilistico: ritentare lo stesso testo di norma basta a
+  # risolverlo senza intervento manuale. Se un turno resta sospetto anche
+  # dopo tutti i tentativi, viene comunque montato (mai bloccare l'episodio
+  # per un turno) ma segnalato per esteso in warnings[], con l'indicazione
+  # di ascoltarlo e rifarlo con tools/retake.py se serve.
+  dropout_max_retries: 2
+  # Vuoto CONTIGUO (in secondi) oltre il quale un segmento e' sospetto anche
+  # se il parlato totale torna. dropout_min_ratio qui sopra non basta da solo:
+  # misura il parlato con la soglia ASSOLUTA di trim_threshold_pct, e un vuoto
+  # pieno di rumore di fondo la supera, quindi per lui conta come parlato.
+  # Aggiunto il 18/09/2026 dopo il turno 10 dell'episodio "Il fotovoltaico
+  # dell'Alma Mater": 46,1s di segmento per 149 caratteri, con 36s di rumore a
+  # ~-50 dBFS in mezzo. Il parlato vero copriva tutto il tempo atteso, quindi
+  # il rapporto era ~1 e nessun controllo scattava; in montaggio nemmeno
+  # cap_internal_silence lo accorciava, per la stessa identica ragione. Il
+  # risultato era 44 secondi in cui si sentiva solo il sottofondo.
+  # 8 e' MISURATO: sui 47 segmenti di quell'episodio il vuoto contiguo piu'
+  # lungo di un segmento SANO era 5,4s, quello del difettoso 36,1s. Se lo
+  # abbassi sotto 6 inizi a pagare ritentativi su turni che vanno bene.
+  dropout_max_gap_seconds: 8.0
+  # Soglia del vuoto, in percentuale del picco MASSIMO del segmento. E'
+  # relativa al picco, e non al 95esimo percentile come trim_threshold_pct,
+  # proprio perche' deve cadere SOPRA il rumore di fondo: qui la domanda non
+  # e' "c'e' segnale?" ma "c'e' voce?".
+  dropout_gap_relative_pct: 2.0
+  # Pausa tra un turno di parola e il successivo (millisecondi).
+  # A bordi ritagliati il vuoto percepito e' questo valore + i due margini
+  # (110 ms), ed e' finalmente COSTANTE. 550 riproduce i ~650 ms che si
+  # sentivano con s2.1-pro, quando le pause non davano fastidio.
+  #
+  # Sceso a 200 il 16/09/2026: a 350 (percepito ~460 ms) i primi scambi
+  # dell'episodio "Il costo della pioggia" - turni corti, poco contenuto -
+  # sembravano avere troppo vuoto fra una battuta e la risposta. A 200
+  # (percepito ~310 ms) se il ritmo torna a sembrare lento vale la pena
+  # rivedere la SOGLIA di percezione, non necessariamente questo numero:
+  # la stessa pausa fissa su turni lunghi e turni corti non si sente allo
+  # stesso modo.
+  pause_between_turns_ms: 200
+  # Silenzio in testa e in coda all'episodio (millisecondi)
+  lead_in_ms: 300
+  lead_out_ms: 600
+  # Bitrate del file mp3 finale
+  output_mp3_bitrate: 192
+  # Formati audio accettati nella cartella voci
+  accepted_extensions: [.wav, .mp3, .m4a, .flac, .ogg, .opus, .webm]
+
+script:
+  # Modello Claude usato per scrivere la conversazione
+  model: claude-opus-5
+  api_key_env: ANTHROPIC_API_KEY
+  max_tokens: 16000
+  effort: high
+  language: italiano
+  # Formato del copione quando non viene indicato esplicitamente.
+  #   conversazione -> due voci alla pari (default storico)
+  #   intervista    -> un ruolo conduce, l'altro fa solo le domande
+  # Le regole dei due formati, deroghe comprese, stanno in prompts/copione.md:
+  # qui c'e' solo quale usare in mancanza di indicazioni.
+  default_format: conversazione
+  # Durata indicativa dell'episodio richiesta all'autore dello script (minuti)
+  target_minutes: 8
+  # Parole al minuto usate per la stima della durata
+  words_per_minute: 150
+  # Caratteri massimi del documento passati al modello (0 = nessun limite)
+  max_document_chars: 120000
+
+# ---------------------------------------------------------------------------
+# Intro, outro e sottofondo (tutti opzionali e indipendenti).
+# Richiede ffmpeg SOLO se almeno una musica e' scelta per l'episodio (vedi
+# paths.music_dir e tools/music_set.py). Un episodio senza musiche non tocca
+# nessuno di questi parametri e non richiede ffmpeg.
+#
+# Valori di partenza "da tarare a orecchio": non sono misurati su episodi
+# reali come pause_between_turns_ms o chars_per_second, sono punti di
+# partenza ragionevoli.
+# ---------------------------------------------------------------------------
+music:
+  # Pausa fra la fine dell'intro e l'inizio della prima battuta (millisecondi).
+  intro_gap_ms: 800
+  # Pausa fra la fine dell'ultima battuta e l'inizio dell'outro (millisecondi).
+  outro_gap_ms: 600
+  # Dissolvenza in uscita sul bordo finale del file di intro. 0 = nessuna: di
+  # norma il file e' gia' rifinito da chi lo ha prodotto (sigla con la sua
+  # chiusura naturale). Alzalo solo se l'intro finisce bruscamente.
+  intro_fade_out_ms: 0
+  # Dissolvenza in entrata sul bordo iniziale del file di outro. Stesso
+  # ragionamento di intro_fade_out_ms.
+  outro_fade_in_ms: 0
+  # Dissolvenza in entrata del sottofondo. Parte all'inizio di intro_gap_ms
+  # (o all'inizio della sezione parlata se non c'e' intro), non sulla prima
+  # parola: cosi' il sottofondo e' gia' presente, sia pure debole, quando si
+  # comincia a parlare, invece di entrare di scatto a meta' della pausa.
+  bed_fade_in_ms: 1500
+  # Dissolvenza in uscita del sottofondo: si chiude esattamente alla fine
+  # della coda della sezione parlata, PRIMA della pausa verso l'outro (quella
+  # pausa resta silenzio puro).
+  bed_fade_out_ms: 2000
+  # Se il sottofondo e' piu' corto della sezione parlata va in loop; questa e'
+  # la dissolvenza incrociata sul punto di giunzione, per non sentire lo
+  # stacco. Se il brano e' piu' corto di 2x questo valore il loop non ha
+  # abbastanza materiale per la dissolvenza: errore di dominio, non un loop
+  # rotto in silenzio.
+  bed_loop_crossfade_ms: 2000
+  # Livello del sottofondo RELATIVO alla voce, in dB (negativo = piu' piano).
+  # Non e' un guadagno fisso sul file: si misura la loudness di voce e
+  # sottofondo e si applica il guadagno che porta il sottofondo esattamente
+  # a questa distanza dalla voce, cosi' il risultato e' coerente anche
+  # cambiando brano o voce.
+  bed_level_db: -20
+  # Ducking: abbassa ulteriormente il sottofondo mentre si parla (compressione
+  # sidechain sulla voce). DEFAULT FALSE: con pause fisse fra i turni di
+  # ~200-550ms la sezione parlata e' quasi voce continua, quindi un release
+  # troppo corto risale visibilmente in ogni pausa (effetto "pompaggio"), e i
+  # valori tipici da mixer musicale (release ~400ms) qui tolgono piu' dB di
+  # quanti bed_level_db ne abbia gia' tolti, facendo sparire il sottofondo.
+  # Attivalo solo se vuoi che la musica si abbassi ANCORA quando si parla,
+  # oltre al bed_level_db di base.
+  ducking: false
+  # Soglia della compressione sidechain, in dB (convertita internamente in
+  # ampiezza lineare 0-1, come vuole il filtro ffmpeg sidechaincompress).
+  # La voce usata come sidechain e' quella GIA' normalizzata a target_lufs,
+  # mai quella grezza: altrimenti la soglia andrebbe ritarata a ogni episodio
+  # in base al livello naturale di chi parla.
+  ducking_threshold_db: -22
+  # Rapporto di compressione sopra soglia. Valori piu' alti abbassano di piu'
+  # il sottofondo mentre si parla. -22dB/2.5 sono MISURATI (non a naso): su un
+  # segmento di voce sintetica a piena scala danno ~5.7-5.9 dB di riduzione
+  # aggiuntiva oltre a bed_level_db, con pieno recupero nelle pause entro
+  # ~0.2 dB dal livello base (vedi tests/test_music.py). Rimisura se cambi
+  # provider TTS o parametri di sintesi: livelli diversi spostano quanto la
+  # voce supera la soglia.
+  ducking_ratio: 2.5
+  # Tempo di attacco: quanto velocemente il sottofondo si abbassa quando si
+  # inizia a parlare. Troppo corto (pochi ms) si sente come un click.
+  ducking_attack_ms: 20
+  # Tempo di rilascio: quanto lentamente il sottofondo risale nelle pause.
+  # DEVE stare sopra pause_between_turns_ms per non pompare a ogni pausa fra
+  # due turni: 1200ms e' pensato per restare piatto sulle pause brevi e
+  # risalire solo nei silenzi piu' lunghi (fine di un blocco, verso l'outro).
+  ducking_release_ms: 1200
+  # Loudness integrata target (LUFS) per intro, sezione parlata e outro,
+  # normalizzate CIASCUNA separatamente prima di essere concatenate: intro e
+  # voce TTS hanno quasi sempre livelli naturali diversi.
+  target_lufs: -16
+  # Limite di picco vero (dBTP) applicato al file finale dopo la
+  # concatenazione, per evitare clipping sui player che non fanno il proprio
+  # limiting.
+  true_peak_db: -1.5
+
+# ---------------------------------------------------------------------------
+# Lezioni dagli episodi precedenti: src/episode_signals.py raccoglie i segnali
+# (sempre, gratis, a fine sintesi), src/lessons.py li aggrega e propone
+# regole di stile/espressivita' che SOLO tu approvi con
+# `tools/lessons.py --accept`. Vedi README.md.
+# ---------------------------------------------------------------------------
+lessons:
+  # Soglia di ricorrenza per considerare un pattern uno "schema" e non un
+  # episodio isolato (--evidence, --propose). Distribuita su piu' episodi
+  # apposta: 3 occorrenze nello stesso episodio sono un caso, non un'abitudine.
+  recurrence_min_occurrences: 3
+  recurrence_min_episodes: 2
+  # Quanti _segnali.json guardare a ritroso di default.
+  evidence_lookback_episodes: 6
+  # Righe massime di prompts/lezioni.md. Oltre, --accept chiede quale lezione
+  # togliere prima di aggiungerne un'altra: piu' regole aggiungi, meno peso
+  # ha ciascuna nel prompt del copione.
+  max_lines: 20
+  # Dopo quanti episodi da quando una lezione e' attiva si controlla con
+  # --review se lo schema che doveva correggere si ripresenta ancora.
+  review_after_episodes: 3
+  # Soglia di somiglianza testuale (difflib.SequenceMatcher.ratio(), 0-1) per
+  # allineare un turno di bozza a uno di copione approvato quando il testo e'
+  # cambiato. Sotto questa soglia i due turni si considerano diversi (uno
+  # tolto, uno aggiunto), non lo stesso turno riscritto. Vedi
+  # src/episode_signals.py:align_turns().
+  turn_similarity_threshold: 0.35
+  # Modello e variabile d'ambiente per tools/lessons.py --propose. null =
+  # riusa script.model / script.api_key_env: e' la stessa API, non serve
+  # duplicare la configurazione se non vuoi un modello diverso apposta.
+  model: null
+  api_key_env: null
+  # Prezzo del modello usato per --propose (USD ogni 1M token), per
+  # dichiarare il costo PRIMA della chiamata (vedi cost_per_million_chars_usd
+  # sopra per lo stesso principio sul TTS). null = costo non noto: lo
+  # strumento mostra solo i token stimati. Compilalo tu con la tariffa
+  # corrente del modello scelto: un numero indovinato qui sarebbe peggio di
+  # nessun numero.
+  input_cost_per_million_tokens_usd: null
+  output_cost_per_million_tokens_usd: null
+  # In --propose, quante prove al massimo per pattern vengono mandate al
+  # modello, e quanti caratteri al massimo per ogni battuta d'esempio (MAI il
+  # copione intero): tiene il costo sotto controllo e forza le prove a
+  # restare prove, non contesto.
+  max_examples_per_pattern: 5
+  max_example_chars: 200

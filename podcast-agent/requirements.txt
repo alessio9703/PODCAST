@@ -1,0 +1,25 @@
+# Obbligatorie. Versioni fissate (==): il progetto deve installarsi allo
+# stesso modo su macchine diverse con il solo "pip install -r
+# requirements.txt", senza sorprese da un aggiornamento a monte.
+anthropic==1.5.0          # scrittura dello script del podcast
+requests==2.34.2          # client HTTP per il provider vocale
+PyYAML==6.0.3             # lettura di config.yaml
+pypdf==6.18.1             # estrazione testo dai PDF
+# Porta un eseguibile ffmpeg statico gia' pronto per macOS/Windows/Linux:
+# e' quello che permette a intro/outro/sottofondo (musiche/) di funzionare
+# con il solo pip install, senza chiedere di installare ffmpeg col package
+# manager di sistema. src/ffmpeg_tool.py e' l'unico punto che lo usa
+# direttamente; tutto il resto del progetto (compreso chi non usa la
+# musica) non dipende da questa scelta.
+imageio-ffmpeg==0.6.0
+
+# Opzionali (installa solo se ti servono)
+# python-docx>=1.1.0      # per usare documenti .docx come input — non pinnata
+#                          # con == perche' non e' installata/verificata in
+#                          # questo ambiente; installala e verifica tu la
+#                          # versione se la usi.
+# lameenc==1.8.4           # encoder mp3 di RIPIEGO ESTREMO: usato solo se
+#                          # ne' imageio-ffmpeg ne' un ffmpeg di sistema sono
+#                          # trovabili (vedi src/ffmpeg_tool.py). Con
+#                          # imageio-ffmpeg installato, di norma non entra
+#                          # mai in gioco.
