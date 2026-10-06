@@ -89,6 +89,9 @@ stderr. Leggi il JSON, non il testo.
 | `tools/music_set.py --run-dir D [--intro N] [--outro N] [--sottofondo N] [--none CATEGORIA...]` | sceglie le musiche della run — **gratis, senza approvazione** | `intro`, `outro`, `sottofondo`, `warnings[]` (brani senza licenza) |
 | `tools/run_init.py --title "..."` | crea la cartella dell'episodio | `run_dir`, `session_file`, `script_file` |
 | `tools/script_save.py --run-dir D --script-json F --speakers A B [P --presenter P --participant "A\|Nome Cognome\|ruolo" ...]` | **valida e salva il copione che hai scritto** (con la presentazione iniziale: vedi 3-quater) | `version`, `warnings[]`, `rendered`, `approved`, `presenter`, `participants[]` |
+| `tools/script_edit.py --run-dir D --turn N --text "..."` | cambia il testo (tag comprese) di **una** battuta senza riscrivere tutta la bozza: nuova versione, l'approvazione decade da sola | come `script_save.py`; exit `1` `ScriptInvalid` se la modifica rompe una regola (non salva) |
+| `tools/script_show.py --run-dir D` | rilegge il copione corrente | `rendered`, `version`, `approved`, `approval_problem`, `versions[]` |
+| `tools/script_versions.py --run-dir D --list \| --diff A [B] \| --restore N` | storico, confronto fra versioni, ripristino (= nuova versione da riapprovare) | `versions[]` / `righe[]` con `stato` (invariata, modificata, aggiunta, rimossa) / la versione nuova |
 | `tools/script_approve.py --run-dir D` | registra il sì dell'utente | `version`, `sha256` |
 | `tools/voices_prepare.py --speakers A B --out V --run-dir D [--dry-run]` | cache o clonazione | `voice_map`, `newly_cloned[]`, `reused[]`, `audio_paths_file` |
 | `tools/estimate.py --script S` | stima | `chars`, `duration_label`, `cost_usd`, `rendered`, `duration_with_music_seconds` se ci sono musiche |
@@ -102,7 +105,9 @@ stderr. Leggi il JSON, non il testo.
 | `tools/run_finalize.py --run-dir D --document DOC --voices V --audio-paths A` | chiude la run | `voci_usate`, `documento`, `files[]` |
 
 `script_write.py` e `script_revise.py` esistono ancora ma **non sono per te**: chiamano
-l'API Anthropic e servono a `run.py`.
+l'API Anthropic e servono all'interfaccia web. Lo stesso vale per `episode_config.py`
+(le scelte dell'episodio in `episodio.json`): se la run ce l'ha, `script_save.py` ne
+riprende speaker, formato e presentazione quando ometti `--speakers`.
 
 Gli exit code sono informazione, non rumore:
 
@@ -114,12 +119,14 @@ Gli exit code sono informazione, non rumore:
 | `3` | serve un'informazione dall'utente | chiedi con `AskUserQuestion`, poi richiama |
 
 **`tools/music_list.py --resolve`** ha una convenzione diversa da `voices_list.py`: l'esito
-sta nell'exit code, non in `match: null` — nome ambiguo esce `3` coi candidati nel messaggio,
-nome inesistente esce `1`. È voluto: quel tool serve anche a `music_set.py`, che deve potersi
+sta nell'exit code, non in `match: null` — nome ambiguo esce `3` (`error_type:
+AmbiguousName`, candidati in `details.candidates`), nome inesistente esce `1`. È voluto: quel tool serve anche a `music_set.py`, che deve potersi
 fermare da solo su un nome incerto.
 
-Su errore il JSON ha `ok: false`, `error_type` e `error`. Il campo `error` è già scritto
-per essere letto da un umano: riportalo, non riassumerlo in peggio.
+Su errore il JSON ha `ok: false`, `error_type`, `error` e, per alcuni errori, `details`
+con i dati strutturati (es. i candidati). Il campo `error` è già scritto per essere letto
+da un umano: riportalo, non riassumerlo in peggio. Un comando interrotto (Ctrl-C) esce `1`
+con `error_type: Interrupted`: si può rilanciare così com'è.
 
 ## Procedura
 
@@ -366,6 +373,9 @@ Se chiede modifiche, riscrivi la bozza e risalvala, indicando cosa hai cambiato:
 
 Ogni salvataggio crea una versione nuova nella sessione, con l'istruzione che l'ha
 generata: lo storico resta leggibile in `_script_session.json` e non devi ricostruirlo tu.
+Se la modifica riguarda una sola battuta, `tools/script_edit.py --turn N --text "..."` fa
+lo stesso senza riscrivere tutta la bozza. Per mostrare all'utente cosa è cambiato fra due
+versioni c'è `tools/script_versions.py --diff A B --only-changes`.
 Poi **rimostri il copione e richiedi conferma**. Cicli finché non approva.
 
 Quando approva, e solo allora:

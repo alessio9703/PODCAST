@@ -11,6 +11,16 @@ partire.
 L'approvazione viene registrata insieme allo sha256 del copione approvato. Se
 il copione cambia dopo, l'hash non corrisponde piu' e il via libera decade da
 solo: un si' vale sul contenuto che l'utente ha letto, non sul file.
+
+Dall'interfaccia:
+
+    python tools/script_approve.py --run-dir output/<run> --version 3 --by "Mario Rossi"
+    python tools/script_approve.py --run-dir output/<run> --revoke --by "Mario Rossi"
+
+`--version` e' la versione che l'utente ha letto: se nel frattempo il copione
+e' cambiato il comando si ferma (exit 1, VersionConflict) invece di approvare
+un testo che nessuno ha visto. Una versione con errori bloccanti (solo dal
+percorso API) non si approva: exit 1, ScriptHasErrors.
 """
 
 from __future__ import annotations
@@ -19,6 +29,8 @@ import argparse
 import json
 
 from _common import add_config_arg, bootstrap, emit, note, resolve_path, run_tool  # noqa: E402
+from src.run_lock import session_lock  # noqa: E402
+from src.script_editing import check_expected_version  # noqa: E402
 from src.script_session import FILENAME as SESSION_FILENAME  # noqa: E402
 from src.script_session import ScriptSession, script_hash  # noqa: E402
 
@@ -31,6 +43,8 @@ def main() -> None:
     parser.add_argument(
         "--revoke", action="store_true", help="Ritira un'approvazione data prima"
     )
+    parser.add_argument("--version", type=int, default=None, help="Versione che l'utente ha letto e approva")
+    parser.add_argument("--by", default=None, help="Chi approva (o ritira l'approvazione)")
     add_config_arg(parser)
     args = parser.parse_args()
 
@@ -40,14 +54,30 @@ def main() -> None:
         if args.session
         else resolve_path(args.run_dir) / SESSION_FILENAME
     )
+    with session_lock(session_path.parent):
+        _approve_or_revoke(args, session_path)
+
+
+def _approve_or_revoke(args, session_path) -> None:  # type: ignore[no-untyped-def]
     session = ScriptSession.load(session_path)
 
     if args.revoke:
+        revoked = session.approved
         session.approved = None
         session.save()
-        note("Approvazione ritirata.")
-        emit({"approved": False, "session_file": str(session_path)})
+        note("Approvazione ritirata." if revoked else "Non c'era nessuna approvazione da ritirare.")
+        emit(
+            {
+                "approved": False,
+                "revoked": revoked,
+                "revoked_by": args.by,
+                "current_version": session.version_count,
+                "session_file": str(session_path),
+            }
+        )
         return
+
+    check_expected_version(session, args.version)
 
     # L'approvazione vale sul copione che sta davvero su disco.
     script_file = session_path.parent / "conversazione.json"
@@ -61,7 +91,7 @@ def main() -> None:
                 "una nuova conferma."
             )
 
-    approval = session.approve()
+    approval = session.approve(by=args.by)
     session.save()
     note(
         f"Approvata la versione {approval['version']} del copione "
@@ -74,6 +104,7 @@ def main() -> None:
             "version": approval["version"],
             "sha256": approval["sha256"],
             "at": approval["at"],
+            "by": approval.get("by"),
             "session_file": str(session_path),
         }
     )

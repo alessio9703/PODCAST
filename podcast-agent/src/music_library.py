@@ -14,14 +14,12 @@ from __future__ import annotations
 
 import difflib
 import json
-import shutil
-import subprocess
 import unicodedata
-import wave
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from .ffmpeg_tool import media_duration_seconds
 from .fileio import write_json_atomic
 from .registry import file_hash
 
@@ -77,44 +75,14 @@ class MusicTrack:
         return file_hash(self.path)
 
     def duration_seconds(self) -> float | None:
-        """Durata del brano. None se non misurabile senza ffmpeg/ffprobe.
+        """Durata del brano. None se non misurabile.
 
-        I .wav si misurano senza dipendenze (modulo standard `wave`). Gli
-        altri formati (mp3, m4a, ...) servono ffprobe: se manca, la durata
-        resta sconosciuta invece di bloccare l'elenco — la si conoscera' al
-        momento del mix, quando ffmpeg e' comunque richiesto.
+        I .wav si misurano senza dipendenze; gli altri formati con ffprobe o,
+        nell'installazione standard, con l'ffmpeg di imageio-ffmpeg (vedi
+        src/ffmpeg_tool.media_duration_seconds). Una durata sconosciuta non
+        blocca l'elenco: la si conoscera' al momento del mix.
         """
-        if self.extension == ".wav":
-            try:
-                with wave.open(str(self.path), "rb") as handle:
-                    frames = handle.getnframes()
-                    rate = handle.getframerate()
-                    return frames / rate if rate else None
-            except (wave.Error, OSError):
-                return None
-        return _ffprobe_duration(self.path)
-
-
-def _ffprobe_duration(path: Path) -> float | None:
-    ffprobe = shutil.which("ffprobe")
-    if not ffprobe:
-        return None
-    try:
-        result = subprocess.run(
-            [
-                ffprobe, "-v", "error", "-show_entries", "format=duration",
-                "-of", "default=noprint_wrappers=1:nokey=1", str(path),
-            ],
-            capture_output=True, text=True, timeout=30,
-        )
-    except (OSError, subprocess.TimeoutExpired):
-        return None
-    if result.returncode != 0:
-        return None
-    try:
-        return float(result.stdout.strip())
-    except ValueError:
-        return None
+        return media_duration_seconds(self.path)
 
 
 def _load_metadata(track_path: Path, category: str) -> tuple[TrackMetadata, str | None]:

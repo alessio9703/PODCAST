@@ -21,7 +21,10 @@ Nessun altro modulo chiama `shutil.which("ffmpeg")` o importa
 from __future__ import annotations
 
 import os
+import re
 import shutil
+import subprocess
+import wave
 from pathlib import Path
 
 
@@ -66,4 +69,61 @@ def require_ffmpeg() -> str:
     return exe
 
 
-__all__ = ["FfmpegNotFoundError", "find_ffmpeg", "require_ffmpeg"]
+_DURATION_RE = re.compile(r"Duration:\s*(\d+):(\d{2}):(\d{2}(?:\.\d+)?)")
+
+
+def media_duration_seconds(path: str | Path) -> float | None:
+    """Durata di un file audio, in secondi. None se non misurabile.
+
+    Tre strade, in ordine:
+
+      1. i .wav con il modulo standard `wave` (nessuna dipendenza);
+      2. `ffprobe`, se e' nel PATH di sistema;
+      3. `ffmpeg -i`, leggendo la riga "Duration:" che stampa su stderr.
+
+    La terza e' quella che conta nell'installazione standard: imageio-ffmpeg
+    porta ffmpeg ma NON ffprobe, quindi senza questa strada la durata degli
+    mp3/m4a (musiche, campioni delle voci) restava sconosciuta.
+    """
+    path = Path(path)
+    if path.suffix.lower() == ".wav":
+        try:
+            with wave.open(str(path), "rb") as handle:
+                rate = handle.getframerate()
+                return handle.getnframes() / rate if rate else None
+        except (wave.Error, OSError, EOFError):
+            pass  # wav non standard (es. float, extensible): ci prova ffmpeg
+
+    ffprobe = None if os.environ.get("PODCAST_AGENT_DISABLE_FFMPEG") else shutil.which("ffprobe")
+    if ffprobe:
+        try:
+            result = subprocess.run(
+                [ffprobe, "-v", "error", "-show_entries", "format=duration",
+                 "-of", "default=noprint_wrappers=1:nokey=1", str(path)],
+                capture_output=True, text=True, timeout=30,
+            )
+            if result.returncode == 0:
+                return float(result.stdout.strip())
+        except (OSError, subprocess.TimeoutExpired, ValueError):
+            pass
+
+    ffmpeg = find_ffmpeg()
+    if not ffmpeg:
+        return None
+    try:
+        # Senza output ffmpeg esce con errore ("At least one output file must
+        # be specified"), ma la riga Duration l'ha gia' stampata: e' voluto.
+        result = subprocess.run(
+            [ffmpeg, "-hide_banner", "-i", str(path)],
+            capture_output=True, text=True, timeout=30,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+    match = _DURATION_RE.search(result.stderr or "")
+    if not match:
+        return None
+    hours, minutes, seconds = match.groups()
+    return int(hours) * 3600 + int(minutes) * 60 + float(seconds)
+
+
+__all__ = ["FfmpegNotFoundError", "find_ffmpeg", "media_duration_seconds", "require_ffmpeg"]

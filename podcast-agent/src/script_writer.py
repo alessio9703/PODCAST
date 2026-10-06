@@ -442,6 +442,39 @@ def _render_music_context(music_context: dict[str, Any] | None) -> str:
     return "\n--- CONTESTO MUSICALE ---\n" + "\n\n".join(parts) + "\n--- FINE CONTESTO MUSICALE ---\n"
 
 
+def _render_format(
+    script_format: str, speakers: list[str], interviewer: str | None, presenter: str | None
+) -> str:
+    """La riga "Formato:" quando il formato e' stato scelto esplicitamente."""
+    dialogue = [s for s in speakers if s != presenter]
+    if script_format == "intervista":
+        others = [s for s in dialogue if s != interviewer]
+        return (
+            "intervista (segui le regole del formato `intervista`).\n"
+            f"Fa le domande (intervistatore): {interviewer}\n"
+            f"Risponde (intervistato): {', '.join(others)}"
+        )
+    return (
+        "conversazione (segui le regole del formato `conversazione`): "
+        f"{' e '.join(dialogue)} discutono alla pari"
+    )
+
+
+def _render_presentation(presenter: str | None, participants: list[dict[str, str]] | None) -> str:
+    """Il blocco sulla voce di presentazione, o stringa vuota."""
+    if not presenter:
+        return ""
+    people = "\n".join(
+        f'- "{p["nome"]}" (speaker {p["speaker"]}): {p["ruolo"]}' for p in (participants or [])
+    )
+    return (
+        f"\nVoce di presentazione: {presenter}. Apre l'episodio e poi non parla piu' "
+        "(vedi \"Presentazione iniziale\" nelle regole). Presenta, con il nome "
+        "esattamente come scritto fra virgolette e con il loro ruolo:\n"
+        f"{people}\n"
+    )
+
+
 @dataclass
 class ScriptWriter:
     """Mantiene la conversazione con Claude per poter iterare sulle revisioni."""
@@ -470,6 +503,11 @@ class ScriptWriter:
         document: Document,
         speakers: list[str],
         music_context: dict[str, Any] | None = None,
+        *,
+        script_format: str | None = None,
+        interviewer: str | None = None,
+        presenter: str | None = None,
+        participants: list[dict[str, str]] | None = None,
     ) -> tuple[str, bool]:
         """Costruisce il prompt iniziale. Pubblico perche' ScriptSession lo salva
         su disco: e' il "compito" da cui si ricostruisce la conversazione quando
@@ -481,6 +519,13 @@ class ScriptWriter:
         e non passato a parte perche' ScriptSession salva `prompt` per
         intero: cosi' anche le revisioni successive lo ritrovano senza dover
         essere ripassato ogni volta.
+
+        `script_format` / `interviewer` / `presenter` / `participants`: le
+        stesse scelte che il subagent passa a tools/script_save.py, con lo
+        stesso significato (vedi prompts/copione.md, "Formati" e
+        "Presentazione iniziale"). Senza `script_format` il prompt e' quello
+        di sempre (monologo / dialogo / tavola rotonda secondo il numero di
+        speaker): run.py e le chiamate senza configurazione non cambiano.
         """
         text, truncated = document.truncated(self.max_document_chars)
         target_words = self.target_minutes * self.words_per_minute
@@ -491,13 +536,17 @@ class ScriptWriter:
             else ""
         )
         speaker_block = "\n".join(f"- {s}" for s in speakers)
-        formato = (
-            "un monologo con un solo speaker"
-            if len(speakers) == 1
-            else f"un dialogo fra {len(speakers)} speaker"
-            if len(speakers) == 2
-            else f"una tavola rotonda con {len(speakers)} speaker"
-        )
+        if script_format:
+            formato = _render_format(script_format, speakers, interviewer, presenter)
+        else:
+            formato = (
+                "un monologo con un solo speaker"
+                if len(speakers) == 1
+                else f"un dialogo fra {len(speakers)} speaker"
+                if len(speakers) == 2
+                else f"una tavola rotonda con {len(speakers)} speaker"
+            )
+        presentation = _render_presentation(presenter, participants)
         music_block = _render_music_context(music_context)
 
         prompt = f"""Scrivi il copione di un episodio di podcast in {self.language} a partire dal documento qui sotto.
@@ -505,7 +554,7 @@ class ScriptWriter:
 Formato: {formato}.
 Speaker disponibili (usa esattamente questi nomi, tutti almeno una volta):
 {speaker_block}
-
+{presentation}
 Durata indicativa: circa {self.target_minutes} minuti di parlato, cioe' all'incirca {target_words} parole complessive.
 {music_block}
 --- DOCUMENTO ---

@@ -8,6 +8,11 @@ Un nome di file senza percorso viene cercato prima in `paths.documents_dir`
 
 Con --save-to scrive il testo estratto su file e ne restituisce il percorso:
 serve a script_write.py, che lavora sul testo, non sul PDF.
+
+Un documento da cui non si ricava testo esce con exit 1 ed error_type
+`DocumentNotExtractable`, con `details.motivo` fra scansione, protetto, vuoto e
+illeggibile; un'estensione non gestita con `UnsupportedDocument`. `pages` e'
+null per i formati che non hanno pagine (DOCX, testo).
 """
 
 from __future__ import annotations
@@ -23,6 +28,7 @@ from _common import (  # noqa: E402
     run_tool,
 )
 from src.pdf_reader import extract_text  # noqa: E402
+from src.registry import file_hash  # noqa: E402
 
 
 def main() -> None:
@@ -50,7 +56,11 @@ def main() -> None:
     emit(
         {
             "path": str(document.path),
+            "name": document.path.name,
             "kind": document.kind,
+            "size_bytes": document.path.stat().st_size,
+            "sha256": file_hash(document.path),
+            "extractable": True,
             "pages": document.pages,
             "chars": document.char_count,
             "words": document.word_count,

@@ -20,7 +20,7 @@ import json
 from _common import add_config_arg, bootstrap, emit, note, resolve_path, run_tool  # noqa: E402
 from src.audio_assembler import load_choices, script_segment_keys, segment_path  # noqa: E402
 from src.cost_estimate import estimate as compute  # noqa: E402
-from src.music_library import MusicLibrary, has_any_music, load_music_choice  # noqa: E402
+from src.music_context import music_durations  # noqa: E402
 from src.segment_cache import VOICES_FILENAME  # noqa: E402
 from src.script_writer import PodcastScript  # noqa: E402
 
@@ -66,7 +66,7 @@ def main() -> None:
     # altrimenti nella stessa cartella dello script (conversazione.json e
     # musiche.json vivono sempre insieme).
     music_dir_for_choice = resolve_path(args.run_dir) if args.run_dir else resolve_path(args.script).parent
-    music = _music_durations(music_dir_for_choice, config)
+    music = music_durations(music_dir_for_choice, config)
     if music:
         note(
             "  Musiche           : "
@@ -106,60 +106,6 @@ def main() -> None:
             "rendered": prediction.render(),
         }
     )
-
-
-def _music_durations(run_dir, config) -> dict[str, object]:
-    """Durate di intro/outro/pause, per completare la stima. Il costo non cambia:
-    le musiche non passano dal provider. Best-effort: un brano la cui durata
-    non si conosce (formato compresso, ffmpeg assente) non blocca la stima,
-    compare con durata None."""
-    try:
-        choice = load_music_choice(run_dir)
-    except Exception:
-        return {}
-    if not has_any_music(choice):
-        return {}
-
-    library = MusicLibrary(config.music_dir, config.accepted_extensions)
-    library.scan()
-    music_cfg = config.music
-
-    note_parts: list[tuple[str, float]] = []
-    payload: dict[str, object] = {}
-    extra_seconds = 0.0
-
-    if choice.get("intro"):
-        try:
-            track = library.get_usable("intro", choice["intro"])
-            duration = track.duration_seconds()
-        except Exception:
-            duration = None
-        gap = float(music_cfg.get("intro_gap_ms", 800)) / 1000.0
-        payload["music_intro_seconds"] = round(duration, 1) if duration is not None else None
-        payload["music_intro_gap_seconds"] = round(gap, 1)
-        if duration is not None:
-            extra_seconds += duration + gap
-            note_parts.append(("intro", duration))
-
-    if choice.get("outro"):
-        try:
-            track = library.get_usable("outro", choice["outro"])
-            duration = track.duration_seconds()
-        except Exception:
-            duration = None
-        gap = float(music_cfg.get("outro_gap_ms", 600)) / 1000.0
-        payload["music_outro_seconds"] = round(duration, 1) if duration is not None else None
-        payload["music_outro_gap_seconds"] = round(gap, 1)
-        if duration is not None:
-            extra_seconds += duration + gap
-            note_parts.append(("outro", duration))
-
-    if choice.get("sottofondo"):
-        payload["music_sottofondo"] = choice["sottofondo"]
-
-    payload["music_extra_seconds"] = round(extra_seconds, 1)
-    payload["_note_parts"] = note_parts
-    return payload
 
 
 def _incremental(run_dir, script: PodcastScript, provider) -> dict[str, object]:
