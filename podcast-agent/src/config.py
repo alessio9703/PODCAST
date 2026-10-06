@@ -151,6 +151,39 @@ class Config:
             )
         return key
 
+    def anthropic_client(self) -> Any:
+        """Il client con cui si parla col modello che scrive il copione.
+
+        Di norma e' `anthropic.Anthropic` con la chiave dell'ambiente. Con
+        `script.client_factory: "modulo:funzione"` in config.yaml si usa
+        invece quello che la funzione restituisce, chiamata con
+        `script.client_options`: e' lo stesso meccanismo di
+        `providers.*.class`, e serve ai test per un client finto che non
+        chiama mai l'API (tests/fake_anthropic.py). In quel caso la chiave non
+        e' richiesta.
+        """
+        factory = self.script.get("client_factory")
+        if factory:
+            module_name, _, func_name = str(factory).partition(":")
+            if not module_name or not func_name:
+                raise ConfigError(
+                    "script.client_factory deve essere nella forma 'modulo:funzione'."
+                )
+            try:
+                module = importlib.import_module(module_name)
+            except ImportError as exc:
+                raise ConfigError(
+                    f"Impossibile importare '{module_name}' (script.client_factory): {exc}"
+                ) from exc
+            builder = getattr(module, func_name, None)
+            if not callable(builder):
+                raise ConfigError(f"'{factory}' non e' una funzione.")
+            return builder(dict(self.script.get("client_options") or {}))
+
+        import anthropic
+
+        return anthropic.Anthropic(api_key=self.anthropic_api_key())
+
 
 def load_config(path: str | Path | None = None) -> Config:
     config_path = Path(path).resolve() if path else DEFAULT_CONFIG

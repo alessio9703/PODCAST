@@ -35,6 +35,7 @@ from typing import Any
 
 from .audio_assembler import AudioAssembler, slugify
 from .ffmpeg_tool import find_ffmpeg, require_ffmpeg
+from .fileio import write_json_atomic
 from .music_library import (
     CATEGORIES,
     MusicLibrary,
@@ -384,11 +385,7 @@ def _write_musiche_usate(
         # questo): oltre voice_offset + voice_duration_seconds si e' nell'outro.
         "voice_duration_seconds": round(voice_duration, 3),
     }
-    target = run_dir / MUSICHE_USATE_FILENAME
-    tmp = target.with_suffix(target.suffix + ".tmp")
-    tmp.write_text(json.dumps(payload, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
-    tmp.replace(target)
-    return target
+    return write_json_atomic(run_dir / MUSICHE_USATE_FILENAME, payload)
 
 
 # ----------------------------------------------------------------------

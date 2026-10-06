@@ -18,6 +18,7 @@ from typing import Any
 
 import anthropic
 
+from .fileio import write_json_atomic
 from .pdf_reader import Document
 
 
@@ -92,13 +93,10 @@ class PodcastScript:
         return {"titolo": self.titolo, "turni": self.turni}
 
     def save(self, path: str | Path) -> Path:
-        target = Path(path)
-        target.parent.mkdir(parents=True, exist_ok=True)
-        target.write_text(
-            json.dumps(self.to_dict(), indent=2, ensure_ascii=False) + "\n",
-            encoding="utf-8",
-        )
-        return target
+        """Scrittura atomica: il gate di approvazione confronta lo sha256 di
+        questo file, e un file scritto a meta' (crash, interruzione) farebbe
+        sembrare cambiato un copione che nessuno ha toccato."""
+        return write_json_atomic(Path(path), self.to_dict())
 
     # -- metriche ---------------------------------------------------------
 
@@ -448,7 +446,7 @@ def _render_music_context(music_context: dict[str, Any] | None) -> str:
 class ScriptWriter:
     """Mantiene la conversazione con Claude per poter iterare sulle revisioni."""
 
-    api_key: str
+    api_key: str = ""
     model: str = "claude-opus-5"
     max_tokens: int = 16000
     effort: str = "high"
@@ -456,11 +454,14 @@ class ScriptWriter:
     target_minutes: int = 8
     words_per_minute: int = 150
     max_document_chars: int = 120000
-    _client: anthropic.Anthropic = field(init=False, repr=False)
+    #: Client gia' pronto (vedi Config.anthropic_client): se c'e', `api_key`
+    #: non serve. Iniettabile per i test, che non devono mai chiamare l'API.
+    client: Any = field(default=None, repr=False)
+    _client: Any = field(init=False, repr=False)
     _messages: list[dict[str, Any]] = field(default_factory=list, init=False, repr=False)
 
     def __post_init__(self) -> None:
-        self._client = anthropic.Anthropic(api_key=self.api_key)
+        self._client = self.client if self.client is not None else anthropic.Anthropic(api_key=self.api_key)
 
     # -- API pubblica -----------------------------------------------------
 

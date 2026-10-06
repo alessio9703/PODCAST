@@ -36,6 +36,7 @@ from pathlib import Path
 from typing import Any, Callable, Iterable
 
 from .ffmpeg_tool import find_ffmpeg
+from .fileio import write_bytes_atomic
 from .script_writer import PodcastScript, spoken_text
 from .voice_provider import VoiceProvider, VoiceProviderError
 
@@ -763,10 +764,7 @@ def _write_atomic(target: Path, data: bytes) -> None:
     per sempre, e il difetto si sentirebbe nell'episodio senza che niente lo
     segnali.
     """
-    target.parent.mkdir(parents=True, exist_ok=True)
-    tmp = target.with_suffix(target.suffix + ".tmp")
-    tmp.write_bytes(data)
-    tmp.replace(target)
+    write_bytes_atomic(target, data)
 
 
 def segment_rms(path: Path) -> float | None:
@@ -875,7 +873,7 @@ def peak_level_dbfs(data: bytes, params) -> float | None:  # type: ignore[no-unt
     tutto a circa -31 dBFS di picco, con il parlato vero e proprio sepolto
     dentro un pavimento di rumore quieto invece che vero silenzio o rumore
     forte — per questo ne' il controllo sul rapporto (il "parlato" relativo
-    coprivа tutto il segmento) ne' quello sul vuoto (nessun tratto si
+    copriva tutto il segmento) ne' quello sul vuoto (nessun tratto si
     distingueva dal resto, perche' tutto era altrettanto piano) lo vedevano.
     Sui 26 segmenti sani dello stesso episodio il picco peggiore era -4.3 dBFS
     e il migliore -0.3 dBFS: un margine enorme rispetto al segmento difettoso.

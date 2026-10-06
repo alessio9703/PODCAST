@@ -16,13 +16,13 @@ Ogni run produce:
 
 from __future__ import annotations
 
-import json
 import shutil
 from datetime import datetime
 from pathlib import Path
 from typing import Mapping
 
 from .audio_assembler import slugify
+from .fileio import write_json_atomic
 from .registry import VoiceRegistry
 
 
@@ -61,11 +61,7 @@ def write_voices_used(
             for name, voice_id in voice_map.items()
         },
     }
-    target = run_dir / "voci_usate.json"
-    target.write_text(
-        json.dumps(payload, indent=2, ensure_ascii=False) + "\n", encoding="utf-8"
-    )
-    return target
+    return write_json_atomic(run_dir / "voci_usate.json", payload)
 
 
 def archive_source_document(source: Path, run_dir: Path) -> str:

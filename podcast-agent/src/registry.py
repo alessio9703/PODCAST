@@ -11,6 +11,10 @@ Formato di voices_registry.json:
     "cloned_at": "2026-09-13T10:00:00"
   }
 }
+
+Il registro e' condiviso fra tutti i processi (piu' utenti dall'interfaccia
+web): ogni modifica passa da `file_lock` e RILEGGE il file dentro il lock, cosi'
+due clonazioni concorrenti non si cancellano a vicenda (vedi src/fileio.py).
 """
 
 from __future__ import annotations
@@ -21,6 +25,8 @@ from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 from typing import Any
+
+from .fileio import file_lock, write_json_atomic
 
 _CHUNK = 1024 * 1024
 
@@ -78,13 +84,17 @@ class VoiceRegistry:
         return raw
 
     def save(self) -> None:
-        self.path.parent.mkdir(parents=True, exist_ok=True)
-        tmp = self.path.with_suffix(self.path.suffix + ".tmp")
-        tmp.write_text(
-            json.dumps(self._data, indent=2, ensure_ascii=False) + "\n",
-            encoding="utf-8",
-        )
-        tmp.replace(self.path)
+        """Riscrive il registro con il contenuto in memoria, sotto lock.
+
+        ATTENZIONE: sovrascrive quello che altri processi hanno scritto dopo il
+        caricamento. Per aggiungere una voce si usa `record()`, che rilegge.
+        """
+        with file_lock(self.path):
+            write_json_atomic(self.path, self._data)
+
+    def reload(self) -> None:
+        """Rilegge il registro dal disco (utile dopo una lunga attesa)."""
+        self._data = self._load()
 
     # -- query ------------------------------------------------------------
 
@@ -136,8 +146,14 @@ class VoiceRegistry:
             voice_id=voice_id,
             cloned_at=datetime.now().replace(microsecond=0).isoformat(),
         )
-        self._data[name] = entry.to_dict()
-        self.save()
+        # Leggi-modifica-scrivi sotto lock, rileggendo DENTRO il lock: il
+        # contenuto caricato all'avvio puo' essere vecchio di minuti (una
+        # clonazione dura), e riscriverlo cancellerebbe le voci registrate
+        # nel frattempo da un altro processo.
+        with file_lock(self.path):
+            self._data = self._load()
+            self._data[name] = entry.to_dict()
+            write_json_atomic(self.path, self._data)
         return entry
 
     def __len__(self) -> int:

@@ -10,6 +10,18 @@ I tre codici diversi non sono decorativi: `2` significa "fermati e riporta"
 (tipicamente una clonazione fallita, che NON va ritentata perche' creerebbe voci
 duplicate a pagamento), `3` significa "chiedi all'utente e richiamami".
 
+In caso di errore il JSON e':
+
+  {"ok": false, "error_type": "...", "error": "...", "exit_code": N,
+   "details": {...}}          <- solo se l'errore porta dati strutturati
+
+`error_type` e' un nome stabile (vedi src/errors.py): un'interfaccia decide
+cosa mostrare da quello, non dal testo di `error`.
+
+Anche un'interruzione (Ctrl-C, SIGTERM) produce il JSON, con
+`error_type: "Interrupted"` ed exit 1: chi chiama il tool come sottoprocesso
+deve sempre trovare UN oggetto JSON su stdout.
+
 Questi file non contengono logica: importano da `src/` ed espongono.
 """
 
@@ -17,6 +29,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import signal
 import sys
 from pathlib import Path
 from typing import Any, Callable
@@ -39,6 +52,7 @@ for _stream in (sys.stdout, sys.stderr):
 from src.audio_assembler import AssemblyError  # noqa: E402
 from src.config import Config, ConfigError, load_config, load_dotenv  # noqa: E402
 from src.episode_signals import SignalsError  # noqa: E402
+from src.errors import NeedsUserDecision, error_details  # noqa: E402
 from src.ffmpeg_tool import FfmpegNotFoundError  # noqa: E402
 from src.lessons import LessonsError  # noqa: E402
 from src.music_library import MusicLibraryError  # noqa: E402
@@ -55,8 +69,21 @@ EXIT_PROVIDER = 2
 EXIT_NEEDS_USER = 3
 
 
-class NeedsUserInput(RuntimeError):
-    """L'agente deve chiedere qualcosa all'utente e richiamare il tool."""
+class NeedsUserInput(NeedsUserDecision):
+    """L'agente deve chiedere qualcosa all'utente e richiamare il tool.
+
+    Resta con il suo `error_type` storico ("needs_user_input"); gli esiti 3
+    nuovi usano una sottoclasse di src.errors.NeedsUserDecision con un nome
+    proprio (es. AmbiguousName, ConsentRequired).
+    """
+
+    error_type = "needs_user_input"
+
+
+#: Esito di un'interruzione (Ctrl-C o SIGTERM). Exit 1 e non un codice nuovo:
+#: il contratto ha quattro esiti e un'interruzione e' un "non e' andato a buon
+#: fine, si puo' rilanciare", cioe' un esito 1 con un error_type riconoscibile.
+INTERRUPTED = "Interrupted"
 
 
 def add_config_arg(parser: argparse.ArgumentParser) -> None:
@@ -82,8 +109,8 @@ def note(message: str) -> None:
 
 
 def _classify(exc: Exception) -> tuple[int, str]:
-    if isinstance(exc, NeedsUserInput):
-        return EXIT_NEEDS_USER, "needs_user_input"
+    if isinstance(exc, NeedsUserDecision):
+        return EXIT_NEEDS_USER, exc.kind
     # MusicChangedError e' una MusicMixerError: va controllata PRIMA, altrimenti
     # ricadrebbe nel ramo generico qui sotto con lo stesso exit code di un
     # qualunque altro errore di dominio, perdendo il segnale "serve una
@@ -110,26 +137,50 @@ def _classify(exc: Exception) -> tuple[int, str]:
             LessonsError,
         ),
     ):
-        return EXIT_DOMAIN, type(exc).__name__
-    return EXIT_DOMAIN, type(exc).__name__
+        return EXIT_DOMAIN, _kind(exc)
+    return EXIT_DOMAIN, _kind(exc)
+
+
+def _kind(exc: Exception) -> str:
+    """error_type esplicito se l'errore lo dichiara, altrimenti il nome della classe."""
+    return getattr(exc, "kind", None) or type(exc).__name__
+
+
+def _emit_error(kind: str, message: str, code: int, details: dict[str, Any] | None) -> None:
+    payload: dict[str, Any] = {"ok": False, "error_type": kind, "error": message, "exit_code": code}
+    if details:
+        payload["details"] = details
+    json.dump(payload, sys.stdout, ensure_ascii=False, indent=2)
+    sys.stdout.write("\n")
+    sys.stdout.flush()
+
+
+def _sigterm_as_interrupt(signum, frame) -> None:  # noqa: ANN001
+    raise KeyboardInterrupt
 
 
 def run_tool(main: Callable[[], None]) -> None:
-    """Esegue il tool traducendo le eccezioni in JSON + exit code."""
+    """Esegue il tool traducendo le eccezioni in JSON + exit code.
+
+    SIGTERM viene trattato come Ctrl-C: e' il segnale con cui un adattatore
+    ferma un sottoprocesso, e senza questo il processo morirebbe senza
+    scrivere il JSON. Un tool che vuole fermarsi in modo piu' ordinato (finire
+    il segmento in corso) installa un proprio handler dentro `main`.
+    """
+    try:
+        signal.signal(signal.SIGTERM, _sigterm_as_interrupt)
+    except (ValueError, OSError):  # non nel thread principale: si va avanti senza
+        pass
     try:
         main()
     except KeyboardInterrupt:
-        note("Interrotto.")
-        raise SystemExit(130)
+        message = "Interrotto prima della fine. Nessun file e' rimasto scritto a meta': il comando si puo' rilanciare."
+        _emit_error(INTERRUPTED, message, EXIT_DOMAIN, None)
+        note(f"ERRORE [{INTERRUPTED}] {message}")
+        raise SystemExit(EXIT_DOMAIN)
     except Exception as exc:  # noqa: BLE001 - tradotte deliberatamente
         code, kind = _classify(exc)
-        json.dump(
-            {"ok": False, "error_type": kind, "error": str(exc), "exit_code": code},
-            sys.stdout,
-            ensure_ascii=False,
-            indent=2,
-        )
-        sys.stdout.write("\n")
+        _emit_error(kind, str(exc), code, error_details(exc))
         note(f"ERRORE [{kind}] {exc}")
         raise SystemExit(code)
 
@@ -145,6 +196,7 @@ __all__ = [
     "EXIT_PROVIDER",
     "EXIT_NEEDS_USER",
     "NeedsUserInput",
+    "INTERRUPTED",
     "add_config_arg",
     "bootstrap",
     "emit",

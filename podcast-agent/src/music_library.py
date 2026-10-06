@@ -22,6 +22,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from .fileio import write_json_atomic
 from .registry import file_hash
 
 CATEGORIES = ("intro", "outro", "sottofondo")
@@ -304,13 +305,7 @@ def write_music_choice(run_dir: Path | str, choice: dict[str, str | None]) -> Pa
     """Scrive musiche.json con i nomi gia' risolti. Operazione gratuita: non spende."""
     target = Path(run_dir) / MUSIC_CHOICE_FILENAME
     payload = {c: choice.get(c) for c in CATEGORIES}
-    target.parent.mkdir(parents=True, exist_ok=True)
-    tmp = target.with_suffix(target.suffix + ".tmp")
-    tmp.write_text(
-        json.dumps(payload, indent=2, ensure_ascii=False) + "\n", encoding="utf-8"
-    )
-    tmp.replace(target)
-    return target
+    return write_json_atomic(target, payload)
 
 
 def has_any_music(choice: dict[str, str | None]) -> bool:

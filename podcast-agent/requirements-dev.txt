@@ -1,0 +1,7 @@
+# Strumenti di SVILUPPO: non servono per usare l'agente, solo per lavorarci.
+# Non vengono installati da requirements.txt. Per installarli:
+#
+#     .venv/bin/pip install -r requirements-dev.txt
+#
+# Proposti, non ancora installati in .venv.
+pyflakes==4.0.2           # import e nomi inutilizzati (python -m pyflakes src tools tests)

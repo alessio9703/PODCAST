@@ -8,7 +8,8 @@
 Operazione LOCALE e GRATUITA: non chiama nessun provider, non tocca il
 copione, non richiede approvazione. Cambiare o togliere una musica non deve
 costare niente (vedi README.md). I nomi passati vengono risolti contro
-musiche/ con la stessa regola delle voci: nome ambiguo -> exit 3, nome
+musiche/ con la stessa regola delle voci: nome ambiguo -> exit 3
+(AmbiguousName, candidati in `details`), nome
 inesistente -> exit 1 (vedi tools/music_list.py --resolve, che usa la stessa
 logica).
 
@@ -20,7 +21,8 @@ from __future__ import annotations
 
 import argparse
 
-from _common import NeedsUserInput, add_config_arg, bootstrap, emit, note, resolve_path, run_tool  # noqa: E402
+from _common import add_config_arg, bootstrap, emit, note, resolve_path, run_tool  # noqa: E402
+from src.errors import AmbiguousName  # noqa: E402
 from src.music_library import CATEGORIES, MusicLibrary, load_music_choice, write_music_choice  # noqa: E402
 
 
@@ -74,7 +76,14 @@ def main() -> None:
         if match is None and candidates:
             names = ", ".join(c.name for c in candidates)
             note(f"'{name}' ({category}): nome ambiguo, candidati: {names}")
-            raise NeedsUserInput(f"'{name}' ({category}) non e' un nome certo: candidati {names}.")
+            raise AmbiguousName(
+                f"'{name}' ({category}) non e' un nome certo: candidati {names}.",
+                details={
+                    "category": category,
+                    "query": name,
+                    "candidates": [c.name for c in candidates],
+                },
+            )
         if match is None:
             available = ", ".join(t.name for t in library.tracks(category)) or "nessuno"
             raise ValueError(

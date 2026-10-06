@@ -6,8 +6,8 @@
 
 Senza --resolve elenca i brani per categoria (durata, licenza si/no, parlato
 si/no). Con --resolve CATEGORIA NOME risolve un nome dentro quella categoria:
-nome ambiguo -> exit 3 con i candidati; nome inesistente -> exit 1 con
-l'elenco disponibile.
+nome ambiguo -> exit 3 (error_type AmbiguousName, candidati in `details`);
+nome inesistente -> exit 1 con l'elenco disponibile.
 
 A differenza di voices_list.py (che ritorna sempre `match: null` e lascia
 decidere all'agente), qui l'esito sta nell'exit code: questo tool serve anche
@@ -19,7 +19,8 @@ from __future__ import annotations
 
 import argparse
 
-from _common import NeedsUserInput, add_config_arg, bootstrap, emit, note, run_tool  # noqa: E402
+from _common import add_config_arg, bootstrap, emit, note, run_tool  # noqa: E402
+from src.errors import AmbiguousName  # noqa: E402
 from src.music_library import CATEGORIES, MusicLibrary, MusicTrack  # noqa: E402
 
 
@@ -104,8 +105,13 @@ def _do_resolve(library: MusicLibrary, category: str, name: str) -> None:
     if candidates:
         names = ", ".join(c.name for c in candidates)
         note(f"'{name}': nome ambiguo in {category}/, candidati: {names}")
-        raise NeedsUserInput(
-            f"'{name}' non e' un nome certo in {category}/: candidati {names}."
+        raise AmbiguousName(
+            f"'{name}' non e' un nome certo in {category}/: candidati {names}.",
+            details={
+                "category": category,
+                "query": name,
+                "candidates": [c.name for c in candidates],
+            },
         )
 
     available = ", ".join(t.name for t in library.tracks(category)) or "nessuno"

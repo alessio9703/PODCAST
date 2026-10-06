@@ -20,6 +20,7 @@ from _approval import add_gate_args, enforce  # noqa: E402
 from _common import add_config_arg, bootstrap, emit, note, resolve_path, run_tool  # noqa: E402
 from src.audio_assembler import AudioAssembler, slugify  # noqa: E402
 from src.episode_signals import collect_and_write, record_synthesis_event  # noqa: E402
+from src.fileio import write_json_atomic  # noqa: E402
 from src.music_mixer import mix_episode, preflight  # noqa: E402
 from src.script_writer import PodcastScript, spoken_text  # noqa: E402
 
@@ -205,23 +206,16 @@ def _write_timings(run_dir: Path, script: PodcastScript, result) -> Path | None:
             round(acc["spoken_chars"] / acc["seconds"], 2) if acc["seconds"] > 0 else None
         )
 
-    target = run_dir / "_tempi_turni.json"
-    target.write_text(
-        json.dumps(
-            {
-                "nota": "Misure per turno, al netto delle pause e delle inline tag. "
-                        "Raccolta dati: la stima non le usa. inizio/fine sono "
-                        "invece la posizione del turno dentro l'episodio montato.",
-                "per_voce": per_voce,
-                "turni": turni,
-            },
-            indent=2,
-            ensure_ascii=False,
-        )
-        + "\n",
-        encoding="utf-8",
+    return write_json_atomic(
+        run_dir / "_tempi_turni.json",
+        {
+            "nota": "Misure per turno, al netto delle pause e delle inline tag. "
+                    "Raccolta dati: la stima non le usa. inizio/fine sono "
+                    "invece la posizione del turno dentro l'episodio montato.",
+            "per_voce": per_voce,
+            "turni": turni,
+        },
     )
-    return target
 
 
 def _label(seconds: float | None) -> str | None:

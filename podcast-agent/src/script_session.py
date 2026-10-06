@@ -29,6 +29,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
+from .fileio import write_json_atomic
 from .script_writer import PodcastScript
 
 FILENAME = "_script_session.json"
@@ -164,14 +165,7 @@ class ScriptSession:
             raise ScriptSessionError("Nessun percorso indicato per salvare la sessione.")
         self.path = target
         self.updated_at = _now()
-        target.parent.mkdir(parents=True, exist_ok=True)
-        tmp = target.with_suffix(target.suffix + ".tmp")
-        tmp.write_text(
-            json.dumps(self.to_dict(), indent=2, ensure_ascii=False) + "\n",
-            encoding="utf-8",
-        )
-        tmp.replace(target)
-        return target
+        return write_json_atomic(target, self.to_dict())
 
     def to_dict(self) -> dict[str, Any]:
         return {

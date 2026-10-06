@@ -15,10 +15,10 @@ l'agente deve dirlo esplicitamente all'utente (consenso vocale).
 from __future__ import annotations
 
 import argparse
-import json
 
 from _approval import add_gate_args, enforce  # noqa: E402
 from _common import add_config_arg, bootstrap, emit, note, resolve_path, run_tool  # noqa: E402
+from src.fileio import write_json_atomic  # noqa: E402
 from src.registry import VoiceRegistry  # noqa: E402
 from src.voice_library import VoiceLibrary, VoiceLibraryError  # noqa: E402
 
@@ -94,18 +94,14 @@ def main() -> None:
     out_file = None
     audio_paths_file = None
     if args.out and not args.dry_run:
-        target = resolve_path(args.out)
-        target.parent.mkdir(parents=True, exist_ok=True)
-        target.write_text(
-            json.dumps(voice_map, indent=2, ensure_ascii=False) + "\n", encoding="utf-8"
-        )
+        # Atomico: voci.json decide le chiavi dei segmenti in cache. Un file
+        # scritto a meta' farebbe sembrare "da rigenerare" (a pagamento)
+        # battute gia' pronte.
+        target = write_json_atomic(resolve_path(args.out), voice_map)
         out_file = str(target)
         # accanto alla voice_map salva anche i file audio di riferimento:
         # servono a run_finalize.py e l'agente non deve costruirli a mano
-        paths_target = target.parent / "_audio_paths.json"
-        paths_target.write_text(
-            json.dumps(audio_paths, indent=2, ensure_ascii=False) + "\n", encoding="utf-8"
-        )
+        paths_target = write_json_atomic(target.parent / "_audio_paths.json", audio_paths)
         audio_paths_file = str(paths_target)
 
     newly_cloned = [n for n, r in results.items() if r["action"] == "cloned"]

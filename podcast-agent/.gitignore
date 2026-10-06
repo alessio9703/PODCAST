@@ -15,3 +15,7 @@ __pycache__/
 *.pyc
 .venv/
 .claude/settings.local.json
+
+# lock fra processi e temporanei delle scritture atomiche (src/fileio.py)
+*.lock
+.*.tmp

@@ -25,7 +25,7 @@ from src.script_writer import ScriptWriter  # noqa: E402
 def build_writer(config) -> ScriptWriter:  # type: ignore[no-untyped-def]
     settings = config.script
     return ScriptWriter(
-        api_key=config.anthropic_api_key(),
+        client=config.anthropic_client(),
         model=str(settings.get("model", "claude-opus-5")),
         max_tokens=int(settings.get("max_tokens", 16000)),
         effort=str(settings.get("effort", "high")),

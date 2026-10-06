@@ -30,6 +30,7 @@ from difflib import SequenceMatcher
 from pathlib import Path
 from typing import Any
 
+from .fileio import write_json_atomic
 from .script_session import FILENAME as SESSION_FILENAME
 from .script_session import script_hash
 from .script_writer import INLINE_TAG, PodcastScript
@@ -69,11 +70,7 @@ def _now() -> str:
 
 
 def _write_atomic_json(target: Path, payload: Any) -> Path:
-    target.parent.mkdir(parents=True, exist_ok=True)
-    tmp = target.with_suffix(target.suffix + ".tmp")
-    tmp.write_text(json.dumps(payload, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
-    tmp.replace(target)
-    return target
+    return write_json_atomic(target, payload)
 
 
 def _load_json(target: Path) -> Any | None:

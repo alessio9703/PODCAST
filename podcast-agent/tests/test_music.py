@@ -12,6 +12,7 @@ Il provider vocale e' il FakeProvider: nessuna chiamata a pagamento.
 
 from __future__ import annotations
 
+import importlib.util
 import json
 import math
 import os
@@ -262,7 +263,17 @@ def main() -> None:
     check("exit 0 senza musica e senza ffmpeg", code == 0, err)
     check("nessuna chiave musiche nell'output", "voice_offset_seconds" not in out, str(out))
     check("output prodotto", Path(out["output"]).is_file())
-    check("formato mp3 (via lameenc, ffmpeg disabilitato)", out["format"] == "mp3", str(out))
+    # lameenc e' una dipendenza OPZIONALE (commentata in requirements.txt):
+    # con ffmpeg disabilitato l'mp3 si ottiene solo se c'e'. Senza, il
+    # comportamento documentato e' il ripiego su WAV con un avviso esplicito.
+    if importlib.util.find_spec("lameenc") is not None:
+        check("formato mp3 (via lameenc, ffmpeg disabilitato)", out["format"] == "mp3", str(out))
+    else:
+        check(
+            "senza lameenc ne' ffmpeg: ripiego su WAV, con avviso",
+            out["format"] == "wav" and any("WAV invece che in MP3" in w for w in out["warnings"]),
+            str(out),
+        )
     check("tts_calls == 4 (tutti i turni)", out["tts_calls"] == 4, str(out))
 
     # ------------------------------------------------------------------
