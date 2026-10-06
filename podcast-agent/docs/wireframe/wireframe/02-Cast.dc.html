@@ -1,0 +1,179 @@
+<!doctype html>
+<html lang="it">
+<head>
+<meta charset="utf-8">
+<title>2 · Cast e formato</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&amp;family=IBM+Plex+Mono:wght@400;500&amp;display=swap">
+<style>
+body{margin:0}
+a{color:#1c1d1f}a:hover{color:#000}
+</style>
+</helmet>
+<div style="min-height: 100vh; display: flex; flex-wrap: wrap; background: #f5f5f3; font-family: 'IBM Plex Sans', 'Helvetica Neue', sans-serif; color: #1c1d1f">
+  <div style="flex: 1 1 240px; display: flex">
+    <dc-import name="Sidebar" active="nuovo" hint-size="100%,900px"></dc-import>
+  </div>
+  <main style="flex: 999 1 560px; min-width: 0; box-sizing: border-box; padding: 32px 48px 64px; display: flex; flex-direction: column; gap: 28px">
+    <div style="display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px; font-size: 14px; color: #5b5d61">
+      <span>[Titolo episodio] · <b style="color: #1c1d1f">Bozza</b></span>
+      <span>Bozza salvata automaticamente in Archivio</span>
+    </div>
+    <dc-import name="Stepper" step="2" hint-size="100%,78px"></dc-import>
+
+    <div style="display: flex; flex-direction: column; gap: 6px">
+      <h1 style="margin: 0; font-size: 28px; line-height: 36px; font-weight: 700; letter-spacing: -0.02em">Chi parla e in che forma?</h1>
+      <p style="margin: 0; font-size: 15px; color: #5b5d61">Scegli il formato, poi assegna una voce a ogni ruolo. Le voci sono persone reali: scegline una dalla libreria, non la indoviniamo mai.</p>
+    </div>
+
+    <section style="display: flex; flex-direction: column; gap: 16px">
+      <h2 style="margin: 0; font-size: 18px; font-weight: 600">Formato</h2>
+      <div role="radiogroup" aria-label="Formato" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(min(300px, 100%), 1fr)); gap: 16px">
+        <button type="button" role="radio" aria-checked="{{convOn}}" onClick="{{pickConv}}" style="{{convStyle}}">
+          <span style="font-size: 16px; font-weight: 700">Conversazione</span>
+          <span style="font-size: 14px; color: #5b5d61">Due voci alla pari discutono il documento.</span>
+        </button>
+        <button type="button" role="radio" aria-checked="{{intOn}}" onClick="{{pickInt}}" style="{{intStyle}}">
+          <span style="font-size: 16px; font-weight: 700">Intervista</span>
+          <span style="font-size: 14px; color: #5b5d61">Una voce fa le domande, l'altra risponde.</span>
+        </button>
+        <fieldset style="margin: 0; display: flex; flex-direction: column; gap: 10px; padding: 20px; background: #ffffff; border: 1px solid #d5d5d1; border-radius: 12px; min-width: 0">
+          <legend style="float: left; padding: 0; font-size: 16px; font-weight: 700">Durata indicativa</legend>
+          <div style="display: flex; align-items: flex-end; gap: 12px">
+            <label style="display: flex; flex-direction: column; gap: 6px; font-size: 13px; font-weight: 600; color: #5b5d61">Ore
+              <input type="number" min="0" max="5" value="0" inputmode="numeric" style="width: 88px; min-height: 44px; padding: 0 12px; border: 1px solid #b9b9b4; border-radius: 8px; font: inherit; font-size: 17px; font-weight: 600; color: #1c1d1f">
+            </label>
+            <span style="padding-bottom: 10px; font-size: 18px; font-weight: 600; color: #5b5d61">:</span>
+            <label style="display: flex; flex-direction: column; gap: 6px; font-size: 13px; font-weight: 600; color: #5b5d61">Minuti
+              <input type="number" min="0" max="59" step="5" value="15" inputmode="numeric" style="width: 88px; min-height: 44px; padding: 0 12px; border: 1px solid #b9b9b4; border-radius: 8px; font: inherit; font-size: 17px; font-weight: 600; color: #1c1d1f">
+            </label>
+          </div>
+          <span style="font-size: 13px; color: #5b5d61">Il copione viene scritto per avvicinarsi a questa durata.</span>
+        </fieldset>
+      </div>
+    </section>
+
+    <section style="display: flex; flex-direction: column; gap: 16px">
+      <h2 style="margin: 0; font-size: 18px; font-weight: 600">Ruoli</h2>
+      <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(min(300px, 100%), 1fr)); gap: 16px">
+        <div style="display: flex; flex-direction: column; gap: 14px; padding: 20px; background: #ffffff; border: 1px solid #d5d5d1; border-radius: 12px">
+          <div style="display: flex; flex-direction: column; gap: 2px">
+            <span style="font-size: 13px; font-weight: 600; letter-spacing: 0.04em; text-transform: uppercase; color: #5b5d61">Presentatore</span>
+            <span style="font-size: 14px; color: #5b5d61">Apre e chiude l'episodio</span>
+          </div>
+          <div style="display: flex; align-items: center; gap: 12px; padding: 12px; border-radius: 8px; background: #f5f5f3">
+            <button type="button" aria-label="Ascolta il campione" style="flex: none; width: 44px; height: 44px; border-radius: 50%; border: 1px solid #b9b9b4; background: #ffffff; display: flex; align-items: center; justify-content: center"><svg width="14" height="14" viewBox="0 0 24 24" fill="#1c1d1f" aria-hidden="true"><path d="M7 4l13 8-13 8z"></path></svg></button>
+            <div style="flex: 1; display: flex; flex-direction: column; gap: 2px"><span style="font-weight: 600">[Voce 1]</span><span style="font-size: 13px; color: #245a2e; font-weight: 600">Già clonata</span></div>
+            <button type="button" style="min-height: 40px; padding: 0 12px; border-radius: 8px; border: 1px solid #d5d5d1; background: #ffffff; font: inherit; font-size: 13px; font-weight: 600">Cambia</button>
+          </div>
+          <label style="display: flex; flex-direction: column; gap: 6px; font-size: 14px; font-weight: 600">Nome e cognome da pronunciare
+            <input type="text" value="[Nome Cognome]" style="min-height: 44px; padding: 0 12px; border: 1px solid #b9b9b4; border-radius: 8px; font: inherit; font-size: 15px; font-weight: 400">
+          </label>
+        </div>
+
+        <div style="display: flex; flex-direction: column; gap: 14px; padding: 20px; background: #ffffff; border: 1px solid #d5d5d1; border-radius: 12px">
+          <div style="display: flex; flex-direction: column; gap: 2px">
+            <span style="font-size: 13px; font-weight: 600; letter-spacing: 0.04em; text-transform: uppercase; color: #5b5d61">{{role2}}</span>
+            <span style="font-size: 14px; color: #5b5d61">{{role2hint}}</span>
+          </div>
+          <div style="display: flex; align-items: center; gap: 12px; padding: 12px; border-radius: 8px; background: #f5f5f3">
+            <button type="button" aria-label="Ascolta il campione" style="flex: none; width: 44px; height: 44px; border-radius: 50%; border: 1px solid #b9b9b4; background: #ffffff; display: flex; align-items: center; justify-content: center"><svg width="14" height="14" viewBox="0 0 24 24" fill="#1c1d1f" aria-hidden="true"><path d="M7 4l13 8-13 8z"></path></svg></button>
+            <div style="flex: 1; display: flex; flex-direction: column; gap: 2px"><span style="font-weight: 600">[Voce 2]</span><span style="font-size: 13px; color: #8a3714; font-weight: 600">Da clonare · consenso richiesto</span></div>
+            <button type="button" style="min-height: 40px; padding: 0 12px; border-radius: 8px; border: 1px solid #d5d5d1; background: #ffffff; font: inherit; font-size: 13px; font-weight: 600">Cambia</button>
+          </div>
+          <label style="display: flex; flex-direction: column; gap: 6px; font-size: 14px; font-weight: 600">Nome e cognome da pronunciare
+            <input type="text" value="[Nome]" style="min-height: 44px; padding: 0 12px; border: 2px solid #8a6a00; border-radius: 8px; font: inherit; font-size: 15px; font-weight: 400">
+            <span style="font-size: 13px; font-weight: 500; color: #6b5000">Manca il cognome: aggiungilo, non lo indoviniamo.</span>
+          </label>
+          <label style="display: flex; flex-direction: column; gap: 6px; font-size: 14px; font-weight: 600">Ruolo
+            <input type="text" placeholder="Es. responsabile del progetto" style="min-height: 44px; padding: 0 12px; border: 1px solid #b9b9b4; border-radius: 8px; font: inherit; font-size: 15px; font-weight: 400">
+          </label>
+        </div>
+
+        <div style="display: flex; flex-direction: column; gap: 14px; padding: 20px; background: #ffffff; border: 2px dashed #b9b9b4; border-radius: 12px">
+          <div style="display: flex; flex-direction: column; gap: 2px">
+            <span style="font-size: 13px; font-weight: 600; letter-spacing: 0.04em; text-transform: uppercase; color: #5b5d61">{{role3}}</span>
+            <span style="font-size: 14px; color: #5b5d61">{{role3hint}}</span>
+          </div>
+          <div style="flex: 1; min-height: 120px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 6px; text-align: center; font-size: 14px; color: #5b5d61">
+            <span style="font-weight: 600; color: #1c1d1f">Nessuna voce assegnata</span>
+            <span>Scegli una voce dalla libreria qui sotto</span>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section style="display: flex; flex-direction: column; gap: 16px">
+      <div style="display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px">
+        <h2 style="margin: 0; font-size: 18px; font-weight: 600">Libreria voci</h2>
+        <button type="button" style="min-height: 44px; padding: 0 16px; border-radius: 8px; border: 1px solid #d5d5d1; background: #ffffff; font: inherit; font-size: 14px; font-weight: 600">Aggiungi una registrazione</button>
+      </div>
+      <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(min(240px, 100%), 1fr)); gap: 16px">
+        <sc-for list="{{voices}}" as="v" hint-placeholder-count="4">
+          <div style="display: flex; flex-direction: column; gap: 12px; padding: 16px; background: #ffffff; border: 1px solid #d5d5d1; border-radius: 12px">
+            <div style="display: flex; align-items: center; gap: 12px">
+              <button type="button" aria-label="Ascolta il campione" style="flex: none; width: 44px; height: 44px; border-radius: 50%; border: 1px solid #b9b9b4; background: #ffffff; display: flex; align-items: center; justify-content: center"><svg width="14" height="14" viewBox="0 0 24 24" fill="#1c1d1f" aria-hidden="true"><path d="M7 4l13 8-13 8z"></path></svg></button>
+              <div style="display: flex; flex-direction: column; gap: 2px"><span style="font-weight: 600">{{v.name}}</span><span style="{{v.chip}}">{{v.status}}</span></div>
+            </div>
+            <div style="display: flex; align-items: center; gap: 3px; height: 28px" aria-hidden="true">
+              <sc-for list="{{bars}}" as="b" hint-placeholder-count="24"><span style="{{b}}"></span></sc-for>
+            </div>
+            <button type="button" style="{{v.btnStyle}}">{{v.btn}}</button>
+          </div>
+        </sc-for>
+      </div>
+    </section>
+
+    <div style="display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px; padding-top: 20px; border-top: 1px solid #d5d5d1">
+      <a href="01-Documento.dc.html" style="display: inline-flex; align-items: center; min-height: 44px; padding: 0 16px; border-radius: 8px; text-decoration: none; font-weight: 600; font-size: 15px">Indietro</a>
+      <a href="03-Musiche.dc.html" style="display: inline-flex; align-items: center; min-height: 44px; padding: 0 20px; border-radius: 8px; background: #1c1d1f; color: #ffffff; text-decoration: none; font-weight: 600; font-size: 15px">Avanti: musiche</a>
+    </div>
+  </main>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":1300}}'>
+class Component extends DCLogic {
+  constructor(props) {
+    super(props);
+    this.state = { format: 'intervista' };
+  }
+  renderVals() {
+    const f = this.state.format;
+    const card = 'display: flex; flex-direction: column; align-items: flex-start; gap: 6px; padding: 20px; text-align: left; font: inherit; color: #1c1d1f; border-radius: 12px; cursor: pointer; ';
+    const on = card + 'background: #ffffff; border: 2px solid #1c1d1f';
+    const off = card + 'background: #ffffff; border: 1px solid #d5d5d1';
+    const isInt = f === 'intervista';
+    const chipOk = 'font-size: 13px; font-weight: 600; color: #245a2e';
+    const chipNew = 'font-size: 13px; font-weight: 600; color: #8a3714';
+    const btnBase = 'min-height: 44px; border-radius: 8px; font: inherit; font-size: 14px; font-weight: 600; ';
+    const assigned = btnBase + 'border: 1px solid #ececea; background: #ececea; color: #3d3f42';
+    const free = btnBase + 'border: 1px solid #1c1d1f; background: #ffffff; color: #1c1d1f';
+    const heights = [8, 14, 22, 12, 26, 18, 10, 24, 16, 28, 12, 20, 9, 22, 15, 26, 11, 19, 24, 13, 8, 17, 21, 10];
+    return {
+      convOn: isInt ? 'false' : 'true',
+      intOn: isInt ? 'true' : 'false',
+      convStyle: isInt ? off : on,
+      intStyle: isInt ? on : off,
+      pickConv: () => this.setState({ format: 'conversazione' }),
+      pickInt: () => this.setState({ format: 'intervista' }),
+      role2: isInt ? 'Intervistatore' : 'Voce A',
+      role2hint: isInt ? 'Fa le domande' : 'Discute alla pari',
+      role3: isInt ? 'Ospite' : 'Voce B',
+      role3hint: isInt ? 'Risponde alle domande' : 'Discute alla pari',
+      bars: heights.map(h => 'flex: 1; height: ' + h + 'px; border-radius: 2px; background: #c9c9c4'),
+      voices: [
+        { name: '[Voce 1]', status: 'Già clonata', chip: chipOk, btn: 'Assegnata: presentatore', btnStyle: assigned },
+        { name: '[Voce 2]', status: 'Da clonare', chip: chipNew, btn: 'Assegnata: ' + (isInt ? 'intervistatore' : 'voce A'), btnStyle: assigned },
+        { name: '[Voce 3]', status: 'Già clonata', chip: chipOk, btn: 'Assegna a ' + (isInt ? 'ospite' : 'voce B'), btnStyle: free },
+        { name: '[Voce 4]', status: 'Da clonare', chip: chipNew, btn: 'Assegna a ' + (isInt ? 'ospite' : 'voce B'), btnStyle: free }
+      ]
+    };
+  }
+}
+</script>
+</body>
+</html>

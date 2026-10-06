@@ -1,0 +1,194 @@
+<!doctype html>
+<html lang="it">
+<head>
+<meta charset="utf-8">
+<title>7 · Episodio e correzioni</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&amp;family=IBM+Plex+Mono:wght@400;500&amp;display=swap">
+<style>
+body{margin:0}
+a{color:#1c1d1f}a:hover{color:#000}
+</style>
+</helmet>
+<div style="min-height: 100vh; display: flex; flex-wrap: wrap; background: #f5f5f3; font-family: 'IBM Plex Sans', 'Helvetica Neue', sans-serif; color: #1c1d1f">
+  <div style="flex: 1 1 240px; display: flex">
+    <dc-import name="Sidebar" active="archivio" hint-size="100%,900px"></dc-import>
+  </div>
+  <main style="flex: 999 1 560px; min-width: 0; box-sizing: border-box; padding: 32px 48px 64px; display: flex; flex-direction: column; gap: 28px">
+    <div style="display: flex; flex-wrap: wrap; align-items: center; gap: 8px; font-size: 14px; color: #5b5d61">
+      <a href="Main.dc.html" style="color: #5b5d61">Archivio</a><span>/</span><span style="color: #1c1d1f; font-weight: 600">[Titolo episodio]</span>
+    </div>
+    <dc-import name="Stepper" step="7" hint-size="100%,78px"></dc-import>
+
+    <div style="display: flex; flex-wrap: wrap; align-items: flex-end; justify-content: space-between; gap: 16px">
+      <div style="display: flex; flex-direction: column; gap: 6px">
+        <div style="display: flex; flex-wrap: wrap; align-items: center; gap: 12px">
+          <h1 style="margin: 0; font-size: 28px; line-height: 36px; font-weight: 700; letter-spacing: -0.02em">[Titolo episodio]</h1>
+          <span style="display: inline-flex; align-items: center; min-height: 26px; padding: 0 10px; border-radius: 999px; background: #e3f1e5; color: #245a2e; font-size: 13px; font-weight: 600">Pronto</span>
+        </div>
+        <p style="margin: 0; font-size: 15px; color: #5b5d61">Intervista · [mm:ss] · 3 voci · montato il [gg/mm]</p>
+      </div>
+      <div style="display: flex; flex-wrap: wrap; gap: 8px">
+        <button type="button" style="min-height: 44px; padding: 0 16px; border-radius: 8px; border: 1px solid #d5d5d1; background: #ffffff; font: inherit; font-size: 14px; font-weight: 600">Cambia musiche</button>
+        <button type="button" style="min-height: 44px; padding: 0 16px; border-radius: 8px; border: 1px solid #d5d5d1; background: #ffffff; font: inherit; font-size: 14px; font-weight: 600">File dell'episodio</button>
+        <button type="button" style="display: flex; align-items: center; gap: 8px; min-height: 44px; padding: 0 18px; border-radius: 8px; border: 0; background: #1c1d1f; color: #ffffff; font: inherit; font-size: 14px; font-weight: 600"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 4v12M7 11l5 5 5-5M5 20h14"></path></svg>Scarica mp3</button>
+      </div>
+    </div>
+
+    <section aria-label="Player" style="display: flex; flex-direction: column; gap: 14px; padding: 24px; background: #ffffff; border: 1px solid #d5d5d1; border-radius: 12px">
+      <div style="display: flex; gap: 4px; font-size: 12px; font-weight: 600; letter-spacing: 0.04em; text-transform: uppercase; color: #5b5d61">
+        <span style="flex: 0 0 8%; border-top: 2px solid #9a9a95; padding-top: 4px">Intro</span>
+        <span style="flex: 1 1 auto; border-top: 2px solid #3d3f42; padding-top: 4px">Parlato · [n] battute</span>
+        <span style="flex: 0 0 8%; border-top: 2px solid #9a9a95; padding-top: 4px">Outro</span>
+      </div>
+      <div style="position: relative">
+        <div style="display: flex; align-items: center; gap: 2px; height: 96px" aria-label="Forma d'onda: clicca un punto per vedere la battuta">
+          <sc-for list="{{bars}}" as="b" hint-placeholder-count="140"><span style="{{b}}"></span></sc-for>
+        </div>
+        <div style="position: absolute; left: 41%; top: -6px; bottom: -6px; width: 2px; background: #1c1d1f"></div>
+        <div style="position: absolute; left: 38%; top: 104px; padding: 2px 8px; border-radius: 4px; background: #a3441a; color: #ffffff; font-size: 12px; font-weight: 700">Battuta 23</div>
+      </div>
+      <div style="display: flex; flex-wrap: wrap; align-items: center; gap: 16px; padding-top: 24px">
+        <button type="button" aria-label="Indietro 10 secondi" style="width: 44px; height: 44px; border-radius: 50%; border: 1px solid #d5d5d1; background: #ffffff; font: inherit; font-size: 12px; font-weight: 700">-10</button>
+        <button type="button" aria-label="Riproduci" style="width: 56px; height: 56px; border-radius: 50%; border: 0; background: #1c1d1f; display: flex; align-items: center; justify-content: center"><svg width="20" height="20" viewBox="0 0 24 24" fill="#ffffff" aria-hidden="true"><path d="M7 4l13 8-13 8z"></path></svg></button>
+        <button type="button" aria-label="Avanti 10 secondi" style="width: 44px; height: 44px; border-radius: 50%; border: 1px solid #d5d5d1; background: #ffffff; font: inherit; font-size: 12px; font-weight: 700">+10</button>
+        <span style="font-family: 'IBM Plex Mono', monospace; font-size: 14px">[04:12] / [mm:ss]</span>
+      </div>
+    </section>
+
+    <div style="display: flex; flex-wrap: wrap; align-items: flex-start; gap: 24px">
+      <section aria-label="Trascrizione" style="flex: 1 1 360px; min-width: 0; display: flex; flex-direction: column; background: #ffffff; border: 1px solid #d5d5d1; border-radius: 12px">
+        <h2 style="margin: 0; padding: 20px 20px 8px; font-size: 16px; font-weight: 700">Trascrizione</h2>
+        <div style="display: flex; gap: 14px; padding: 14px 20px; border-bottom: 1px solid #ececea"><span style="flex: none; font-family: 'IBM Plex Mono', monospace; font-size: 13px; color: #5b5d61">[03:58]</span><span style="font-size: 15px"><b>Ospite</b> · [Testo della battuta 22]</span></div>
+        <div style="display: flex; gap: 14px; padding: 14px 20px; border-bottom: 1px solid #ececea; background: #fbeae1; box-shadow: inset 3px 0 0 #a3441a"><span style="flex: none; font-family: 'IBM Plex Mono', monospace; font-size: 13px; color: #8a3714; font-weight: 600">[04:12]</span><span style="font-size: 15px"><b>Intervistatore</b> · [Testo della battuta 23]</span></div>
+        <div style="display: flex; gap: 14px; padding: 14px 20px; border-bottom: 1px solid #ececea"><span style="flex: none; font-family: 'IBM Plex Mono', monospace; font-size: 13px; color: #5b5d61">[04:19]</span><span style="font-size: 15px"><b>Ospite</b> · [Testo della battuta 24]</span></div>
+        <div style="display: flex; gap: 14px; padding: 14px 20px"><span style="flex: none; font-family: 'IBM Plex Mono', monospace; font-size: 13px; color: #5b5d61">[04:41]</span><span style="font-size: 15px"><b>Intervistatore</b> · [Testo della battuta 25]</span></div>
+      </section>
+
+      <aside aria-label="Correzione della battuta" style="flex: 1 1 440px; min-width: 0; display: flex; flex-direction: column; gap: 16px; padding: 24px; background: #ffffff; border: 1px solid #d5d5d1; border-radius: 12px">
+        <div style="display: flex; flex-direction: column; gap: 4px">
+          <span style="font-size: 13px; font-weight: 600; color: #5b5d61">Battuta 23 · Intervistatore · [04:12–04:19]</span>
+          <h2 style="margin: 0; font-size: 18px; font-weight: 700">Cosa non va in questa battuta?</h2>
+        </div>
+        <div role="tablist" aria-label="Tipo di correzione" style="display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px">
+          <button type="button" role="tab" aria-selected="{{resaOn}}" onClick="{{pickResa}}" style="{{resaTab}}"><span style="font-weight: 700">Come è detta</span><span style="font-size: 13px; color: #5b5d61">Stesso testo, nuova resa</span></button>
+          <button type="button" role="tab" aria-selected="{{testoOn}}" onClick="{{pickTesto}}" style="{{testoTab}}"><span style="font-weight: 700">Cosa dice</span><span style="font-size: 13px; color: #5b5d61">Correggi il testo · nuova approvazione</span></button>
+        </div>
+
+        <sc-if value="{{isResa}}" hint-placeholder-val="{{ true }}">
+          <div style="display: flex; flex-direction: column; gap: 14px">
+            <fieldset style="margin: 0; padding: 0; border: 0; min-width: 0; display: flex; flex-direction: column; gap: 10px">
+              <legend style="padding: 0 0 10px; font-size: 15px; font-weight: 700">Come deve cambiare?</legend>
+              <div style="display: flex; flex-wrap: wrap; gap: 8px">
+                <sc-for list="{{dirs}}" as="d" hint-placeholder-count="8">
+                  <button type="button" aria-pressed="{{d.on}}" onClick="{{d.toggle}}" style="{{d.style}}">{{d.label}}</button>
+                </sc-for>
+              </div>
+              <label style="display: flex; flex-direction: column; gap: 6px; font-size: 13px; font-weight: 600; color: #5b5d61">Altre indicazioni, con parole tue
+                <textarea rows="2" placeholder="Es. sottolinea «costi», chiudi la frase con tono di domanda" style="padding: 10px 12px; border: 1px solid #b9b9b4; border-radius: 8px; font: inherit; font-size: 15px; line-height: 22px; font-weight: 400; color: #1c1d1f; resize: vertical"></textarea>
+              </label>
+              <span style="font-size: 13px; color: #5b5d61">{{dirSummary}}</span>
+            </fieldset>
+            <div style="display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px; padding: 14px 16px; border-radius: 10px; background: #f5f5f3; border: 1px solid #d5d5d1">
+              <label style="display: flex; align-items: center; gap: 10px; font-size: 14px; font-weight: 600">Nuovi take
+                <select style="min-height: 40px; padding: 0 10px; border: 1px solid #b9b9b4; border-radius: 8px; font: inherit; font-size: 14px; background: #ffffff"><option>3</option><option>2</option><option>1</option></select>
+              </label>
+              <div style="display: flex; align-items: center; gap: 12px"><span style="font-size: 13px; color: #3d3f42">Costo stimato <b>€ [x,xx]</b></span><button type="button" style="min-height: 44px; padding: 0 16px; border-radius: 8px; border: 0; background: #1c1d1f; color: #ffffff; font: inherit; font-size: 14px; font-weight: 700">Genera 3 take</button></div>
+            </div>
+            <label style="display: flex; align-items: center; gap: 10px; min-height: 44px; font-size: 14px"><input type="checkbox" checked style="width: 20px; height: 20px; accent-color: #1c1d1f">Ascolta in contesto: battuta prima, take, battuta dopo, con sottofondo</label>
+            <div role="radiogroup" aria-label="Scegli il take" style="display: flex; flex-direction: column; gap: 8px">
+              <sc-for list="{{takes}}" as="k" hint-placeholder-count="4">
+                <div style="{{k.row}}">
+                  <button type="button" aria-label="Ascolta in contesto" style="flex: none; width: 44px; height: 44px; border-radius: 50%; border: 1px solid #b9b9b4; background: #ffffff; display: flex; align-items: center; justify-content: center"><svg width="14" height="14" viewBox="0 0 24 24" fill="#1c1d1f" aria-hidden="true"><path d="M7 4l13 8-13 8z"></path></svg></button>
+                  <span style="flex: 1; font-size: 15px; font-weight: 600">{{k.label}}</span>
+                  <button type="button" role="radio" aria-checked="{{k.on}}" onClick="{{k.pick}}" style="{{k.btn}}">{{k.btnText}}</button>
+                </div>
+              </sc-for>
+            </div>
+            <button type="button" style="min-height: 48px; border-radius: 8px; border: 0; background: #1c1d1f; color: #ffffff; font: inherit; font-size: 15px; font-weight: 700">Usa {{chosenLabel}} e rimonta</button>
+            <span style="font-size: 13px; color: #5b5d61">I take scartati restano disponibili.</span>
+          </div>
+        </sc-if>
+
+        <sc-if value="{{isTesto}}" hint-placeholder-val="{{ false }}">
+          <div style="display: flex; flex-direction: column; gap: 14px">
+            <label style="display: flex; flex-direction: column; gap: 6px; font-size: 14px; font-weight: 600">Testo della battuta
+              <textarea rows="4" style="padding: 10px 12px; border: 1px solid #b9b9b4; border-radius: 8px; font: inherit; font-size: 15px; line-height: 22px; font-weight: 400; resize: vertical">[Testo della battuta 23]</textarea>
+            </label>
+            <div style="display: flex; flex-direction: column; gap: 6px; padding: 14px 16px; border-radius: 10px; background: #fdf3d3; border: 1px solid #e3c76a; font-size: 14px; line-height: 21px">
+              <b>Cosa succede dopo</b>
+              <span>Il copione passa alla versione 4 e va riapprovato. Poi rigeneriamo solo questa battuta e rimontiamo l'episodio. Le altre restano identiche.</span>
+            </div>
+            <a href="04-Copione.dc.html" style="display: flex; align-items: center; justify-content: center; min-height: 48px; border-radius: 8px; background: #1c1d1f; color: #ffffff; text-decoration: none; font-size: 15px; font-weight: 700">Salva e vai all'approvazione</a>
+          </div>
+        </sc-if>
+      </aside>
+    </div>
+  </main>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":1400}}'>
+class Component extends DCLogic {
+  constructor(props) {
+    super(props);
+    this.state = { mode: 'resa', take: 2, dirs: ['Più calmo'] };
+  }
+  renderVals() {
+    const { mode, take } = this.state;
+    const N = 140;
+    const bars = [];
+    for (let i = 0; i < N; i++) {
+      const h = 14 + Math.round(Math.abs(Math.sin(i * 0.9) * 36 + Math.sin(i * 0.23) * 24));
+      const intro = i < 11, outro = i >= N - 11;
+      const sel = i >= 53 && i <= 58;
+      const c = sel ? '#a3441a' : (intro || outro) ? '#b9b9b4' : '#3d3f42';
+      bars.push('flex: 1; min-width: 1px; height: ' + Math.min(h, 92) + 'px; border-radius: 2px; background: ' + c);
+    }
+    const tab = 'display: flex; flex-direction: column; align-items: flex-start; gap: 4px; padding: 14px; text-align: left; font: inherit; color: #1c1d1f; border-radius: 10px; cursor: pointer; background: #ffffff; ';
+    const isResa = mode === 'resa';
+    const labels = ['Take originale', 'Take 1', 'Take 2', 'Take 3'];
+    const takes = labels.map((label, i) => {
+      const on = i === take;
+      return {
+        label, on: on ? 'true' : 'false',
+        row: 'display: flex; align-items: center; gap: 12px; padding: 10px 12px; border-radius: 10px; ' + (on ? 'border: 2px solid #1c1d1f' : 'border: 1px solid #d5d5d1'),
+        btn: 'min-height: 40px; padding: 0 14px; border-radius: 8px; font: inherit; font-size: 13px; font-weight: 600; cursor: pointer; ' + (on ? 'border: 1px solid #1c1d1f; background: #1c1d1f; color: #ffffff' : 'border: 1px solid #d5d5d1; background: #ffffff; color: #1c1d1f'),
+        btnText: on ? 'Scelto' : 'Scegli',
+        pick: () => this.setState({ take: i })
+      };
+    });
+    const opposite = { 'Più lento': 'Più veloce', 'Più veloce': 'Più lento', 'Più energico': 'Più calmo', 'Più calmo': 'Più energico', 'Più serio': 'Più sorridente', 'Più sorridente': 'Più serio' };
+    const chosen = this.state.dirs;
+    const chip = 'min-height: 40px; padding: 0 14px; border-radius: 999px; font: inherit; font-size: 14px; cursor: pointer; ';
+    const dirs = ['Più lento', 'Più veloce', 'Più energico', 'Più calmo', 'Più serio', 'Più sorridente', 'Più pause', 'Pronuncia diversa'].map(label => {
+      const on = chosen.indexOf(label) >= 0;
+      return {
+        label, on: on ? 'true' : 'false',
+        style: chip + (on ? 'border: 1px solid #1c1d1f; background: #1c1d1f; color: #ffffff; font-weight: 600' : 'border: 1px solid #d5d5d1; background: #ffffff; color: #1c1d1f'),
+        toggle: () => {
+          let next = chosen.filter(x => x !== label && x !== opposite[label]);
+          if (!on) next = next.concat([label]);
+          this.setState({ dirs: next });
+        }
+      };
+    });
+    return {
+      bars, takes, dirs,
+      dirSummary: chosen.length ? 'Nei nuovi take: ' + chosen.join(', ').toLowerCase() + '.' : 'Nessuna indicazione: i nuovi take saranno varianti libere della stessa battuta.',
+      chosenLabel: labels[take].toLowerCase(),
+      isResa, isTesto: !isResa,
+      resaOn: isResa ? 'true' : 'false', testoOn: isResa ? 'false' : 'true',
+      resaTab: tab + (isResa ? 'border: 2px solid #1c1d1f' : 'border: 1px solid #d5d5d1'),
+      testoTab: tab + (!isResa ? 'border: 2px solid #1c1d1f' : 'border: 1px solid #d5d5d1'),
+      pickResa: () => this.setState({ mode: 'resa' }),
+      pickTesto: () => this.setState({ mode: 'testo' })
+    };
+  }
+}
+</script>
+</body>
+</html>

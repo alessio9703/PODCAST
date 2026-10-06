@@ -1,0 +1,135 @@
+<!doctype html>
+<html lang="it">
+<head>
+<meta charset="utf-8">
+<title>Confronto versioni del copione</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&amp;family=IBM+Plex+Mono:wght@400;500&amp;display=swap">
+<style>
+body{margin:0}
+a{color:#1c1d1f}a:hover{color:#000}
+</style>
+</helmet>
+<section aria-label="Confronto tra versioni" style="width: 100%; box-sizing: border-box; display: flex; flex-direction: column; background: #ffffff; border: 2px solid #1c1d1f; border-radius: 12px; font-family: 'IBM Plex Sans', 'Helvetica Neue', sans-serif; color: #1c1d1f">
+  <div style="display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px; padding: 16px 20px; border-bottom: 1px solid #d5d5d1">
+    <div style="display: flex; flex-wrap: wrap; align-items: center; gap: 10px">
+      <h2 style="margin: 0; font-size: 18px; font-weight: 700">Confronto</h2>
+      <label style="display: flex; align-items: center; gap: 8px; font-size: 14px; color: #5b5d61">
+        <span style="position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0)">Versione di partenza</span>
+        <select style="min-height: 40px; padding: 0 10px; border: 1px solid #b9b9b4; border-radius: 8px; font: inherit; font-size: 14px; color: #1c1d1f; background: #ffffff"><option>{{verLabel}}</option><option>{{otherLabel}}</option></select>
+      </label>
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#5b5d61" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12h14M13 6l6 6-6 6"></path></svg>
+      <span style="display: inline-flex; align-items: center; min-height: 40px; padding: 0 12px; border-radius: 8px; background: #ececea; font-size: 14px; font-weight: 600">v3 · corrente</span>
+    </div>
+    <div style="display: flex; align-items: center; gap: 8px">
+      <div role="group" aria-label="Cosa mostrare" style="display: flex; padding: 3px; border-radius: 8px; background: #ececea">
+        <button type="button" aria-pressed="{{onlyOn}}" onClick="{{showOnly}}" style="{{onlyStyle}}">Solo modifiche</button>
+        <button type="button" aria-pressed="{{allOn}}" onClick="{{showAll}}" style="{{allStyle}}">Tutto il copione</button>
+      </div>
+      <button type="button" aria-label="Chiudi il confronto" onClick="{{close}}" style="width: 40px; height: 40px; border-radius: 8px; border: 1px solid #d5d5d1; background: #ffffff; display: flex; align-items: center; justify-content: center; cursor: pointer"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#1c1d1f" stroke-width="2.4" stroke-linecap="round" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"></path></svg></button>
+    </div>
+  </div>
+
+  <div style="display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px; padding: 14px 20px; background: #f5f5f3; border-bottom: 1px solid #d5d5d1">
+    <span style="font-size: 14px"><span style="color: #5b5d61">Richiesta che ha creato la v3:</span> <b>«[aggiungi una domanda sui costi]»</b></span>
+    <div style="display: flex; flex-wrap: wrap; gap: 8px; font-size: 13px; font-weight: 600">
+      <span style="display: inline-flex; align-items: center; min-height: 26px; padding: 0 10px; border-radius: 999px; background: #ffffff; border: 1px solid #d5d5d1">2 modificate</span>
+      <span style="display: inline-flex; align-items: center; min-height: 26px; padding: 0 10px; border-radius: 999px; background: #e3f1e5; color: #245a2e">1 aggiunta</span>
+      <span style="display: inline-flex; align-items: center; min-height: 26px; padding: 0 10px; border-radius: 999px; background: #fbe6e6; color: #8f1c1c">1 rimossa</span>
+    </div>
+  </div>
+
+  <div style="display: flex; align-items: flex-start; gap: 16px; padding: 18px 20px; border-bottom: 1px solid #ececea">
+    <span style="flex: none; width: 28px; padding-top: 2px; font-size: 13px; color: #5b5d61; font-family: 'IBM Plex Mono', monospace">01</span>
+    <div style="flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 8px">
+      <div style="display: flex; flex-wrap: wrap; align-items: center; gap: 8px"><span style="padding: 2px 8px; border-radius: 4px; background: #1c1d1f; color: #ffffff; font-size: 12px; font-weight: 700; letter-spacing: 0.04em; text-transform: uppercase">Presentatore</span><span style="font-size: 12px; font-weight: 700; color: #3d3f42; letter-spacing: 0.04em; text-transform: uppercase">Modificata</span></div>
+      <p style="margin: 0; font-size: 16px; line-height: 28px">[Apertura: presenta il tema] <del style="background: #fbe6e6; color: #8f1c1c">[e racconta come è nato il progetto]</del> <ins style="background: #e3f1e5; color: #245a2e; text-decoration: none; font-weight: 600">[e anticipa la domanda sui costi]</ins> [poi presenta gli ospiti]</p>
+    </div>
+  </div>
+
+  <sc-if value="{{all}}" hint-placeholder-val="{{ false }}">
+    <div style="display: flex; align-items: flex-start; gap: 16px; padding: 18px 20px; border-bottom: 1px solid #ececea; color: #5b5d61">
+      <span style="flex: none; width: 28px; padding-top: 2px; font-size: 13px; font-family: 'IBM Plex Mono', monospace">02</span>
+      <div style="flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 8px">
+        <span style="align-self: flex-start; padding: 2px 8px; border-radius: 4px; background: #ececea; color: #3d3f42; font-size: 12px; font-weight: 700; letter-spacing: 0.04em; text-transform: uppercase">Intervistatore</span>
+        <p style="margin: 0; font-size: 16px; line-height: 26px">[Prima domanda sul punto chiave del documento]</p>
+      </div>
+    </div>
+    <div style="display: flex; align-items: flex-start; gap: 16px; padding: 18px 20px; border-bottom: 1px solid #ececea; color: #5b5d61">
+      <span style="flex: none; width: 28px; padding-top: 2px; font-size: 13px; font-family: 'IBM Plex Mono', monospace">03</span>
+      <div style="flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 8px">
+        <span style="align-self: flex-start; padding: 2px 8px; border-radius: 4px; background: #ececea; color: #3d3f42; font-size: 12px; font-weight: 700; letter-spacing: 0.04em; text-transform: uppercase">Ospite</span>
+        <p style="margin: 0; font-size: 16px; line-height: 26px">[Risposta con un esempio concreto tratto dal documento]</p>
+      </div>
+    </div>
+  </sc-if>
+  <sc-if value="{{only}}" hint-placeholder-val="{{ true }}">
+    <button type="button" onClick="{{showAll}}" style="display: flex; align-items: center; justify-content: center; gap: 8px; min-height: 44px; border: 0; border-bottom: 1px solid #ececea; background: #fafaf8; font: inherit; font-size: 13px; color: #5b5d61; cursor: pointer">2 battute invariate · mostra</button>
+  </sc-if>
+
+  <div style="display: flex; align-items: flex-start; gap: 16px; padding: 18px 20px; border-bottom: 1px solid #ececea; background: #f3f9f4">
+    <span style="flex: none; width: 28px; padding-top: 2px; font-size: 13px; color: #245a2e; font-family: 'IBM Plex Mono', monospace">04</span>
+    <div style="flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 8px">
+      <div style="display: flex; flex-wrap: wrap; align-items: center; gap: 8px"><span style="padding: 2px 8px; border-radius: 4px; background: #ececea; color: #3d3f42; font-size: 12px; font-weight: 700; letter-spacing: 0.04em; text-transform: uppercase">Intervistatore</span><span style="font-size: 12px; font-weight: 700; color: #245a2e; letter-spacing: 0.04em; text-transform: uppercase">Aggiunta</span></div>
+      <p style="margin: 0; font-size: 16px; line-height: 26px; color: #245a2e">[Nuova domanda: quanto costa e chi sostiene la spesa]</p>
+    </div>
+  </div>
+
+  <div style="display: flex; align-items: flex-start; gap: 16px; padding: 18px 20px; border-bottom: 1px solid #ececea">
+    <span style="flex: none; width: 28px; padding-top: 2px; font-size: 13px; color: #5b5d61; font-family: 'IBM Plex Mono', monospace">05</span>
+    <div style="flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 8px">
+      <div style="display: flex; flex-wrap: wrap; align-items: center; gap: 8px"><span style="padding: 2px 8px; border-radius: 4px; background: #ececea; color: #3d3f42; font-size: 12px; font-weight: 700; letter-spacing: 0.04em; text-transform: uppercase">Ospite</span><span style="font-size: 12px; font-weight: 700; color: #3d3f42; letter-spacing: 0.04em; text-transform: uppercase">Modificata</span></div>
+      <p style="margin: 0; font-size: 16px; line-height: 28px"><ins style="background: #e3f1e5; color: #245a2e; text-decoration: none; font-weight: 600">[pausa]</ins> [Risposta con il dato più importante] <del style="background: #fbe6e6; color: #8f1c1c">[ripetuto due volte]</del></p>
+    </div>
+  </div>
+
+  <div style="display: flex; align-items: flex-start; gap: 16px; padding: 18px 20px; border-bottom: 1px solid #ececea; background: #fdf5f5">
+    <span style="flex: none; width: 28px; padding-top: 2px; font-size: 13px; color: #8f1c1c; font-family: 'IBM Plex Mono', monospace">—</span>
+    <div style="flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 8px">
+      <div style="display: flex; flex-wrap: wrap; align-items: center; gap: 8px"><span style="padding: 2px 8px; border-radius: 4px; background: #ececea; color: #3d3f42; font-size: 12px; font-weight: 700; letter-spacing: 0.04em; text-transform: uppercase">Ospite</span><span style="font-size: 12px; font-weight: 700; color: #8f1c1c; letter-spacing: 0.04em; text-transform: uppercase">Rimossa</span></div>
+      <p style="margin: 0; font-size: 16px; line-height: 26px; color: #8f1c1c"><del>[Digressione sulla storia del progetto]</del></p>
+    </div>
+  </div>
+
+  <div style="display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px; padding: 16px 20px">
+    <div style="display: flex; flex-direction: column; gap: 2px">
+      <button type="button" style="align-self: flex-start; min-height: 44px; padding: 0 16px; border-radius: 8px; border: 1px solid #1c1d1f; background: #ffffff; font: inherit; font-size: 14px; font-weight: 600">Ripristina {{verShort}}</button>
+      <span style="font-size: 13px; color: #5b5d61">Crea la versione 4, da approvare di nuovo</span>
+    </div>
+    <button type="button" onClick="{{close}}" style="min-height: 44px; padding: 0 18px; border-radius: 8px; border: 0; background: #1c1d1f; color: #ffffff; font: inherit; font-size: 14px; font-weight: 700; cursor: pointer">Torna al copione</button>
+  </div>
+</section>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"ver":{"editor":"enum","options":["v2","v1"],"default":"v2"},"onClose":{"editor":null},"$preview":{"width":900,"height":1000}}'>
+class Component extends DCLogic {
+  constructor(props) {
+    super(props);
+    this.state = { all: false };
+  }
+  renderVals() {
+    const ver = this.props.ver ?? 'v2';
+    const labels = { v2: 'v2 · «più breve l’intro»', v1: 'v1 · prima stesura' };
+    const all = this.state.all;
+    const seg = 'min-height: 36px; padding: 0 12px; border-radius: 6px; border: 0; font: inherit; font-size: 13px; cursor: pointer; ';
+    const on = seg + 'background: #ffffff; color: #1c1d1f; font-weight: 700';
+    const off = seg + 'background: transparent; color: #3d3f42; font-weight: 500';
+    return {
+      verShort: ver,
+      verLabel: labels[ver] || labels.v2,
+      otherLabel: ver === 'v1' ? labels.v2 : labels.v1,
+      all, only: !all,
+      allOn: all ? 'true' : 'false', onlyOn: all ? 'false' : 'true',
+      allStyle: all ? on : off, onlyStyle: all ? off : on,
+      showAll: () => this.setState({ all: true }),
+      showOnly: () => this.setState({ all: false }),
+      close: () => { if (this.props.onClose) this.props.onClose(); }
+    };
+  }
+}
+</script>
+</body>
+</html>

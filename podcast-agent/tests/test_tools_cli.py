@@ -833,6 +833,83 @@ def main() -> None:
     code, out, _ = synth15()
     check("dopo il purge si ripaga tutto", out["tts_calls"] == 5, str(out)[:200])
 
+    print("\n[16] Presentazione iniziale — terza voce che presenta i partecipanti")
+    code, out, _ = tool("run_init.py", "--title", "prova presentazione", config=config)
+    pres_dir = Path(out["run_dir"])
+    pbozza = pres_dir / "bozza.json"
+    pspeakers = ["Mario Rossi", "Giulia Bianchi", "Voce Narrante"]
+    part = ["--participant", "Mario Rossi|Mario Rossi|responsabile del reparto acquisti",
+            "--participant", "Giulia Bianchi|Giulia Bianchi|analista dei dati di vendita"]
+
+    def psave(payload, *extra, speakers=pspeakers):
+        pbozza.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
+        return tool("script_save.py", "--run-dir", str(pres_dir), "--script-json",
+                    str(pbozza), "--speakers", *speakers, *extra, config=config)
+
+    dialogo = [{"speaker": "Mario Rossi", "testo": "Ciao a tutti."},
+               {"speaker": "Giulia Bianchi", "testo": "Parliamo del report."}]
+    apertura = {"speaker": "Voce Narrante", "testo":
+                "Benvenuti. Oggi parlano Mario Rossi, responsabile del reparto acquisti, "
+                "e Giulia Bianchi, analista dei dati di vendita."}
+
+    code, out, _ = psave({"titolo": "T", "turni": [apertura, *dialogo]},
+                         "--presenter", "Voce Narrante")
+    check("presentatore senza --participant -> exit 1",
+          code == 1 and "Manca nome pronunciato e ruolo" in out["error"], out.get("error", "")[:200])
+
+    code, out, _ = psave({"titolo": "T", "turni": dialogo}, "--presenter", "Voce Narrante", *part)
+    check("copione che non apre col presentatore -> exit 1",
+          code == 1 and "deve aprire con la presentazione" in out["error"], out.get("error", "")[:200])
+
+    code, out, _ = psave({"titolo": "T", "turni": [
+        {"speaker": "Voce Narrante", "testo": "Benvenuti. Oggi parla Mario Rossi."}, *dialogo]},
+        "--presenter", "Voce Narrante", *part)
+    check("presentazione che omette un nome -> exit 1",
+          code == 1 and "Giulia Bianchi" in out["error"], out.get("error", "")[:200])
+
+    code, out, _ = psave({"titolo": "T", "turni": [apertura, *dialogo,
+                          {"speaker": "Voce Narrante", "testo": "Grazie."}]},
+                         "--presenter", "Voce Narrante", *part)
+    check("presentatore che riparla dopo l'apertura -> exit 1",
+          code == 1 and "solo nei turni iniziali" in out["error"], out.get("error", "")[:200])
+
+    code, out, _ = psave({"titolo": "T", "turni": [apertura, *dialogo]},
+                         "--presenter", "Voce Narrante", "--participant", "Mario Rossi|Mario Rossi")
+    check("--participant malformato -> exit 1", code == 1 and "--participant" in out["error"])
+
+    code, out, _ = psave({"titolo": "T", "turni": [apertura, *dialogo]},
+                         "--presenter", "Voce Narrante", *part)
+    check("presentazione valida -> exit 0", code == 0, str(out)[:300])
+    check("presenter e participants nel JSON",
+          out["presenter"] == "Voce Narrante" and len(out["participants"]) == 2)
+    check("il presentatore e' un turno come gli altri (cache, retake, turn_at)",
+          out["turn_count"] == 3 and out["turni"][0]["speaker"] == "Voce Narrante")
+
+    # La revisione ricorda presentatore e partecipanti senza ripassarli.
+    code, out, _ = psave({"titolo": "T", "turni": [apertura, *dialogo]})
+    check("la revisione riusa presentatore e partecipanti dalla sessione",
+          code == 0 and out["presenter"] == "Voce Narrante", str(out)[:300])
+    code, out, _ = psave({"titolo": "T", "turni": dialogo})
+    check("...e continua a pretendere la presentazione",
+          code == 1 and "deve aprire con la presentazione" in out["error"])
+
+    # In intervista la voce di presentazione non e' ne' intervistatore ne' intervistato.
+    code, out, _ = tool("run_init.py", "--title", "prova pres intervista", config=config)
+    pres_dir = Path(out["run_dir"])
+    pbozza = pres_dir / "bozza.json"
+    code, out, _ = psave({"titolo": "T", "turni": [
+        {"speaker": "Voce Narrante", "testo": apertura["testo"]},
+        {"speaker": "Giulia Bianchi", "testo": "Come funziona?"},
+        {"speaker": "Mario Rossi", "testo": "Semplice."}]},
+        "--presenter", "Voce Narrante", *part,
+        "--format", "intervista", "--interviewer", "Giulia Bianchi")
+    check("intervista: la presentazione non genera avvisi di ruolo",
+          code == 0 and not out["warnings"], str(out.get("warnings"))[:300])
+
+    code, out, _ = tool("voices_list.py", config=config)
+    check("voices_list espone spoken_name e name_complete",
+          code == 0 and all({"spoken_name", "name_complete"} <= set(v) for v in out["voices"]))
+
     print(f"\nStima {estimated_seconds}s vs durata reale {real_seconds}s "
           "(diverse: il provider finto non parla a 150 parole/minuto)")
     print(f"\n{len(PASSED)} controlli superati, {len(SKIPPED)} saltati.")

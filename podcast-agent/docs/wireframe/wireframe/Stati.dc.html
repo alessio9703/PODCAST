@@ -1,0 +1,112 @@
+<!doctype html>
+<html lang="it">
+<head>
+<meta charset="utf-8">
+<title>Stati e messaggi</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&amp;family=IBM+Plex+Mono:wght@400;500&amp;display=swap">
+<style>
+body{margin:0}
+a{color:#1c1d1f}a:hover{color:#000}
+</style>
+</helmet>
+<div style="width: 1440px; height: 1200px; box-sizing: border-box; padding: 56px 64px; background: #f5f5f3; font-family: 'IBM Plex Sans', 'Helvetica Neue', sans-serif; color: #1c1d1f; display: flex; flex-direction: column; gap: 28px">
+  <div style="display: flex; flex-direction: column; gap: 6px">
+    <h1 style="margin: 0; font-size: 32px; line-height: 40px; font-weight: 700; letter-spacing: -0.02em">Stati e messaggi</h1>
+    <p style="margin: 0; font-size: 15px; color: #5b5d61">Ogni comando restituisce uno di quattro esiti: la UI li mostra sempre con lo stesso schema. Più gli stati vuoto, in corso e interrotto.</p>
+  </div>
+
+  <div style="display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 24px">
+    <section style="display: flex; flex-direction: column; gap: 12px">
+      <span style="font-family: 'IBM Plex Mono', monospace; font-size: 13px; font-weight: 500; color: #5b5d61">Esito 0 · tutto a posto</span>
+      <div role="status" style="display: flex; align-items: center; gap: 12px; padding: 14px 16px; border-radius: 10px; background: #1c1d1f; color: #ffffff">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12l5 5L20 7"></path></svg>
+        <span style="flex: 1; font-size: 15px">Copione salvato · versione 3</span>
+        <button type="button" style="min-height: 36px; padding: 0 10px; border-radius: 6px; border: 1px solid #5b5d61; background: transparent; color: #ffffff; font: inherit; font-size: 13px">Annulla</button>
+      </div>
+      <p style="margin: 0; font-size: 13px; line-height: 19px; color: #5b5d61">Conferma breve, poi si passa al passo successivo. Nessun blocco.</p>
+    </section>
+
+    <section style="display: flex; flex-direction: column; gap: 12px">
+      <span style="font-family: 'IBM Plex Mono', monospace; font-size: 13px; font-weight: 500; color: #5b5d61">Esito 1 · errore correggibile</span>
+      <div role="alert" style="display: flex; flex-direction: column; gap: 10px; padding: 16px; border-radius: 10px; background: #fdf3d3; border: 1px solid #e3c76a">
+        <b style="font-size: 15px">Questo PDF non contiene testo</b>
+        <span style="font-size: 14px; line-height: 21px; color: #3d3f42">Sembra una scansione. Carica un PDF con testo selezionabile, oppure un DOCX.</span>
+        <button type="button" style="align-self: flex-start; min-height: 40px; padding: 0 14px; border-radius: 8px; border: 1px solid #1c1d1f; background: #ffffff; font: inherit; font-size: 14px; font-weight: 600">Carica un altro file</button>
+      </div>
+      <p style="margin: 0; font-size: 13px; line-height: 19px; color: #5b5d61">Dice cosa correggere e dà l'azione per farlo, accanto al campo che l'ha causato.</p>
+    </section>
+
+    <section style="display: flex; flex-direction: column; gap: 12px">
+      <span style="font-family: 'IBM Plex Mono', monospace; font-size: 13px; font-weight: 500; color: #5b5d61">Esito 2 · errore del provider</span>
+      <div role="alert" style="display: flex; flex-direction: column; gap: 10px; padding: 16px; border-radius: 10px; background: #fbe6e6; border: 1px solid #d99a9a">
+        <b style="font-size: 15px; color: #8f1c1c">Credito del servizio vocale esaurito</b>
+        <span style="font-size: 14px; line-height: 21px; color: #3d3f42">La clonazione di [Nome Cognome] non è partita. Non riproviamo da soli per non creare voci duplicate.</span>
+        <div style="display: flex; flex-wrap: wrap; gap: 8px">
+          <button type="button" style="min-height: 40px; padding: 0 14px; border-radius: 8px; border: 1px solid #1c1d1f; background: #ffffff; font: inherit; font-size: 14px; font-weight: 600">Contatta [referente]</button>
+          <button type="button" style="min-height: 40px; padding: 0 14px; border-radius: 8px; border: 1px solid #d5d5d1; background: #ffffff; font: inherit; font-size: 14px">Copia i dettagli</button>
+        </div>
+      </div>
+      <p style="margin: 0; font-size: 13px; line-height: 19px; color: #5b5d61">Blocco: nessun pulsante «Riprova». L'episodio resta in Archivio.</p>
+    </section>
+
+    <section style="display: flex; flex-direction: column; gap: 12px">
+      <span style="font-family: 'IBM Plex Mono', monospace; font-size: 13px; font-weight: 500; color: #5b5d61">Esito 3 · serve una risposta</span>
+      <div style="display: flex; flex-direction: column; gap: 12px; padding: 16px; border-radius: 10px; background: #e4edf8; border: 1px solid #9fbbe0">
+        <b style="font-size: 15px; color: #1d4c85">Ci sono due voci «[Nome]». Quale intendi?</b>
+        <div role="radiogroup" aria-label="Scegli la voce" style="display: flex; flex-direction: column; gap: 8px">
+          <button type="button" role="radio" aria-checked="false" style="display: flex; align-items: center; justify-content: space-between; min-height: 44px; padding: 0 14px; border-radius: 8px; border: 1px solid #9fbbe0; background: #ffffff; font: inherit; font-size: 14px"><span>[Nome Cognome A]</span><span style="color: #5b5d61">registrata il [gg/mm]</span></button>
+          <button type="button" role="radio" aria-checked="false" style="display: flex; align-items: center; justify-content: space-between; min-height: 44px; padding: 0 14px; border-radius: 8px; border: 1px solid #9fbbe0; background: #ffffff; font: inherit; font-size: 14px"><span>[Nome Cognome B]</span><span style="color: #5b5d61">registrata il [gg/mm]</span></button>
+        </div>
+      </div>
+      <p style="margin: 0; font-size: 13px; line-height: 19px; color: #5b5d61">La domanda e le opzioni arrivano dal comando. Non si va avanti senza scelta.</p>
+    </section>
+
+    <section style="display: flex; flex-direction: column; gap: 12px">
+      <span style="font-family: 'IBM Plex Mono', monospace; font-size: 13px; font-weight: 500; color: #5b5d61">In corso · scrittura del copione</span>
+      <div aria-busy="true" style="display: flex; flex-direction: column; gap: 12px; padding: 16px; border-radius: 10px; background: #ffffff; border: 1px solid #d5d5d1">
+        <div style="display: flex; align-items: center; gap: 10px"><span style="width: 18px; height: 18px; border-radius: 50%; border: 3px solid #d5d5d1; border-top-color: #1c1d1f; box-sizing: border-box"></span><b style="font-size: 15px">Sto scrivendo il copione…</b></div>
+        <div style="height: 10px; width: 40%; border-radius: 4px; background: #ececea"></div>
+        <div style="height: 10px; width: 90%; border-radius: 4px; background: #ececea"></div>
+        <div style="height: 10px; width: 75%; border-radius: 4px; background: #ececea"></div>
+      </div>
+      <p style="margin: 0; font-size: 13px; line-height: 19px; color: #5b5d61">Scheletro delle battute al posto del contenuto. Si può lasciare la pagina.</p>
+    </section>
+
+    <section style="display: flex; flex-direction: column; gap: 12px">
+      <span style="font-family: 'IBM Plex Mono', monospace; font-size: 13px; font-weight: 500; color: #5b5d61">Interrotto · generazione</span>
+      <div style="display: flex; flex-direction: column; gap: 10px; padding: 16px; border-radius: 10px; background: #ffffff; border: 2px solid #1c1d1f">
+        <b style="font-size: 15px">Generazione interrotta alla battuta [38] di [64]</b>
+        <span style="font-size: 14px; line-height: 21px; color: #3d3f42">Le battute già pronte sono salvate. Riprendendo si generano solo le [26] mancanti.</span>
+        <button type="button" style="align-self: flex-start; min-height: 44px; padding: 0 16px; border-radius: 8px; border: 0; background: #1c1d1f; color: #ffffff; font: inherit; font-size: 14px; font-weight: 700">Riprendi</button>
+      </div>
+      <p style="margin: 0; font-size: 13px; line-height: 19px; color: #5b5d61">Si riprende anche dalla riga dell'Archivio.</p>
+    </section>
+  </div>
+
+  <section style="display: flex; align-items: center; gap: 32px; padding: 32px; border-radius: 12px; background: #ffffff; border: 1px solid #d5d5d1">
+    <div style="flex: none; width: 96px; height: 96px; border-radius: 50%; background: #ececea; display: flex; align-items: center; justify-content: center">
+      <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="#5b5d61" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="9" y="2" width="6" height="12" rx="3"></rect><path d="M5 10a7 7 0 0 0 14 0"></path><path d="M12 17v5"></path></svg>
+    </div>
+    <div style="flex: 1; display: flex; flex-direction: column; gap: 6px">
+      <span style="font-family: 'IBM Plex Mono', monospace; font-size: 13px; color: #5b5d61">Vuoto · Archivio</span>
+      <b style="font-size: 20px">Non hai ancora nessun episodio</b>
+      <span style="font-size: 15px; color: #3d3f42">Parti da un documento: in pochi passi diventa un podcast con le voci del tuo team.</span>
+    </div>
+    <a href="01-Documento.dc.html" style="display: inline-flex; align-items: center; min-height: 48px; padding: 0 22px; border-radius: 8px; background: #1c1d1f; color: #ffffff; text-decoration: none; font-weight: 600; font-size: 15px">Crea il primo episodio</a>
+  </section>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":1200}}'>
+class Component extends DCLogic {
+  renderVals() {
+    return {};
+  }
+}
+</script>
+</body>
+</html>

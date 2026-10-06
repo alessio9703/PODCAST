@@ -38,6 +38,26 @@ def _normalize(value: str) -> str:
     return " ".join(stripped.lower().replace("_", " ").replace("-", " ").split())
 
 
+#: Parole che nei nomi dei file stanno davanti al nome della persona ("Voce
+#: Alessio Menegatto.m4a") e che non fanno parte del nome.
+_FILENAME_NOISE = {"voce", "registrazione", "audio"}
+
+
+def spoken_name_guess(stem: str) -> tuple[str, bool]:
+    """Il nome come andrebbe pronunciato, ricavato dal nome del file.
+
+    Ritorna (nome, completo). `completo` e' False quando dal file non si ricava
+    un nome E cognome ("Voce Sarah"): in quel caso chi presenta la persona
+    deve CHIEDERE il resto, non inventarlo. E' solo una proposta: l'ordine
+    nome/cognome di un file come "Giardini Margherita" non si puo' dedurre, e
+    la conferma resta all'utente.
+    """
+    words = [w for w in stem.replace("_", " ").split() if w]
+    while words and _normalize(words[0]) in _FILENAME_NOISE:
+        words.pop(0)
+    return " ".join(words), len(words) >= 2
+
+
 class VoiceLibrary:
     def __init__(self, voices_dir: Path, accepted_extensions: list[str]) -> None:
         self.dir = Path(voices_dir)
@@ -146,4 +166,4 @@ class VoiceLibrary:
         return None, candidates
 
 
-__all__ = ["VoiceLibrary", "AvailableVoice", "VoiceLibraryError"]
+__all__ = ["VoiceLibrary", "AvailableVoice", "VoiceLibraryError", "spoken_name_guess"]

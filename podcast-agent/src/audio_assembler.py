@@ -27,6 +27,7 @@ from __future__ import annotations
 import hashlib
 import io
 import json
+import math
 import subprocess
 import wave
 from array import array
@@ -294,6 +295,13 @@ class AudioAssembler:
     #: proprio perche' deve stare sopra il rumore di fondo: e' la differenza
     #: fra "non c'e' segnale" e "non c'e' voce".
     dropout_gap_relative_pct: float = 2.0
+    #: Picco ASSOLUTO minimo (dBFS) sotto il quale l'intero segmento e'
+    #: sospetto, anche senza nessun tratto che si distingua dal resto (vedi
+    #: `peak_level_dbfs`). Caso reale (episodio "Telemedicina in farmacia",
+    #: 28/09/2026, turno 20): picco a -31 dBFS contro un peggiore sano nello
+    #: stesso episodio di -4.3 dBFS. -12 dB e' un margine ampio apposta: sui
+    #: 26 segmenti sani di quell'episodio nessuno scendeva sotto i -4.3 dBFS.
+    dropout_min_peak_db: float = -12.0
 
     # ------------------------------------------------------------------
     # Costruzione
@@ -325,6 +333,7 @@ class AudioAssembler:
             dropout_max_retries=int(audio.get("dropout_max_retries", 2)),
             dropout_max_gap_seconds=float(audio.get("dropout_max_gap_seconds", 8.0)),
             dropout_gap_relative_pct=float(audio.get("dropout_gap_relative_pct", 2.0)),
+            dropout_min_peak_db=float(audio.get("dropout_min_peak_db", -12.0)),
         )
 
     # ------------------------------------------------------------------
@@ -402,6 +411,7 @@ class AudioAssembler:
                         trim_threshold_pct=self.trim_threshold_pct,
                         dropout_max_gap_seconds=self.dropout_max_gap_seconds,
                         dropout_gap_relative_pct=self.dropout_gap_relative_pct,
+                        dropout_min_peak_db=self.dropout_min_peak_db,
                     )
                 except VoiceProviderError as exc:
                     raise AssemblyError(
@@ -852,6 +862,37 @@ def active_speech_seconds(  # type: ignore[no-untyped-def]
     return active_frames * hop / params.framerate
 
 
+def peak_level_dbfs(data: bytes, params) -> float | None:  # type: ignore[no-untyped-def]
+    """Picco assoluto del segmento intero, in dBFS (0 dB = campione a fondo scala).
+
+    A differenza di `active_speech_seconds` e `longest_quiet_gap_seconds`,
+    NON e' relativo al picco del segmento stesso: e' pensato apposta per il
+    caso in cui l'intero segmento, testa/coda comprese, e' anormalmente piano
+    — una soglia relativa a se stesso non lo vedrebbe mai, perche' "il 95esimo
+    percentile del picco" resta alto rispetto a un pavimento che e' basso
+    ovunque. Osservato sul turno 20 dell'episodio "Telemedicina in farmacia"
+    (28/09/2026): il provider ha restituito un file di 45s (atteso ~20s) quasi
+    tutto a circa -31 dBFS di picco, con il parlato vero e proprio sepolto
+    dentro un pavimento di rumore quieto invece che vero silenzio o rumore
+    forte — per questo ne' il controllo sul rapporto (il "parlato" relativo
+    coprivа tutto il segmento) ne' quello sul vuoto (nessun tratto si
+    distingueva dal resto, perche' tutto era altrettanto piano) lo vedevano.
+    Sui 26 segmenti sani dello stesso episodio il picco peggiore era -4.3 dBFS
+    e il migliore -0.3 dBFS: un margine enorme rispetto al segmento difettoso.
+    """
+    if params.sampwidth != 2:
+        return None
+    samples = array("h")
+    samples.frombytes(data)
+    mono = samples[:: params.nchannels] if params.nchannels > 1 else samples
+    if not mono:
+        return None
+    peak = max(abs(v) for v in mono)
+    if peak <= 0:
+        return None
+    return 20 * math.log10(peak / 32767)
+
+
 def _decode_wav_bytes(data: bytes):  # type: ignore[no-untyped-def]
     """Apre un wav dai byte grezzi restituiti dal provider (non ancora su disco)."""
     try:
@@ -908,11 +949,13 @@ class SegmentDefect:
     altro tentativo, poi un warning) e' lo stesso.
     """
 
-    #: "troncato" (il provider ha smesso a meta' frase) oppure "vuoto"
-    #: (il provider ha continuato a generare rumore al posto della voce).
+    #: "troncato" (il provider ha smesso a meta' frase), "vuoto" (il provider
+    #: ha continuato a generare rumore al posto della voce) oppure "sottovoce"
+    #: (il segmento e' interamente troppo piano: sintesi quasi muta).
     kind: str
     ratio: float | None = None
     gap_seconds: float | None = None
+    peak_db: float | None = None
 
     def describe(self) -> str:
         if self.kind == "troncato":
@@ -920,9 +963,15 @@ class SegmentDefect:
                 f"il parlato copre solo il {(self.ratio or 0) * 100:.0f}% del tempo "
                 "di lettura atteso: probabile sintesi troncata a meta' frase"
             )
+        if self.kind == "vuoto":
+            return (
+                f"contiene {self.gap_seconds:.0f}s di vuoto continuo in mezzo al turno: "
+                "il provider ha smesso di parlare lasciando solo rumore di fondo"
+            )
         return (
-            f"contiene {self.gap_seconds:.0f}s di vuoto continuo in mezzo al turno: "
-            "il provider ha smesso di parlare lasciando solo rumore di fondo"
+            f"il picco del segmento e' a {self.peak_db:.1f} dBFS, molto piu' basso "
+            "del parlato normale: probabile sintesi quasi muta per l'intero turno "
+            "(non troncata a meta' frase, ma sussurrata dall'inizio alla fine)"
         )
 
 
@@ -934,18 +983,26 @@ def detect_dropped_audio(
     threshold_pct: float = 1.5,
     max_gap_seconds: float = 8.0,
     gap_relative_pct: float = 2.0,
+    min_peak_db: float | None = -12.0,
 ) -> SegmentDefect | None:
     """Il difetto del segmento, se ce n'e' uno; None se va bene.
 
-    Due controlli indipendenti, perche' il provider sbaglia in due modi che si
-    escludono a vicenda nei sintomi:
+    Tre controlli indipendenti, perche' il provider sbaglia in modi diversi
+    che si escludono a vicenda nei sintomi:
 
       - **troncato**: smette a meta' frase, il parlato totale non copre il
         tempo atteso. Serve `expected_seconds`, quindi un provider che dichiara
         `chars_per_second`;
       - **vuoto**: dice tutto il testo ma con un buco lungo in mezzo, riempito
         di rumore. Il parlato totale torna, quindi il primo controllo non lo
-        vede — e nemmeno il ritaglio, che al rumore non arriva.
+        vede — e nemmeno il ritaglio, che al rumore non arriva;
+      - **sottovoce**: il segmento intero (non solo un tratto) e' anormalmente
+        piano, con il parlato vero sepolto in un pavimento di rumore quieto.
+        I primi due controlli sono entrambi RELATIVI al picco del segmento
+        stesso, quindi non lo vedono: se tutto e' piano allo stesso modo, "il
+        95esimo percentile del picco" resta comunque il riferimento e sembra
+        tutto normale rispetto a se stesso. Questo controllo usa una soglia
+        ASSOLUTA apposta per questo (vedi `peak_level_dbfs`).
 
     None anche quando il segmento non e' controllabile (formato non wav, turno
     troppo corto per essere un segnale affidabile): in nessun caso si blocca la
@@ -965,6 +1022,11 @@ def detect_dropped_audio(
         if gap is not None and gap > max_gap_seconds:
             return SegmentDefect(kind="vuoto", gap_seconds=gap)
 
+    if min_peak_db is not None:
+        peak_db = peak_level_dbfs(frames, params)
+        if peak_db is not None and peak_db < min_peak_db:
+            return SegmentDefect(kind="sottovoce", peak_db=peak_db)
+
     return None
 
 
@@ -979,6 +1041,7 @@ def synthesize_segment(
     trim_threshold_pct: float = 1.5,
     dropout_max_gap_seconds: float = 8.0,
     dropout_gap_relative_pct: float = 2.0,
+    dropout_min_peak_db: float = -12.0,
 ) -> tuple[bytes, "SegmentDefect | None"]:
     """Chiama il provider, RITENTANDO se il risultato sembra una sintesi troncata.
 
@@ -1012,6 +1075,7 @@ def synthesize_segment(
             threshold_pct=trim_threshold_pct,
             max_gap_seconds=dropout_max_gap_seconds if checkable else 0.0,
             gap_relative_pct=dropout_gap_relative_pct,
+            min_peak_db=dropout_min_peak_db if checkable else None,
         )
         if defect is None:
             break

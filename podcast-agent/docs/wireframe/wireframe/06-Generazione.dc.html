@@ -1,0 +1,109 @@
+<!doctype html>
+<html lang="it">
+<head>
+<meta charset="utf-8">
+<title>6 · Generazione</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&amp;family=IBM+Plex+Mono:wght@400;500&amp;display=swap">
+<style>
+body{margin:0}
+a{color:#1c1d1f}a:hover{color:#000}
+</style>
+</helmet>
+<div style="min-height: 100vh; display: flex; flex-wrap: wrap; background: #f5f5f3; font-family: 'IBM Plex Sans', 'Helvetica Neue', sans-serif; color: #1c1d1f">
+  <div style="flex: 1 1 240px; display: flex">
+    <dc-import name="Sidebar" active="nuovo" hint-size="100%,900px"></dc-import>
+  </div>
+  <main style="flex: 999 1 560px; min-width: 0; box-sizing: border-box; padding: 32px 48px 64px; display: flex; flex-direction: column; gap: 28px">
+    <div style="display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px; font-size: 14px; color: #5b5d61">
+      <span>[Titolo episodio] · <b style="color: #8a3714">In generazione</b></span>
+      <span>Puoi chiudere questa pagina: ti avvisiamo quando è pronto</span>
+    </div>
+    <dc-import name="Stepper" step="6" hint-size="100%,78px"></dc-import>
+
+    <div style="display: flex; flex-direction: column; gap: 6px">
+      <h1 style="margin: 0; font-size: 28px; line-height: 36px; font-weight: 700; letter-spacing: -0.02em">Stiamo generando l'episodio</h1>
+      <p style="margin: 0; font-size: 15px; color: #5b5d61">Ogni battuta viene salvata appena pronta. Se qualcosa si interrompe, riprendi da dove si è fermata.</p>
+    </div>
+
+    <section aria-label="Avanzamento" style="display: flex; flex-direction: column; gap: 16px; padding: 24px; background: #ffffff; border: 1px solid #d5d5d1; border-radius: 12px">
+      <div style="display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 8px">
+        <span style="font-size: 18px; font-weight: 700">Sintesi delle battute</span>
+        <span style="font-size: 15px; color: #5b5d61"><b style="color: #1c1d1f">[38]</b> di [64] · ~[m] min rimanenti</span>
+      </div>
+      <div role="progressbar" aria-valuenow="59" aria-valuemin="0" aria-valuemax="100" aria-label="Avanzamento sintesi" style="height: 10px; border-radius: 5px; background: #ececea; overflow: hidden">
+        <div style="width: 59%; height: 100%; background: #a3441a"></div>
+      </div>
+      <div style="display: grid; grid-template-columns: repeat(auto-fill, minmax(22px, 1fr)); gap: 4px" aria-hidden="true">
+        <sc-for list="{{cells}}" as="c" hint-placeholder-count="64"><span style="{{c}}"></span></sc-for>
+      </div>
+      <div style="display: flex; flex-wrap: wrap; gap: 16px; font-size: 13px; color: #5b5d61">
+        <span style="display: flex; align-items: center; gap: 6px"><span style="width: 12px; height: 12px; border-radius: 3px; background: #3d3f42"></span>Pronta</span>
+        <span style="display: flex; align-items: center; gap: 6px"><span style="width: 12px; height: 12px; border-radius: 3px; background: #a3441a"></span>In corso</span>
+        <span style="display: flex; align-items: center; gap: 6px"><span style="width: 12px; height: 12px; border-radius: 3px; border: 1px solid #b9b9b4; box-sizing: border-box"></span>In attesa</span>
+      </div>
+    </section>
+
+    <div style="display: flex; flex-wrap: wrap; align-items: flex-start; gap: 24px">
+      <section style="flex: 999 1 520px; min-width: 0; display: flex; flex-direction: column; background: #ffffff; border: 1px solid #d5d5d1; border-radius: 12px">
+        <h2 style="margin: 0; padding: 20px 24px 8px; font-size: 16px; font-weight: 700">Fasi</h2>
+        <ol style="margin: 0; padding: 0 24px 16px; list-style: none; display: flex; flex-direction: column">
+          <li style="display: flex; align-items: center; gap: 14px; min-height: 56px; border-bottom: 1px solid #ececea">
+            <span style="flex: none; width: 28px; height: 28px; border-radius: 50%; background: #ececea; display: flex; align-items: center; justify-content: center"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#1c1d1f" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12l5 5L20 7"></path></svg></span>
+            <span style="flex: 1">Preparazione voci</span>
+            <span style="font-size: 13px; color: #5b5d61">1 riusata · 2 clonate</span>
+          </li>
+          <li style="display: flex; align-items: center; gap: 14px; min-height: 56px; border-bottom: 1px solid #ececea">
+            <span style="flex: none; width: 28px; height: 28px; border-radius: 50%; background: #a3441a; display: flex; align-items: center; justify-content: center"><span style="width: 8px; height: 8px; border-radius: 50%; background: #ffffff"></span></span>
+            <span style="flex: 1; font-weight: 700">Sintesi delle battute</span>
+            <span style="font-size: 13px; color: #8a3714; font-weight: 600">In corso · battuta [39]</span>
+          </li>
+          <li style="display: flex; align-items: center; gap: 14px; min-height: 56px; border-bottom: 1px solid #ececea">
+            <span style="flex: none; width: 28px; height: 28px; border-radius: 50%; border: 1.5px solid #b9b9b4; box-sizing: border-box"></span>
+            <span style="flex: 1; color: #5b5d61">Montaggio</span>
+          </li>
+          <li style="display: flex; align-items: center; gap: 14px; min-height: 56px; border-bottom: 1px solid #ececea">
+            <span style="flex: none; width: 28px; height: 28px; border-radius: 50%; border: 1.5px solid #b9b9b4; box-sizing: border-box"></span>
+            <span style="flex: 1; color: #5b5d61">Mix con le musiche</span>
+          </li>
+          <li style="display: flex; align-items: center; gap: 14px; min-height: 56px">
+            <span style="flex: none; width: 28px; height: 28px; border-radius: 50%; border: 1.5px solid #b9b9b4; box-sizing: border-box"></span>
+            <span style="flex: 1; color: #5b5d61">Chiusura e archiviazione</span>
+          </li>
+        </ol>
+      </section>
+
+      <aside style="flex: 1 1 320px; min-width: 0; display: flex; flex-direction: column; gap: 16px">
+        <section style="display: flex; flex-direction: column; gap: 10px; padding: 20px; background: #ffffff; border: 1px solid #d5d5d1; border-radius: 12px">
+          <h2 style="margin: 0; font-size: 16px; font-weight: 700">Vuoi fermarti?</h2>
+          <p style="margin: 0; font-size: 14px; line-height: 21px; color: #3d3f42">Le battute già pronte restano salvate. Potrai riprendere dall'Archivio.</p>
+          <button type="button" style="min-height: 44px; border-radius: 8px; border: 1px solid #d5d5d1; background: #ffffff; font: inherit; font-size: 15px; font-weight: 600">Interrompi la generazione</button>
+        </section>
+      </aside>
+    </div>
+
+    <div style="display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px; padding-top: 20px; border-top: 1px solid #d5d5d1">
+      <a href="Main.dc.html" style="display: inline-flex; align-items: center; min-height: 44px; padding: 0 16px; border-radius: 8px; text-decoration: none; font-weight: 600; font-size: 15px">Torna all'archivio</a>
+      <a href="07-Episodio.dc.html" style="display: inline-flex; align-items: center; min-height: 44px; padding: 0 20px; border-radius: 8px; border: 1px solid #d5d5d1; background: #ffffff; text-decoration: none; font-weight: 600; font-size: 15px">Ascolta l'episodio · a fine generazione</a>
+    </div>
+  </main>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":1400}}'>
+class Component extends DCLogic {
+  renderVals() {
+    const base = 'height: 22px; border-radius: 4px; box-sizing: border-box; ';
+    const cells = [];
+    for (let i = 1; i <= 64; i++) {
+      cells.push(base + (i <= 38 ? 'background: #3d3f42' : i === 39 ? 'background: #a3441a' : 'border: 1px solid #b9b9b4'));
+    }
+    return { cells };
+  }
+}
+</script>
+</body>
+</html>

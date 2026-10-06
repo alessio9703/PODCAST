@@ -50,6 +50,14 @@ class ScriptSession:
     #: ritrovata alla revisione, non richiesta a ogni salvataggio.
     script_format: str = "conversazione"
     interviewer: str | None = None
+    #: Presentazione iniziale: `presenter` e' lo speaker (una voce a se', NON uno
+    #: dei partecipanti) che nei primi turni presenta chi prende parte
+    #: all'episodio; `participants` sono i presentati, nella forma
+    #: {"speaker", "nome", "ruolo"} (nome = come viene pronunciato, ruolo = chi
+    #: e' e di cosa si occupa). Restano nella sessione per lo stesso motivo del
+    #: formato: sono scelte dell'utente da ritrovare alla revisione.
+    presenter: str | None = None
+    participants: list[dict[str, str]] = field(default_factory=list)
     #: {"intro": {"name", "sha256"}, "outro": {...}} — solo le categorie con
     #: parlato: true al momento della prima stesura. Serve SOLO al confronto
     #: sha256 di mix_episode() ("il copione era stato scritto per un'altra
@@ -88,6 +96,8 @@ class ScriptSession:
         path: Path,
         script_format: str = "conversazione",
         interviewer: str | None = None,
+        presenter: str | None = None,
+        participants: list[dict[str, str]] | None = None,
         music_context: dict[str, Any] | None = None,
         active_lessons: list[dict[str, str]] | None = None,
     ) -> "ScriptSession":
@@ -99,6 +109,8 @@ class ScriptSession:
             prompt=prompt,
             script_format=script_format,
             interviewer=interviewer,
+            presenter=presenter,
+            participants=list(participants or []),
             music_context=music_context,
             active_lessons=list(active_lessons or []),
             created_at=now,
@@ -138,6 +150,8 @@ class ScriptSession:
             approved=raw.get("approved"),
             script_format=raw.get("script_format", "conversazione"),
             interviewer=raw.get("interviewer"),
+            presenter=raw.get("presenter"),
+            participants=list(raw.get("participants", [])),
             music_context=raw.get("music_context"),
             created_at=raw.get("created_at", ""),
             updated_at=raw.get("updated_at", ""),
@@ -167,6 +181,8 @@ class ScriptSession:
             "prompt": self.prompt,
             "script_format": self.script_format,
             "interviewer": self.interviewer,
+            "presenter": self.presenter,
+            "participants": self.participants,
             "music_context": self.music_context,
             "current_script": self.current_script,
             "active_lessons": self.active_lessons,

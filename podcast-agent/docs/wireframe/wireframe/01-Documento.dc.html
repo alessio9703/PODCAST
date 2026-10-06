@@ -1,0 +1,97 @@
+<!doctype html>
+<html lang="it">
+<head>
+<meta charset="utf-8">
+<title>1 · Documento</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&amp;family=IBM+Plex+Mono:wght@400;500&amp;display=swap">
+<style>
+body{margin:0}
+a{color:#1c1d1f}a:hover{color:#000}
+</style>
+</helmet>
+<div style="min-height: 100vh; display: flex; flex-wrap: wrap; background: #f5f5f3; font-family: 'IBM Plex Sans', 'Helvetica Neue', sans-serif; color: #1c1d1f">
+  <div style="flex: 1 1 240px; display: flex">
+    <dc-import name="Sidebar" active="nuovo" hint-size="100%,900px"></dc-import>
+  </div>
+  <main style="flex: 999 1 560px; min-width: 0; box-sizing: border-box; padding: 32px 48px 64px; display: flex; flex-direction: column; gap: 28px">
+    <div style="display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px; font-size: 14px; color: #5b5d61">
+      <span>Nuovo episodio · <b style="color: #1c1d1f">Bozza</b></span>
+      <span>Bozza salvata automaticamente in Archivio</span>
+    </div>
+    <dc-import name="Stepper" step="1" hint-size="100%,78px"></dc-import>
+
+    <div style="display: flex; flex-direction: column; gap: 6px">
+      <h1 style="margin: 0; font-size: 28px; line-height: 36px; font-weight: 700; letter-spacing: -0.02em">Da quale documento parte l'episodio?</h1>
+      <p style="margin: 0; font-size: 15px; color: #5b5d61">Il testo viene estratto e usato per scrivere il copione.</p>
+    </div>
+
+    <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(min(380px, 100%), 1fr)); gap: 24px">
+      <label style="display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 12px; min-height: 280px; padding: 32px; box-sizing: border-box; background: #ffffff; border: 2px dashed #b9b9b4; border-radius: 12px; text-align: center; cursor: pointer">
+        <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="#5b5d61" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 16V4M7 9l5-5 5 5"></path><path d="M4 16v3a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1v-3"></path></svg>
+        <span style="font-size: 17px; font-weight: 600">Trascina qui il documento</span>
+        <span style="font-size: 14px; color: #5b5d61">PDF, DOCX, TXT o MD</span>
+        <span style="display: inline-flex; align-items: center; min-height: 44px; padding: 0 18px; border-radius: 8px; border: 1px solid #1c1d1f; font-weight: 600; font-size: 15px">Scegli un file</span>
+        <input type="file" accept=".pdf,.docx,.txt,.md" style="position: absolute; width: 1px; height: 1px; opacity: 0">
+      </label>
+
+      <section style="display: flex; flex-direction: column; gap: 12px; padding: 24px; background: #ffffff; border: 1px solid #d5d5d1; border-radius: 12px">
+        <div style="display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 8px"><h2 style="margin: 0; font-size: 16px; font-weight: 600">Oppure scegli tra i documenti caricati</h2><a href="Documenti.dc.html" style="font-size: 14px; font-weight: 600">Vedi tutti</a></div>
+        <div style="display: flex; flex-direction: column">
+          <label style="display: flex; align-items: center; gap: 12px; min-height: 52px; padding: 0 12px; border-radius: 8px; background: #ececea">
+            <input type="radio" name="doc" checked="" style="width: 18px; height: 18px; accent-color: #1c1d1f">
+            <span style="flex: 1; font-weight: 600">[documento-scelto].pdf</span>
+            <span style="font-size: 13px; color: #5b5d61">[gg/mm]</span>
+          </label>
+          <label style="display: flex; align-items: center; gap: 12px; min-height: 52px; padding: 0 12px; border-radius: 8px">
+            <input type="radio" name="doc" style="width: 18px; height: 18px; accent-color: #1c1d1f">
+            <span style="flex: 1">[documento].docx</span>
+            <span style="font-size: 13px; color: #5b5d61">[gg/mm]</span>
+          </label>
+          <label style="display: flex; align-items: center; gap: 12px; min-height: 52px; padding: 0 12px; border-radius: 8px">
+            <input type="radio" name="doc" style="width: 18px; height: 18px; accent-color: #1c1d1f">
+            <span style="flex: 1">[documento].md</span>
+            <span style="font-size: 13px; color: #5b5d61">[gg/mm]</span>
+          </label>
+        </div>
+      </section>
+    </div>
+
+    <section aria-label="Documento estratto" style="display: flex; flex-direction: column; gap: 20px; padding: 24px; background: #ffffff; border: 1px solid #d5d5d1; border-radius: 12px">
+      <div style="display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px">
+        <div style="display: flex; align-items: center; gap: 12px">
+          <div style="width: 44px; height: 52px; border-radius: 6px; background: #ececea; display: flex; align-items: center; justify-content: center; font-size: 11px; font-weight: 700; color: #3d3f42">PDF</div>
+          <div style="display: flex; flex-direction: column; gap: 2px">
+            <div style="font-weight: 600; font-size: 16px">[documento-scelto].pdf</div>
+            <div style="display: flex; flex-wrap: wrap; gap: 16px; font-size: 14px; color: #5b5d61"><span>[n] pagine</span><span>[n] parole</span><span style="color: #245a2e; font-weight: 600">Testo estratto</span></div>
+          </div>
+        </div>
+        <button type="button" style="min-height: 44px; padding: 0 16px; border-radius: 8px; border: 1px solid #d5d5d1; background: #ffffff; font: inherit; font-size: 14px; font-weight: 600">Sostituisci</button>
+      </div>
+      <div style="display: flex; flex-direction: column; gap: 8px; max-width: 560px">
+        <label for="titolo" style="font-size: 14px; font-weight: 600">Titolo dell'episodio</label>
+        <input id="titolo" type="text" value="[Titolo proposto dal documento]" style="min-height: 44px; padding: 0 14px; border: 1px solid #b9b9b4; border-radius: 8px; font: inherit; font-size: 15px">
+        <span style="font-size: 13px; color: #5b5d61">Lo usiamo per l'archivio e per il nome del file mp3. Puoi cambiarlo quando vuoi.</span>
+      </div>
+    </section>
+
+    <div style="display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px; padding-top: 20px; border-top: 1px solid #d5d5d1">
+      <a href="Main.dc.html" style="display: inline-flex; align-items: center; min-height: 44px; padding: 0 16px; border-radius: 8px; text-decoration: none; font-weight: 600; font-size: 15px">Annulla</a>
+      <a href="02-Cast.dc.html" style="display: inline-flex; align-items: center; gap: 8px; min-height: 44px; padding: 0 20px; border-radius: 8px; background: #1c1d1f; color: #ffffff; text-decoration: none; font-weight: 600; font-size: 15px">Avanti: cast e formato</a>
+    </div>
+  </main>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":1300}}'>
+class Component extends DCLogic {
+  renderVals() {
+    return {};
+  }
+}
+</script>
+</body>
+</html>

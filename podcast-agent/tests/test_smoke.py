@@ -406,6 +406,67 @@ def main() -> None:
     check("e il difetto viene riportato invece di essere accettato in silenzio",
           difetto is not None and "vuoto continuo" in difetto.describe(), f"{difetto}")
 
+    # ------------------------------------------------------------------
+    print("\n[11] Sintesi sottovoce (livello anomalo per l'intero turno)")
+    # Riproduce il turno 20 dell'episodio "Telemedicina in farmacia"
+    # (28/09/2026): il provider non tronca la frase e non lascia un buco
+    # rumoroso in mezzo, ma restituisce l'INTERO segmento a un livello
+    # anormalmente basso (picco reale ~-31 dBFS, contro i -4.3 dBFS peggiori
+    # misurati sui segmenti sani dello stesso episodio). I due controlli sopra
+    # sono entrambi relativi al picco del SEGMENTO STESSO, quindi non lo
+    # vedono: se tutto e' piano allo stesso modo, il 95esimo percentile del
+    # picco resta comunque "il riferimento" e sembra tutto normale.
+    normale, piano = 12000, 700  # ampiezze; 700 ~ -33 dBFS, come il caso reale
+
+    sottovoce = pcm((2000, piano))
+    sano_piano_ma_ok = pcm((2000, normale))
+    atteso_sottovoce = 2.0  # il parlato (relativo a se stesso) c'e' tutto
+
+    check("i controlli su rapporto e vuoto NON vedono il livello anomalo",
+          detect_dropped_audio(wav_bytes(sottovoce), atteso_sottovoce,
+                               min_peak_db=None) is None,
+          "se lo vedessero, il difetto reale non sarebbe mai sfuggito")
+
+    difetto_sottovoce = detect_dropped_audio(wav_bytes(sottovoce), atteso_sottovoce)
+    check("il controllo sul picco assoluto lo rileva",
+          difetto_sottovoce is not None and difetto_sottovoce.kind == "sottovoce",
+          f"{difetto_sottovoce}")
+    check("e riporta un picco vicino al caso reale (~-33 dBFS)",
+          difetto_sottovoce is not None and -36 <= (difetto_sottovoce.peak_db or 0) <= -30,
+          f"{difetto_sottovoce.peak_db if difetto_sottovoce else None} dBFS")
+
+    check("un segmento piano ma sopra soglia non viene segnalato",
+          detect_dropped_audio(wav_bytes(sano_piano_ma_ok), atteso_sottovoce) is None)
+
+    class ProviderSottovoce:
+        name, audio_format, chars_per_second = "sottovoce", "wav", 14.5
+
+        def __init__(self):
+            self.chiamate = 0
+
+        def text_to_speech(self, text, voice_id):
+            self.chiamate += 1
+            guasto = self.chiamate == 1
+            return wav_bytes(pcm((2000, piano if guasto else normale)))
+
+    provider_sottovoce = ProviderSottovoce()
+    audio, difetto = synthesize_segment(provider_sottovoce, "una battuta qualsiasi", "v1")
+    check("un segmento sottovoce fa scattare un secondo tentativo",
+          provider_sottovoce.chiamate == 2, f"{provider_sottovoce.chiamate} chiamate")
+    check("e il segmento accettato e' quello a livello normale",
+          difetto is None, f"{difetto}")
+
+    sempre_piano = ProviderSottovoce()
+    sempre_piano.text_to_speech = lambda text, voice_id: (
+        setattr(sempre_piano, "chiamate", sempre_piano.chiamate + 1)
+        or wav_bytes(pcm((2000, piano)))
+    )
+    _, difetto = synthesize_segment(sempre_piano, "battuta", "v1", dropout_max_retries=2)
+    check("se resta sottovoce si ferma dopo i tentativi previsti",
+          sempre_piano.chiamate == 3, f"{sempre_piano.chiamate} chiamate")
+    check("e il difetto viene riportato invece di essere accettato in silenzio",
+          difetto is not None and "sintesi quasi muta" in difetto.describe(), f"{difetto}")
+
     print(f"\n{len(PASSED)} controlli superati.")
     print(f"Artefatti del test in: {root}")
 

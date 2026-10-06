@@ -22,6 +22,7 @@ from __future__ import annotations
 import argparse
 import json
 import re
+import unicodedata
 from pathlib import Path
 from typing import Any
 
@@ -104,11 +105,93 @@ _ACCENTO_APOSTROFO = re.compile(
 )
 
 
+def _fold(value: str) -> str:
+    """Minuscole, senza accenti ne' punteggiatura: solo per cercare un nome nel testo."""
+    decomposed = unicodedata.normalize("NFKD", value)
+    stripped = "".join(ch for ch in decomposed if not unicodedata.combining(ch))
+    return " ".join(re.sub(r"[^\w\s]", " ", stripped.lower()).split())
+
+
+def parse_participant(spec: str) -> dict[str, str]:
+    """"Speaker|Nome pronunciato|Ruolo" -> {"speaker", "nome", "ruolo"}."""
+    parts = [p.strip() for p in spec.split("|")]
+    if len(parts) != 3 or not all(parts):
+        raise ValueError(
+            f"--participant '{spec}' non e' nella forma "
+            '"Speaker|Nome Cognome pronunciato|Chi e\' e di cosa si occupa". '
+            "Se manca un pezzo, chiedilo all'utente invece di inventarlo."
+        )
+    return {"speaker": parts[0], "nome": parts[1], "ruolo": parts[2]}
+
+
+def _check_presentation(
+    turni: list[Any],
+    presenter: str,
+    participants: list[dict[str, str]],
+    speakers: list[str],
+) -> list[str]:
+    """Errori BLOCCANTI sulla presentazione iniziale.
+
+    Sono errori e non avvisi perche' la presentazione e' un requisito esplicito
+    (nome e cognome di tutti, detti all'inizio), non una scelta di stile: un
+    copione che la omette o la mette a meta' non e' quello che l'utente ha chiesto.
+    """
+    errors: list[str] = []
+    dialogue = [s for s in speakers if s != presenter]
+    by_speaker = {p["speaker"]: p for p in participants}
+
+    for speaker in dialogue:
+        if speaker not in by_speaker:
+            errors.append(
+                f"Manca nome pronunciato e ruolo di '{speaker}' (--participant): "
+                "chiedili all'utente, non inventarli."
+            )
+    for speaker in by_speaker:
+        if speaker not in dialogue:
+            errors.append(
+                f"--participant '{speaker}' non e' fra gli speaker del dialogo "
+                f"({', '.join(dialogue)}): il presentatore non si presenta da solo."
+            )
+
+    # Il presentatore parla SOLO all'inizio: i suoi turni sono un blocco
+    # contiguo che apre l'episodio.
+    names = [t.get("speaker", "").strip() if isinstance(t, dict) else "" for t in turni]
+    if not names or names[0] != presenter:
+        errors.append(
+            f"Il copione deve aprire con la presentazione: il primo turno e' di "
+            f"'{presenter}' (voce di presentazione)."
+        )
+        return errors
+    end = 0
+    while end < len(names) and names[end] == presenter:
+        end += 1
+    if presenter in names[end:]:
+        errors.append(
+            f"'{presenter}' e' la voce di presentazione: parla solo nei turni "
+            f"iniziali (1-{end}), non piu' avanti nell'episodio."
+        )
+    if end == len(names):
+        errors.append("Dopo la presentazione manca il dialogo: tutti i turni sono del presentatore.")
+
+    spoken = _fold(" ".join(
+        t.get("testo", "") for t in turni[:end] if isinstance(t, dict) and isinstance(t.get("testo"), str)
+    ))
+    for person in participants:
+        if _fold(person["nome"]) not in spoken:
+            errors.append(
+                f"La presentazione non nomina '{person['nome']}' per nome e cognome "
+                "(deve dirlo esattamente cosi', nei turni iniziali del presentatore)."
+            )
+    return errors
+
+
 def _validate(
     payload: Any,
     speakers: list[str],
     script_format: str = "conversazione",
     interviewer: str | None = None,
+    presenter: str | None = None,
+    participants: list[dict[str, str]] | None = None,
 ) -> tuple[list[str], list[str]]:
     """Ritorna (errori bloccanti, avvisi).
 
@@ -230,12 +313,20 @@ def _validate(
     if silent:
         errors.append("Questi speaker selezionati non hanno nessuna battuta: " + ", ".join(silent))
 
-    warnings.extend(_check_format(payload["turni"], script_format, interviewer))
+    if presenter:
+        errors.extend(
+            _check_presentation(payload["turni"], presenter, participants or [], speakers)
+        )
+
+    warnings.extend(_check_format(payload["turni"], script_format, interviewer, presenter))
     return errors, warnings
 
 
 def _check_format(
-    turni: list[Any], script_format: str, interviewer: str | None
+    turni: list[Any],
+    script_format: str,
+    interviewer: str | None,
+    presenter: str | None = None,
 ) -> list[str]:
     """Controlla che il formato dichiarato sia rispettato.
 
@@ -256,6 +347,9 @@ def _check_format(
         testo = turn.get("testo")
         if not isinstance(speaker, str) or not isinstance(testo, str):
             continue
+
+        if presenter and speaker.strip() == presenter:
+            continue  # la voce di presentazione non e' ne' intervistatore ne' intervistato
 
         if speaker.strip() == interviewer:
             if not _DOMANDA.search(testo):
@@ -342,6 +436,20 @@ def main() -> None:
         default=None,
         help="Con --format intervista: quale speaker fa le domande",
     )
+    parser.add_argument(
+        "--presenter",
+        default=None,
+        help="Voce di presentazione: terzo speaker, parla solo all'inizio e "
+        "presenta chi prende parte. Va incluso anche in --speakers.",
+    )
+    parser.add_argument(
+        "--participant",
+        action="append",
+        default=[],
+        metavar='"SPEAKER|NOME COGNOME|RUOLO"',
+        help="Chi viene presentato (ripetibile, uno per speaker del dialogo): "
+        "nome come va pronunciato e chi e' / di cosa si occupa",
+    )
     add_config_arg(parser)
     args = parser.parse_args()
 
@@ -386,6 +494,25 @@ def main() -> None:
     if args.interviewer:
         session.interviewer = args.interviewer
 
+    if args.presenter:
+        session.presenter = args.presenter
+    for spec in args.participant:
+        person = parse_participant(spec)
+        session.participants = [
+            p for p in session.participants if p.get("speaker") != person["speaker"]
+        ] + [person]
+    if session.presenter:
+        if session.presenter not in args.speakers:
+            raise ValueError(
+                f"Il presentatore '{session.presenter}' non e' fra gli speaker "
+                f"({', '.join(args.speakers)}): includilo in --speakers."
+            )
+        if session.presenter == session.interviewer:
+            raise ValueError(
+                "La voce di presentazione deve essere una terza voce, diversa "
+                "dall'intervistatore."
+            )
+
     if session.script_format not in FORMATS:
         raise ValueError(
             f"Formato '{session.script_format}' sconosciuto. Valori ammessi: "
@@ -404,7 +531,12 @@ def main() -> None:
             )
 
     errors, warnings = _validate(
-        payload, args.speakers, session.script_format, session.interviewer
+        payload,
+        args.speakers,
+        session.script_format,
+        session.interviewer,
+        session.presenter,
+        session.participants,
     )
     if errors:
         raise ValueError(
@@ -435,6 +567,8 @@ def main() -> None:
             "speakers": script.speakers,
             "format": session.script_format,
             "interviewer": session.interviewer,
+            "presenter": session.presenter,
+            "participants": session.participants,
             "turn_count": len(script.turni),
             "chars": script.total_chars,
             "words": script.total_words,

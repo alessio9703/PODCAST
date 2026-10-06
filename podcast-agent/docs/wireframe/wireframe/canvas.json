@@ -1,0 +1,304 @@
+{
+  "v": 3,
+  "attachments": {},
+  "boards": {
+    "01-Documento.dc.html": {
+      "expand": "fill",
+      "h": 1300,
+      "is_interactive": true,
+      "title": "1 · Documento",
+      "w": 1440,
+      "x": 1520,
+      "y": 1580
+    },
+    "02-Cast.dc.html": {
+      "expand": "fill",
+      "h": 1358,
+      "is_interactive": true,
+      "title": "2 · Cast e formato",
+      "w": 1440,
+      "x": 3040,
+      "y": 1580
+    },
+    "03-Musiche.dc.html": {
+      "expand": "fill",
+      "h": 1300,
+      "is_interactive": true,
+      "title": "3 · Musiche",
+      "w": 1440,
+      "x": 4560,
+      "y": 1580
+    },
+    "04-Copione.dc.html": {
+      "expand": "fill",
+      "h": 1400,
+      "is_interactive": true,
+      "title": "4 · Copione",
+      "w": 1440,
+      "x": 0,
+      "y": 3700
+    },
+    "05-Conferma.dc.html": {
+      "expand": "fill",
+      "h": 1400,
+      "is_interactive": true,
+      "title": "5 · Stima e consenso",
+      "w": 1440,
+      "x": 1520,
+      "y": 3700
+    },
+    "06-Generazione.dc.html": {
+      "expand": "fill",
+      "h": 1400,
+      "is_interactive": true,
+      "title": "6 · Generazione",
+      "w": 1440,
+      "x": 3040,
+      "y": 3700
+    },
+    "07-Episodio.dc.html": {
+      "expand": "fill",
+      "h": 1629,
+      "is_interactive": true,
+      "title": "7 · Episodio e correzioni",
+      "w": 1440,
+      "x": 4560,
+      "y": 3700
+    },
+    "Confronto.dc.html": {
+      "h": 1000,
+      "title": "4 · Confronto versioni (pannello)",
+      "w": 900,
+      "x": 6080,
+      "y": 3700
+    },
+    "Documenti.dc.html": {
+      "expand": "fill",
+      "h": 1300,
+      "is_interactive": true,
+      "title": "Documenti",
+      "w": 1440,
+      "x": 6080,
+      "y": 1580
+    },
+    "Flusso.dc.html": {
+      "h": 1200,
+      "title": "Mappa del flusso",
+      "w": 1440,
+      "x": 0,
+      "y": 0
+    },
+    "Main.dc.html": {
+      "expand": "fill",
+      "h": 1300,
+      "is_interactive": true,
+      "title": "Archivio",
+      "w": 1440,
+      "x": 0,
+      "y": 1580
+    },
+    "Musiche.dc.html": {
+      "expand": "fill",
+      "h": 1300,
+      "is_interactive": true,
+      "title": "Musiche",
+      "w": 1440,
+      "x": 9120,
+      "y": 1580
+    },
+    "Sidebar.dc.html": {
+      "h": 900,
+      "title": "Componente · Menu",
+      "w": 240,
+      "x": 3040,
+      "y": 0
+    },
+    "Stati.dc.html": {
+      "h": 1200,
+      "title": "Stati e messaggi (exit code)",
+      "w": 1440,
+      "x": 1520,
+      "y": 0
+    },
+    "Stepper.dc.html": {
+      "h": 96,
+      "title": "Componente · Stepper",
+      "w": 1120,
+      "x": 3360,
+      "y": 0
+    },
+    "Voci.dc.html": {
+      "expand": "fill",
+      "h": 1300,
+      "is_interactive": true,
+      "title": "Voci",
+      "w": 1440,
+      "x": 7600,
+      "y": 1580
+    }
+  },
+  "createdOnFiles": {
+    "at": "2026-10-05T10:00:00Z",
+    "v": 1
+  },
+  "designSystems": [],
+  "launch": {
+    "view": "canvas"
+  },
+  "notes": {
+    "n0": {
+      "fill": "blue",
+      "maxH": 360,
+      "text": "Archivio = home. Ogni episodio mostra lo stato e una sola azione successiva (Riprendi, Approva, Ascolta). Le bozze compaiono qui appena si carica un documento.",
+      "w": 600,
+      "x": 0,
+      "y": 2920
+    },
+    "n1": {
+      "fill": "blue",
+      "maxH": 360,
+      "text": "Comandi: doc_extract, run_init (automatico). Il titolo dell'episodio è proposto dal documento e resta modificabile. PDF scansionato o protetto: errore correggibile (vedi Stati, codice 1).",
+      "w": 600,
+      "x": 1520,
+      "y": 2920
+    },
+    "n10": {
+      "fill": "blue",
+      "maxH": 360,
+      "text": "Libreria Voci (voices_list, voices_registry.json). Per ogni persona: campione, stato di clonazione, consenso, episodi in cui è usata. «Aggiungi una voce» apre il pannello a destra (chiudibile in Play) con i consigli di registrazione e la conferma del consenso. Caricare una voce non la clona: la clonazione avviene al primo episodio, dopo la stima.",
+      "w": 600,
+      "x": 7600,
+      "y": 2920
+    },
+    "n11": {
+      "fill": "blue",
+      "maxH": 360,
+      "text": "Libreria Musiche (music_list). Per ogni brano: durata, presenza di parlato, licenza, episodi che lo usano. Ogni riga ha «Dettagli» (in Play si aprono e chiudono): trascrizione del parlato e licenza. Se la licenza manca, il modulo per aggiungerla è dentro i dettagli. La licenza mancante è segnalata, non bloccata.",
+      "w": 600,
+      "x": 9120,
+      "y": 2920
+    },
+    "n2": {
+      "fill": "blue",
+      "maxH": 360,
+      "text": "Comandi: voices_list. Le voci si scelgono da card con anteprima audio: niente nomi ambigui. Nome e cognome da pronunciare sono obbligatori, mai indovinati. Le voci «da clonare» sono segnalate già qui; il consenso si conferma al passo 5.",
+      "w": 600,
+      "x": 3040,
+      "y": 2981
+    },
+    "n3": {
+      "fill": "blue",
+      "maxH": 360,
+      "text": "Comandi: music_list, music_set. Passo facoltativo. La licenza mancante è un avviso, non un blocco. La mini-timeline mostra subito la struttura dell'episodio.",
+      "w": 600,
+      "x": 4560,
+      "y": 2920
+    },
+    "n4": {
+      "fill": "blue",
+      "maxH": 360,
+      "text": "Comandi: script_write, script_revise, script_save, script_approve. Il copione si scrive da solo entrando nel passo. «Approva» è il primo punto di non ritorno: vale sul testo letto e decade se il testo cambia.",
+      "w": 600,
+      "x": 0,
+      "y": 5140
+    },
+    "n5": {
+      "fill": "blue",
+      "maxH": 360,
+      "text": "Comandi: estimate, poi voices_prepare. Proposta per lo sviluppo: stima prima della clonazione. Il pulsante «Genera l'episodio» resta disattivato finché ogni consenso non è spuntato (provalo in Play).",
+      "w": 600,
+      "x": 1520,
+      "y": 5140
+    },
+    "n6": {
+      "fill": "blue",
+      "maxH": 360,
+      "text": "Comandi: voices_prepare, synthesize, run_finalize. Richiede l'avanzamento in tempo reale lato backend. La pagina si può chiudere: l'episodio resta in Archivio. Interruzione e blocco del provider: vedi Stati.",
+      "w": 600,
+      "x": 3040,
+      "y": 5140
+    },
+    "n7": {
+      "fill": "blue",
+      "maxH": 360,
+      "text": "Comandi: turn_at, retake, music_set, mix. Clic su forma d'onda o trascrizione → battuta. Percorso testo: torna al copione con nuova approvazione. Percorso resa: costo stimato, N take ascoltati in contesto, sceglie l'utente. Rimontaggio senza nuove sintesi. Interattività completa in fase 2.",
+      "w": 600,
+      "x": 4560,
+      "y": 5367
+    },
+    "n8": {
+      "fill": "blue",
+      "maxH": 360,
+      "text": "Libreria Documenti, raggiungibile dal menu e da «Vedi tutti» al passo 1. Da ogni documento si crea un episodio (si entra al passo 1 con il documento già scelto) o si vedono gli episodi che lo usano. I documenti con testo non estraibile si sostituiscono da qui. Eliminare un documento non tocca gli episodi: run_finalize ne conserva una copia.",
+      "w": 600,
+      "x": 6080,
+      "y": 2920
+    },
+    "n9": {
+      "fill": "blue",
+      "maxH": 360,
+      "text": "Pannello di confronto: si apre al posto delle battute da «Confronta con v2» o da «Confronta» nelle Versioni (provalo in Play sul passo 4). Mostra cosa è cambiato e la richiesta che ha creato la versione. «Ripristina» crea una nuova versione, che va riapprovata. Dati: storico in _script_session.json.",
+      "w": 600,
+      "x": 6080,
+      "y": 4780
+    },
+    "nf": {
+      "fill": "orange",
+      "maxH": 520,
+      "size": 24,
+      "text": "Cosa cambia rispetto al flusso dell'agente\n\n• Formato, voci, presentatore e partecipanti: un'unica schermata «Cast e formato». Il formato viene prima perché decide i ruoli.\n• «Cartella episodio» (run_init) sparisce come passo: la bozza si crea da sola al caricamento del documento e compare in Archivio.\n• Musiche: passo facoltativo, con «Salta».\n• Stima prima della clonazione: un'unica conferma copre consenso, clonazione e sintesi.\n• Stepper unico in 7 passi, senza raggruppamento per fasi.\n• Player e post-produzione nella stessa schermata dell'episodio.\n• Lezioni, impostazioni e diagnostica in «Avanzate» (fase 3).",
+      "w": 600,
+      "x": -680,
+      "y": 0
+    },
+    "t0": {
+      "kind": "title1",
+      "maxW": 4480,
+      "text": "Mappa del flusso, stati e componenti",
+      "w": 240,
+      "x": 0,
+      "y": -300
+    },
+    "t1": {
+      "kind": "title1",
+      "maxW": 8000,
+      "text": "MVP · Archivio e preparazione",
+      "w": 240,
+      "x": 0,
+      "y": 1320
+    },
+    "t2": {
+      "kind": "title1",
+      "maxW": 6980,
+      "text": "MVP · Copione, produzione, episodio",
+      "w": 240,
+      "x": 0,
+      "y": 3440
+    }
+  },
+  "order": [
+    "Flusso.dc.html",
+    "Stati.dc.html",
+    "Sidebar.dc.html",
+    "Stepper.dc.html",
+    "Main.dc.html",
+    "01-Documento.dc.html",
+    "02-Cast.dc.html",
+    "03-Musiche.dc.html",
+    "04-Copione.dc.html",
+    "05-Conferma.dc.html",
+    "06-Generazione.dc.html",
+    "07-Episodio.dc.html",
+    "Documenti.dc.html",
+    "Confronto.dc.html",
+    "Voci.dc.html",
+    "Musiche.dc.html"
+  ],
+  "pages": [
+    {
+      "id": "page-1",
+      "name": "Wireframe"
+    }
+  ],
+  "title": "LIL Podcast · Wireframe"
+}

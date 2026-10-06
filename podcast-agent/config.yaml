@@ -164,6 +164,18 @@ audio:
   # lungo di un segmento SANO era 5,4s, quello del difettoso 36,1s. Se lo
   # abbassi sotto 6 inizi a pagare ritentativi su turni che vanno bene.
   dropout_max_gap_seconds: 8.0
+  # Picco ASSOLUTO minimo (dBFS) sotto il quale un segmento intero e' sospetto,
+  # anche senza nessun tratto che si distingua dal resto. dropout_min_ratio e
+  # dropout_max_gap_seconds sono entrambi RELATIVI al picco del segmento
+  # stesso: se il provider restituisce un turno anormalmente piano DALL'INIZIO
+  # ALLA FINE (non troncato, non con un buco rumoroso in mezzo, solo tutto
+  # sussurrato), "il 95esimo percentile del picco" del segmento resta comunque
+  # il riferimento e nessuno dei due controlli se ne accorge. Caso reale
+  # (episodio "Telemedicina in farmacia", 28/09/2026, turno 20): file di 45s
+  # per un testo che ne prevedeva ~20, quasi tutto a circa -31 dBFS di picco.
+  # -12 e' MISURATO largo apposta: sui 26 segmenti sani di quello stesso
+  # episodio il picco peggiore era -4.3 dBFS, il migliore -0.3 dBFS.
+  dropout_min_peak_db: -12.0
   # Soglia del vuoto, in percentuale del picco MASSIMO del segmento. E'
   # relativa al picco, e non al 95esimo percentile come trim_threshold_pct,
   # proprio perche' deve cadere SOPRA il rumore di fondo: qui la domanda non

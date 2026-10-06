@@ -1,0 +1,165 @@
+<!doctype html>
+<html lang="it">
+<head>
+<meta charset="utf-8">
+<title>3 · Musiche</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&amp;family=IBM+Plex+Mono:wght@400;500&amp;display=swap">
+<style>
+body{margin:0}
+a{color:#1c1d1f}a:hover{color:#000}
+</style>
+</helmet>
+<div style="min-height: 100vh; display: flex; flex-wrap: wrap; background: #f5f5f3; font-family: 'IBM Plex Sans', 'Helvetica Neue', sans-serif; color: #1c1d1f">
+  <div style="flex: 1 1 240px; display: flex">
+    <dc-import name="Sidebar" active="nuovo" hint-size="100%,900px"></dc-import>
+  </div>
+  <main style="flex: 999 1 560px; min-width: 0; box-sizing: border-box; padding: 32px 48px 64px; display: flex; flex-direction: column; gap: 28px">
+    <div style="display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px; font-size: 14px; color: #5b5d61">
+      <span>[Titolo episodio] · <b style="color: #1c1d1f">Bozza</b></span>
+      <span>Bozza salvata automaticamente in Archivio</span>
+    </div>
+    <dc-import name="Stepper" step="3" hint-size="100%,78px"></dc-import>
+
+    <div style="display: flex; flex-wrap: wrap; align-items: flex-end; justify-content: space-between; gap: 16px">
+      <div style="display: flex; flex-direction: column; gap: 6px">
+        <h1 style="margin: 0; font-size: 28px; line-height: 36px; font-weight: 700; letter-spacing: -0.02em; position: relative">Vuoi aggiungere delle musiche?</h1>
+        <p style="margin: 0; font-size: 15px; color: #5b5d61">Facoltativo. Puoi cambiarle anche a episodio montato.</p>
+      </div>
+      <span style="display: inline-flex; align-items: center; min-height: 28px; padding: 0 12px; border-radius: 999px; background: #ececea; font-size: 13px; font-weight: 600; color: #3d3f42">Passo facoltativo</span>
+    </div>
+
+    <section aria-label="Struttura dell'episodio" style="display: flex; flex-direction: column; gap: 14px; padding: 20px 24px; background: #ffffff; border: 1px solid #d5d5d1; border-radius: 12px">
+      <div style="display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 8px">
+        <span style="font-size: 14px; font-weight: 600">Struttura dell'episodio</span>
+        <span style="font-size: 13px; color: #5b5d61">Si aggiorna mentre scegli i brani</span>
+      </div>
+      <div style="display: flex; gap: 16px; align-items: stretch">
+        <div style="flex: none; width: 64px; display: flex; flex-direction: column; gap: 6px; font-size: 13px; font-weight: 600; color: #5b5d61">
+          <span style="height: 40px; display: flex; align-items: center">Voci</span>
+          <span style="height: 40px; display: flex; align-items: center">Musica</span>
+        </div>
+        <div style="flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 6px">
+          <div style="{{grid}}">
+            <sc-if value="{{intro}}" hint-placeholder-val="{{ true }}"><div style="height: 40px"></div></sc-if>
+            <div style="height: 40px; border-radius: 6px; background: #3d3f42; color: #ffffff; display: flex; align-items: center; justify-content: center; font-size: 13px; font-weight: 600">Parlato · ~15:00</div>
+            <sc-if value="{{outro}}" hint-placeholder-val="{{ true }}"><div style="height: 40px"></div></sc-if>
+          </div>
+          <div style="{{grid}}">
+            <sc-if value="{{intro}}" hint-placeholder-val="{{ true }}"><div style="height: 40px; border-radius: 6px; background: #1d4c85; color: #ffffff; display: flex; align-items: center; justify-content: center; font-size: 13px; font-weight: 600">Intro · 0:12</div></sc-if>
+            <sc-if value="{{bg}}" hint-placeholder-val="{{ true }}"><div style="height: 40px; border-radius: 6px; background: repeating-linear-gradient(135deg, #dce6f3 0 8px, #e9eff8 8px 16px); color: #1d4c85; display: flex; align-items: center; justify-content: center; font-size: 13px; font-weight: 600">Sottofondo a volume basso, sotto le voci</div></sc-if>
+            <sc-if value="{{noBg}}" hint-placeholder-val="{{ false }}"><div style="height: 40px; border-radius: 6px; border: 1px dashed #b9b9b4; box-sizing: border-box; color: #5b5d61; display: flex; align-items: center; justify-content: center; font-size: 13px">Nessun sottofondo</div></sc-if>
+            <sc-if value="{{outro}}" hint-placeholder-val="{{ true }}"><div style="height: 40px; border-radius: 6px; background: #1d4c85; color: #ffffff; display: flex; align-items: center; justify-content: center; font-size: 13px; font-weight: 600">Outro · 0:18</div></sc-if>
+          </div>
+        </div>
+      </div>
+      <div style="display: flex; flex-wrap: wrap; justify-content: space-between; gap: 8px; font-size: 13px; color: #5b5d61"><span>{{summary}}</span><span>Durata totale indicativa <b style="color: #1c1d1f">{{total}}</b></span></div>
+    </section>
+
+    <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(min(320px, 100%), 1fr)); gap: 16px">
+      <section style="display: flex; flex-direction: column; gap: 14px; padding: 20px; background: #ffffff; border: 1px solid #d5d5d1; border-radius: 12px">
+        <h2 style="margin: 0; font-size: 16px; font-weight: 700">Intro</h2>
+        <label style="display: flex; flex-direction: column; gap: 6px; font-size: 14px; font-weight: 600">Brano
+          <select onChange="{{set_intro}}" value="{{v_intro}}" style="min-height: 44px; padding: 0 12px; border: 1px solid #b9b9b4; border-radius: 8px; font: inherit; font-size: 15px; font-weight: 400; background: #ffffff"><option value="on">[Brano intro]</option><option value="off">Nessuna musica</option></select>
+        </label>
+        <sc-if value="{{intro}}" hint-placeholder-val="{{ true }}">
+        <div style="display: flex; align-items: center; gap: 12px">
+          <button type="button" aria-label="Ascolta l'anteprima" style="flex: none; width: 44px; height: 44px; border-radius: 50%; border: 1px solid #b9b9b4; background: #ffffff; display: flex; align-items: center; justify-content: center"><svg width="14" height="14" viewBox="0 0 24 24" fill="#1c1d1f" aria-hidden="true"><path d="M7 4l13 8-13 8z"></path></svg></button>
+          <div style="flex: 1; height: 6px; border-radius: 3px; background: #ececea"></div>
+          <span style="font-size: 13px; color: #5b5d61">[0:12]</span>
+        </div>
+        <div style="display: flex; flex-wrap: wrap; gap: 8px">
+          <span style="display: inline-flex; align-items: center; min-height: 26px; padding: 0 10px; border-radius: 999px; background: #e3f1e5; color: #245a2e; font-size: 13px; font-weight: 600">Licenza ok</span>
+          <span style="display: inline-flex; align-items: center; min-height: 26px; padding: 0 10px; border-radius: 999px; background: #ececea; color: #3d3f42; font-size: 13px; font-weight: 600">Solo strumentale</span>
+        </div>
+        </sc-if>
+        <sc-if value="{{no_intro}}" hint-placeholder-val="{{ false }}">
+          <p style="margin: 0; font-size: 14px; color: #5b5d61">Nessuna musica in questa sezione.</p>
+        </sc-if>
+      </section>
+
+      <section style="display: flex; flex-direction: column; gap: 14px; padding: 20px; background: #ffffff; border: 1px solid #d5d5d1; border-radius: 12px">
+        <h2 style="margin: 0; font-size: 16px; font-weight: 700">Sottofondo</h2>
+        <label style="display: flex; flex-direction: column; gap: 6px; font-size: 14px; font-weight: 600">Brano
+          <select onChange="{{set_bg}}" value="{{v_bg}}" style="min-height: 44px; padding: 0 12px; border: 1px solid #b9b9b4; border-radius: 8px; font: inherit; font-size: 15px; font-weight: 400; background: #ffffff"><option value="on">[Brano sottofondo]</option><option value="off">Nessuna musica</option></select>
+        </label>
+        <sc-if value="{{bg}}" hint-placeholder-val="{{ true }}">
+        <div style="display: flex; align-items: center; gap: 12px">
+          <button type="button" aria-label="Ascolta l'anteprima" style="flex: none; width: 44px; height: 44px; border-radius: 50%; border: 1px solid #b9b9b4; background: #ffffff; display: flex; align-items: center; justify-content: center"><svg width="14" height="14" viewBox="0 0 24 24" fill="#1c1d1f" aria-hidden="true"><path d="M7 4l13 8-13 8z"></path></svg></button>
+          <div style="flex: 1; height: 6px; border-radius: 3px; background: #ececea"></div>
+          <span style="font-size: 13px; color: #5b5d61">[2:40] · in loop</span>
+        </div>
+        <div style="display: flex; flex-wrap: wrap; gap: 8px">
+          <span style="display: inline-flex; align-items: center; gap: 6px; min-height: 26px; padding: 0 10px; border-radius: 999px; background: #fdf3d3; color: #6b5000; font-size: 13px; font-weight: 600"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" aria-hidden="true"><path d="M12 3l10 18H2z"></path><path d="M12 10v5M12 18v.5"></path></svg>Licenza mancante</span>
+          <span style="display: inline-flex; align-items: center; min-height: 26px; padding: 0 10px; border-radius: 999px; background: #ececea; color: #3d3f42; font-size: 13px; font-weight: 600">Solo strumentale</span>
+        </div>
+        <p style="margin: 0; font-size: 13px; color: #6b5000">Puoi usarlo, ma verifica i diritti prima di pubblicare l'episodio.</p>
+        </sc-if>
+        <sc-if value="{{no_bg}}" hint-placeholder-val="{{ false }}">
+          <p style="margin: 0; font-size: 14px; color: #5b5d61">Nessuna musica in questa sezione.</p>
+        </sc-if>
+      </section>
+
+      <section style="display: flex; flex-direction: column; gap: 14px; padding: 20px; background: #ffffff; border: 1px solid #d5d5d1; border-radius: 12px">
+        <h2 style="margin: 0; font-size: 16px; font-weight: 700">Outro</h2>
+        <label style="display: flex; flex-direction: column; gap: 6px; font-size: 14px; font-weight: 600">Brano
+          <select onChange="{{set_outro}}" value="{{v_outro}}" style="min-height: 44px; padding: 0 12px; border: 1px solid #b9b9b4; border-radius: 8px; font: inherit; font-size: 15px; font-weight: 400; background: #ffffff"><option value="on">[Brano outro]</option><option value="off">Nessuna musica</option></select>
+        </label>
+        <sc-if value="{{outro}}" hint-placeholder-val="{{ true }}">
+        <div style="display: flex; align-items: center; gap: 12px">
+          <button type="button" aria-label="Ascolta l'anteprima" style="flex: none; width: 44px; height: 44px; border-radius: 50%; border: 1px solid #b9b9b4; background: #ffffff; display: flex; align-items: center; justify-content: center"><svg width="14" height="14" viewBox="0 0 24 24" fill="#1c1d1f" aria-hidden="true"><path d="M7 4l13 8-13 8z"></path></svg></button>
+          <div style="flex: 1; height: 6px; border-radius: 3px; background: #ececea"></div>
+          <span style="font-size: 13px; color: #5b5d61">[0:18]</span>
+        </div>
+        <div style="display: flex; flex-wrap: wrap; gap: 8px">
+          <span style="display: inline-flex; align-items: center; min-height: 26px; padding: 0 10px; border-radius: 999px; background: #e3f1e5; color: #245a2e; font-size: 13px; font-weight: 600">Licenza ok</span>
+          <span style="display: inline-flex; align-items: center; min-height: 26px; padding: 0 10px; border-radius: 999px; background: #e4edf8; color: #1d4c85; font-size: 13px; font-weight: 600">Contiene parlato</span>
+        </div>
+        </sc-if>
+        <sc-if value="{{no_outro}}" hint-placeholder-val="{{ false }}">
+          <p style="margin: 0; font-size: 14px; color: #5b5d61">Nessuna musica in questa sezione.</p>
+        </sc-if>
+      </section>
+    </div>
+
+    <div style="display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px; padding-top: 20px; border-top: 1px solid #d5d5d1">
+      <a href="02-Cast.dc.html" style="display: inline-flex; align-items: center; min-height: 44px; padding: 0 16px; border-radius: 8px; text-decoration: none; font-weight: 600; font-size: 15px">Indietro</a>
+      <div style="display: flex; flex-wrap: wrap; align-items: center; gap: 12px">
+        <a href="04-Copione.dc.html" style="display: inline-flex; align-items: center; min-height: 44px; padding: 0 16px; border-radius: 8px; border: 1px solid #d5d5d1; background: #ffffff; text-decoration: none; font-weight: 600; font-size: 15px">Salta, nessuna musica</a>
+        <a href="04-Copione.dc.html" style="display: inline-flex; align-items: center; min-height: 44px; padding: 0 20px; border-radius: 8px; background: #1c1d1f; color: #ffffff; text-decoration: none; font-weight: 600; font-size: 15px">Avanti: scrivi il copione</a>
+      </div>
+    </div>
+  </main>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":1300}}'>
+class Component extends DCLogic {
+  constructor(props) {
+    super(props);
+    this.state = { intro: true, bg: true, outro: true };
+  }
+  renderVals() {
+    const { intro, bg, outro } = this.state;
+    const cols = (intro ? '72px ' : '') + 'minmax(0, 1fr)' + (outro ? ' 88px' : '');
+    let secs = 15 * 60 + (intro ? 12 : 0) + (outro ? 18 : 0);
+    const mm = Math.floor(secs / 60), ss = String(secs % 60).padStart(2, '0');
+    const n = (intro ? 1 : 0) + (bg ? 1 : 0) + (outro ? 1 : 0);
+    const set = (k) => (e) => this.setState({ [k]: e.target.value === 'on' });
+    return {
+      intro, bg, outro,
+      no_intro: !intro, no_bg: !bg, no_outro: !outro, noBg: !bg,
+      v_intro: intro ? 'on' : 'off', v_bg: bg ? 'on' : 'off', v_outro: outro ? 'on' : 'off',
+      set_intro: set('intro'), set_bg: set('bg'), set_outro: set('outro'),
+      grid: 'display: grid; grid-template-columns: ' + cols + '; gap: 4px',
+      total: '~' + mm + ':' + ss,
+      summary: n === 0 ? 'Episodio senza musiche: solo voci' : n === 3 ? 'Intro, sottofondo e outro' : [intro && 'Intro', bg && 'sottofondo', outro && 'outro'].filter(Boolean).join(' e ').replace(/^./, c => c.toUpperCase())
+    };
+  }
+}
+</script>
+</body>
+</html>

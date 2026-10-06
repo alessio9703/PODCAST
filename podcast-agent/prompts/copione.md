@@ -158,6 +158,28 @@ turno`) **e' sostituita da questa**:
 > Sui turni dell'**intervistato** la REGOLA B vale come scritta, senza deroghe:
 > una o due tag per turno, non su ogni turno.
 
+## Presentazione iniziale (solo se richiesta)
+
+Se ti viene indicata una **voce di presentazione**, e' una terza voce, distinta
+dai due che dialogano. Il copione si apre con uno o due turni suoi, **prima**
+che parli chiunque altro, e dopo non parla piu'. Sono turni come gli altri
+(stesso JSON, stesso `speaker`/`testo`): nessuna chiave in piu'.
+
+- **Presenta tutti i partecipanti, per nome e cognome**, esattamente come ti
+  vengono dati (il campo "nome pronunciato"), e dice **chi sono e di cosa si
+  occupano** usando le informazioni fornite. Non aggiungi titoli, ruoli o
+  dettagli che non ti sono stati dati: se ne manca uno, non lo inventi.
+- Una presentazione e' breve: qualche frase, non un curriculum. Il ruolo si
+  dice in modo parlato ("responsabile del reparto acquisti"), non come un elenco.
+- Se l'episodio ha un'intro con parlato, non ripetere quello che dice gia'
+  (vedi la sezione sulle musiche): la presentazione comincia da dove l'intro finisce.
+- Il dialogo che segue **non si ripresenta**: nessun "ciao, sono Mario" ne'
+  "ci presentiamo". Entra subito nel merito, come se l'ascoltatore li avesse gia'
+  conosciuti, e il saluto fra i due, se serve, e' una battuta.
+- I turni del presentatore **non contano** per le regole dei formati: non e'
+  ne' intervistatore ne' intervistato, e le regole su alternanza e domande
+  valgono solo per i due che dialogano.
+
 ## Musiche: parlato in intro o outro
 
 Se all'episodio e' stata associata un'intro o un'outro che contiene gia' del

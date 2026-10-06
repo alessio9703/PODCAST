@@ -23,6 +23,7 @@ from __future__ import annotations
 
 import json
 import re
+import shutil
 import subprocess
 import tempfile
 import wave
@@ -279,6 +280,7 @@ def mix_episode(
         speech_norm = tmp / "sezione_norm.wav"
         if _loudnorm(speech_path, speech_norm, target_lufs, true_peak_db, rate):
             dynamic_pieces.append("sezione parlata (con sottofondo)")
+        _match_level(speech_norm, target_lufs, true_peak_db, rate)
 
         pieces: list[Path] = []
         intro_duration = 0.0
@@ -292,6 +294,7 @@ def mix_episode(
             intro_norm = tmp / "intro_norm.wav"
             if _loudnorm(intro_faded, intro_norm, target_lufs, true_peak_db, rate):
                 dynamic_pieces.append("intro")
+            _match_level(intro_norm, target_lufs, true_peak_db, rate)
             pieces.append(intro_norm)
             intro_duration = _wav_duration(intro_norm)
 
@@ -309,14 +312,15 @@ def mix_episode(
             outro_norm = tmp / "outro_norm.wav"
             if _loudnorm(outro_faded, outro_norm, target_lufs, true_peak_db, rate):
                 dynamic_pieces.append("outro")
+            _match_level(outro_norm, target_lufs, true_peak_db, rate)
             pieces.append(outro_norm)
 
         concatenated = tmp / "concat.wav"
         _concat_wavs(pieces, concatenated)
 
         final_wav = tmp / "finale.wav"
-        if _loudnorm(concatenated, final_wav, target_lufs, true_peak_db, rate):
-            dynamic_pieces.append("file finale")
+        shutil.copyfile(concatenated, final_wav)
+        _match_level(final_wav, target_lufs, true_peak_db, rate)
 
         if dynamic_pieces:
             warnings.append(
@@ -691,6 +695,28 @@ def _loudnorm(src: Path, dst: Path, target_i: float, target_tp: float, rate: int
     ])
     applied = _parse_loudnorm_json(apply_stderr)
     return str(applied.get("normalization_type", "")).lower() == "dynamic"
+
+
+def _match_level(path: Path, target_i: float, target_tp: float, rate: int) -> None:
+    """Porta `path` alla loudness `target_i` con un guadagno fisso piu' un
+    limiter sul picco vero, in place.
+
+    `_loudnorm` ricade su 'dynamic' quando il guadagno lineare supererebbe il
+    picco consentito (intro registrate al limite) e in quel caso non
+    raggiunge il target: il pezzo resta piu' piano degli altri. Qui il picco
+    lo gestisce un limiter, quindi il livello medio arriva dove deve."""
+    measured = _measure_integrated_loudness(path)
+    gain = target_i - measured
+    if abs(gain) < 0.3:
+        return
+    limit = 10 ** (target_tp / 20)
+    tmp_out = path.with_name(path.stem + "_lvl.wav")
+    _run_ffmpeg([
+        "-y", "-i", str(path),
+        "-af", f"volume={gain:.2f}dB,alimiter=limit={limit:.4f}:level=disabled",
+        "-ar", str(rate), "-sample_fmt", "s16", str(tmp_out),
+    ])
+    tmp_out.replace(path)
 
 
 def _measure_integrated_loudness(path: Path) -> float:

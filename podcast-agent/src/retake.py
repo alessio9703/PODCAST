@@ -151,6 +151,7 @@ def generate_takes(
             trim_threshold_pct=assembler.trim_threshold_pct,
             dropout_max_gap_seconds=assembler.dropout_max_gap_seconds,
             dropout_gap_relative_pct=assembler.dropout_gap_relative_pct,
+            dropout_min_peak_db=assembler.dropout_min_peak_db,
         )
         _write_atomic(target, audio)
 

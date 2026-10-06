@@ -1,0 +1,206 @@
+<!doctype html>
+<html lang="it">
+<head>
+<meta charset="utf-8">
+<title>Musiche</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&amp;family=IBM+Plex+Mono:wght@400;500&amp;display=swap">
+<style>
+body{margin:0}
+a{color:#1c1d1f}a:hover{color:#000}
+</style>
+</helmet>
+<div style="min-height: 100vh; display: flex; flex-wrap: wrap; background: #f5f5f3; font-family: 'IBM Plex Sans', 'Helvetica Neue', sans-serif; color: #1c1d1f">
+  <div style="flex: 1 1 240px; display: flex">
+    <dc-import name="Sidebar" active="musiche" hint-size="100%,900px"></dc-import>
+  </div>
+  <main style="flex: 999 1 560px; min-width: 0; box-sizing: border-box; padding: 40px 48px 64px; display: flex; flex-direction: column; gap: 28px">
+    <div style="display: flex; flex-wrap: wrap; align-items: flex-end; justify-content: space-between; gap: 16px">
+      <div style="display: flex; flex-direction: column; gap: 6px">
+        <h1 style="margin: 0; font-size: 32px; line-height: 40px; font-weight: 700; letter-spacing: -0.02em">Musiche</h1>
+        <p style="margin: 0; font-size: 15px; color: #5b5d61">I brani da usare come intro, sottofondo o outro. Gli stessi che trovi al passo 3.</p>
+      </div>
+      <label style="display: flex; align-items: center; gap: 8px; min-height: 44px; padding: 0 20px; border-radius: 8px; background: #1c1d1f; color: #ffffff; font-weight: 600; font-size: 15px; cursor: pointer">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 16V4M7 9l5-5 5 5"></path><path d="M4 16v3a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1v-3"></path></svg>
+        <span>Carica brano</span>
+        <input type="file" accept="audio/*" style="position: absolute; width: 1px; height: 1px; opacity: 0">
+      </label>
+    </div>
+
+    <div style="display: flex; flex-wrap: wrap; align-items: center; gap: 12px">
+      <label style="display: flex; align-items: center; gap: 8px; flex: 1 1 280px; max-width: 420px; min-height: 44px; padding: 0 14px; background: #ffffff; border: 1px solid #d5d5d1; border-radius: 8px; box-sizing: border-box">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#5b5d61" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="11" cy="11" r="7"></circle><path d="M20 20l-4-4"></path></svg>
+        <span style="position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0)">Cerca brani</span>
+        <input type="search" placeholder="Cerca per titolo" style="flex: 1; min-width: 0; border: 0; outline: none; font: inherit; font-size: 15px; background: transparent">
+      </label>
+      <div role="group" aria-label="Filtra" style="display: flex; flex-wrap: wrap; gap: 8px">
+        <button type="button" aria-pressed="true" style="min-height: 40px; padding: 0 14px; border-radius: 999px; border: 1px solid #1c1d1f; background: #1c1d1f; color: #ffffff; font: inherit; font-size: 14px; font-weight: 600">Tutti</button>
+        <button type="button" aria-pressed="false" style="min-height: 40px; padding: 0 14px; border-radius: 999px; border: 1px solid #d5d5d1; background: #ffffff; color: #1c1d1f; font: inherit; font-size: 14px">Solo strumentali</button>
+        <button type="button" aria-pressed="false" style="min-height: 40px; padding: 0 14px; border-radius: 999px; border: 1px solid #d5d5d1; background: #ffffff; color: #1c1d1f; font: inherit; font-size: 14px">Con parlato</button>
+        <button type="button" aria-pressed="false" style="min-height: 40px; padding: 0 14px; border-radius: 999px; border: 1px solid #d5d5d1; background: #ffffff; color: #1c1d1f; font: inherit; font-size: 14px">Licenza mancante</button>
+      </div>
+    </div>
+
+    <div style="overflow-x: auto; background: #ffffff; border: 1px solid #d5d5d1; border-radius: 12px">
+      <table style="width: 100%; min-width: 980px; border-collapse: collapse; font-size: 15px">
+        <thead>
+          <tr style="text-align: left; color: #5b5d61; font-size: 13px; font-weight: 600; letter-spacing: 0.03em; text-transform: uppercase">
+            <th style="padding: 14px 20px; border-bottom: 1px solid #d5d5d1">Brano</th>
+            <th style="padding: 14px 12px; border-bottom: 1px solid #d5d5d1">Durata</th>
+            <th style="padding: 14px 12px; border-bottom: 1px solid #d5d5d1">Contenuto</th>
+            <th style="padding: 14px 12px; border-bottom: 1px solid #d5d5d1">Licenza</th>
+            <th style="padding: 14px 12px; border-bottom: 1px solid #d5d5d1">Usato in</th>
+            <th style="padding: 14px 20px; border-bottom: 1px solid #d5d5d1; text-align: right">Azioni</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr style="{{r0}}">
+            <td style="padding: 14px 20px; border-bottom: 1px solid #ececea"><div style="display: flex; align-items: center; gap: 12px"><button type="button" aria-label="Ascolta" style="flex: none; width: 44px; height: 44px; border-radius: 50%; border: 1px solid #b9b9b4; background: #ffffff; display: flex; align-items: center; justify-content: center"><svg width="14" height="14" viewBox="0 0 24 24" fill="#1c1d1f" aria-hidden="true"><path d="M7 4l13 8-13 8z"></path></svg></button><span style="font-weight: 600">[Brano intro]</span></div></td>
+            <td style="padding: 14px 12px; border-bottom: 1px solid #ececea; font-family: 'IBM Plex Mono', monospace; font-size: 14px">0:12</td>
+            <td style="padding: 14px 12px; border-bottom: 1px solid #ececea"><span style="display: inline-flex; align-items: center; gap: 6px; min-height: 26px; padding: 0 10px; border-radius: 999px; background: #ececea; color: #3d3f42; font-size: 13px; font-weight: 600">Solo strumentale</span></td>
+            <td style="padding: 14px 12px; border-bottom: 1px solid #ececea"><span style="{{lc0}}">{{lct0}}</span></td>
+            <td style="padding: 14px 12px; border-bottom: 1px solid #ececea"><a href="Main.dc.html" style="font-weight: 600">5 episodi</a></td>
+            <td style="padding: 14px 20px; border-bottom: 1px solid #ececea"><div style="display: flex; justify-content: flex-end; gap: 8px"><button type="button" aria-expanded="{{e0}}" onClick="{{t0}}" style="{{b0}}">{{l0}}</button><button type="button" aria-label="Altre azioni" style="width: 40px; height: 40px; border-radius: 8px; border: 1px solid #d5d5d1; background: #ffffff; font: inherit; font-size: 18px; line-height: 1">⋯</button></div></td>
+          </tr>
+          <tr style="{{d0}}">
+            <td colspan="6" style="padding: 0 20px 20px; border-bottom: 1px solid #ececea">
+              <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(min(280px, 100%), 1fr)); gap: 16px; padding: 16px; border-radius: 10px; background: #ffffff; border: 1px solid #d5d5d1">
+                <div style="display: flex; flex-direction: column; gap: 6px">
+                  <span style="font-size: 13px; font-weight: 600; color: #5b5d61">Parlato</span>
+                  <span style="font-size: 15px">Nessuno: brano solo strumentale.</span>
+                </div>
+                <div style="display: flex; flex-direction: column; gap: 8px">
+                  <span style="font-size: 13px; font-weight: 600; color: #5b5d61">Licenza</span>
+                  <div style="display: flex; align-items: center; gap: 12px; min-height: 44px">
+                    <button type="button" role="switch" aria-checked="{{la0}}" aria-labelledby="lic0" onClick="{{lt0}}" style="{{track0}}"><span style="{{knob0}}"></span></button>
+                    <span id="lic0" style="font-size: 15px; font-weight: 600">Ho la licenza per questo brano</span>
+                  </div>
+                  <span style="{{lh0}}">{{lm0}}</span>
+                </div>
+              </div>
+            </td>
+          </tr>
+          <tr style="{{r1}}">
+            <td style="padding: 14px 20px; border-bottom: 1px solid #ececea"><div style="display: flex; align-items: center; gap: 12px"><button type="button" aria-label="Ascolta" style="flex: none; width: 44px; height: 44px; border-radius: 50%; border: 1px solid #b9b9b4; background: #ffffff; display: flex; align-items: center; justify-content: center"><svg width="14" height="14" viewBox="0 0 24 24" fill="#1c1d1f" aria-hidden="true"><path d="M7 4l13 8-13 8z"></path></svg></button><span style="font-weight: 600">[Brano sottofondo]</span></div></td>
+            <td style="padding: 14px 12px; border-bottom: 1px solid #ececea; font-family: 'IBM Plex Mono', monospace; font-size: 14px">2:40</td>
+            <td style="padding: 14px 12px; border-bottom: 1px solid #ececea"><span style="display: inline-flex; align-items: center; gap: 6px; min-height: 26px; padding: 0 10px; border-radius: 999px; background: #ececea; color: #3d3f42; font-size: 13px; font-weight: 600">Solo strumentale</span></td>
+            <td style="padding: 14px 12px; border-bottom: 1px solid #ececea"><span style="{{lc1}}">{{lct1}}</span></td>
+            <td style="padding: 14px 12px; border-bottom: 1px solid #ececea"><a href="Main.dc.html" style="font-weight: 600">3 episodi</a></td>
+            <td style="padding: 14px 20px; border-bottom: 1px solid #ececea"><div style="display: flex; justify-content: flex-end; gap: 8px"><button type="button" aria-expanded="{{e1}}" onClick="{{t1}}" style="{{b1}}">{{l1}}</button><button type="button" aria-label="Altre azioni" style="width: 40px; height: 40px; border-radius: 8px; border: 1px solid #d5d5d1; background: #ffffff; font: inherit; font-size: 18px; line-height: 1">⋯</button></div></td>
+          </tr>
+          <tr style="{{d1}}">
+            <td colspan="6" style="padding: 0 20px 20px; border-bottom: 1px solid #ececea">
+              <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(min(280px, 100%), 1fr)); gap: 16px; padding: 16px; border-radius: 10px; background: #ffffff; border: 1px solid #d5d5d1">
+                <div style="display: flex; flex-direction: column; gap: 6px">
+                  <span style="font-size: 13px; font-weight: 600; color: #5b5d61">Parlato</span>
+                  <span style="font-size: 15px">Nessuno: brano solo strumentale.</span>
+                </div>
+                <div style="display: flex; flex-direction: column; gap: 8px">
+                  <span style="font-size: 13px; font-weight: 600; color: #5b5d61">Licenza</span>
+                  <div style="display: flex; align-items: center; gap: 12px; min-height: 44px">
+                    <button type="button" role="switch" aria-checked="{{la1}}" aria-labelledby="lic1" onClick="{{lt1}}" style="{{track1}}"><span style="{{knob1}}"></span></button>
+                    <span id="lic1" style="font-size: 15px; font-weight: 600">Ho la licenza per questo brano</span>
+                  </div>
+                  <span style="{{lh1}}">{{lm1}}</span>
+                </div>
+              </div>
+            </td>
+          </tr>
+          <tr style="{{r2}}">
+            <td style="padding: 14px 20px; border-bottom: 1px solid #ececea"><div style="display: flex; align-items: center; gap: 12px"><button type="button" aria-label="Ascolta" style="flex: none; width: 44px; height: 44px; border-radius: 50%; border: 1px solid #b9b9b4; background: #ffffff; display: flex; align-items: center; justify-content: center"><svg width="14" height="14" viewBox="0 0 24 24" fill="#1c1d1f" aria-hidden="true"><path d="M7 4l13 8-13 8z"></path></svg></button><span style="font-weight: 600">[Brano outro]</span></div></td>
+            <td style="padding: 14px 12px; border-bottom: 1px solid #ececea; font-family: 'IBM Plex Mono', monospace; font-size: 14px">0:18</td>
+            <td style="padding: 14px 12px; border-bottom: 1px solid #ececea"><span style="display: inline-flex; align-items: center; gap: 6px; min-height: 26px; padding: 0 10px; border-radius: 999px; background: #e4edf8; color: #1d4c85; font-size: 13px; font-weight: 600">Contiene parlato</span></td>
+            <td style="padding: 14px 12px; border-bottom: 1px solid #ececea"><span style="{{lc2}}">{{lct2}}</span></td>
+            <td style="padding: 14px 12px; border-bottom: 1px solid #ececea"><a href="Main.dc.html" style="font-weight: 600">2 episodi</a></td>
+            <td style="padding: 14px 20px; border-bottom: 1px solid #ececea"><div style="display: flex; justify-content: flex-end; gap: 8px"><button type="button" aria-expanded="{{e2}}" onClick="{{t2}}" style="{{b2}}">{{l2}}</button><button type="button" aria-label="Altre azioni" style="width: 40px; height: 40px; border-radius: 8px; border: 1px solid #d5d5d1; background: #ffffff; font: inherit; font-size: 18px; line-height: 1">⋯</button></div></td>
+          </tr>
+          <tr style="{{d2}}">
+            <td colspan="6" style="padding: 0 20px 20px; border-bottom: 1px solid #ececea">
+              <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(min(280px, 100%), 1fr)); gap: 16px; padding: 16px; border-radius: 10px; background: #ffffff; border: 1px solid #d5d5d1">
+                <div style="display: flex; flex-direction: column; gap: 6px">
+                  <span style="font-size: 13px; font-weight: 600; color: #5b5d61">Trascrizione del parlato</span>
+                  <p style="margin: 0; font-size: 15px; line-height: 23px">«[Testo pronunciato nel brano]»</p>
+                  <span style="font-size: 13px; color: #5b5d61">Utile per evitare che si sovrapponga alle voci dell'episodio.</span>
+                </div>
+                <div style="display: flex; flex-direction: column; gap: 8px">
+                  <span style="font-size: 13px; font-weight: 600; color: #5b5d61">Licenza</span>
+                  <div style="display: flex; align-items: center; gap: 12px; min-height: 44px">
+                    <button type="button" role="switch" aria-checked="{{la2}}" aria-labelledby="lic2" onClick="{{lt2}}" style="{{track2}}"><span style="{{knob2}}"></span></button>
+                    <span id="lic2" style="font-size: 15px; font-weight: 600">Ho la licenza per questo brano</span>
+                  </div>
+                  <span style="{{lh2}}">{{lm2}}</span>
+                </div>
+              </div>
+            </td>
+          </tr>
+          <tr style="{{r3}}">
+            <td style="padding: 14px 20px"><div style="display: flex; align-items: center; gap: 12px"><button type="button" aria-label="Ascolta" style="flex: none; width: 44px; height: 44px; border-radius: 50%; border: 1px solid #b9b9b4; background: #ffffff; display: flex; align-items: center; justify-content: center"><svg width="14" height="14" viewBox="0 0 24 24" fill="#1c1d1f" aria-hidden="true"><path d="M7 4l13 8-13 8z"></path></svg></button><span style="font-weight: 600">[Brano]</span></div></td>
+            <td style="padding: 14px 12px; font-family: 'IBM Plex Mono', monospace; font-size: 14px">1:05</td>
+            <td style="padding: 14px 12px"><span style="display: inline-flex; align-items: center; gap: 6px; min-height: 26px; padding: 0 10px; border-radius: 999px; background: #ececea; color: #3d3f42; font-size: 13px; font-weight: 600">Solo strumentale</span></td>
+            <td style="padding: 14px 12px"><span style="{{lc3}}">{{lct3}}</span></td>
+            <td style="padding: 14px 12px"><span style="color: #5b5d61">Mai usato</span></td>
+            <td style="padding: 14px 20px"><div style="display: flex; justify-content: flex-end; gap: 8px"><button type="button" aria-expanded="{{e3}}" onClick="{{t3}}" style="{{b3}}">{{l3}}</button><button type="button" aria-label="Altre azioni" style="width: 40px; height: 40px; border-radius: 8px; border: 1px solid #d5d5d1; background: #ffffff; font: inherit; font-size: 18px; line-height: 1">⋯</button></div></td>
+          </tr>
+          <tr style="{{d3}}">
+            <td colspan="6" style="padding: 0 20px 20px">
+              <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(min(280px, 100%), 1fr)); gap: 16px; padding: 16px; border-radius: 10px; background: #ffffff; border: 1px solid #d5d5d1">
+                <div style="display: flex; flex-direction: column; gap: 6px">
+                  <span style="font-size: 13px; font-weight: 600; color: #5b5d61">Parlato</span>
+                  <span style="font-size: 15px">Nessuno: brano solo strumentale.</span>
+                </div>
+                <div style="display: flex; flex-direction: column; gap: 8px">
+                  <span style="font-size: 13px; font-weight: 600; color: #5b5d61">Licenza</span>
+                  <div style="display: flex; align-items: center; gap: 12px; min-height: 44px">
+                    <button type="button" role="switch" aria-checked="{{la3}}" aria-labelledby="lic3" onClick="{{lt3}}" style="{{track3}}"><span style="{{knob3}}"></span></button>
+                    <span id="lic3" style="font-size: 15px; font-weight: 600">Ho la licenza per questo brano</span>
+                  </div>
+                  <span style="{{lh3}}">{{lm3}}</span>
+                </div>
+              </div>
+            </td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </main>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":1300}}'>
+class Component extends DCLogic {
+  constructor(props) {
+    super(props);
+    this.state = { open: 1, lic: [true, false, true, true] };
+  }
+  renderVals() {
+    const { open, lic } = this.state;
+    const v = {};
+    const btn = 'min-height: 40px; padding: 0 14px; border-radius: 8px; font: inherit; font-size: 14px; font-weight: 600; cursor: pointer; ';
+    const chip = 'display: inline-flex; align-items: center; min-height: 26px; padding: 0 10px; border-radius: 999px; font-size: 13px; font-weight: 600; ';
+    for (let i = 0; i < 4; i++) {
+      const on = open === i, has = lic[i];
+      v['o' + i] = on;
+      v['e' + i] = on ? 'true' : 'false';
+      v['l' + i] = on ? 'Chiudi dettagli' : 'Dettagli';
+      v['b' + i] = btn + (on ? 'border: 1px solid #1c1d1f; background: #1c1d1f; color: #ffffff' : 'border: 1px solid #d5d5d1; background: #ffffff; color: #1c1d1f');
+      v['r' + i] = on ? 'background: #fafaf8' : '';
+      v['d' + i] = on ? 'background: #fafaf8' : 'display: none';
+      v['t' + i] = () => this.setState({ open: on ? null : i });
+      v['lc' + i] = chip + (has ? 'background: #e3f1e5; color: #245a2e' : 'background: #fdf3d3; color: #6b5000');
+      v['lct' + i] = has ? 'Licenza ok' : 'Licenza mancante';
+      v['la' + i] = has ? 'true' : 'false';
+      v['track' + i] = 'flex: none; position: relative; width: 52px; height: 30px; padding: 0; border-radius: 999px; border: 0; cursor: pointer; background: ' + (has ? '#1c1d1f' : '#b9b9b4');
+      v['knob' + i] = 'position: absolute; top: 3px; left: ' + (has ? '25px' : '3px') + '; width: 24px; height: 24px; border-radius: 50%; background: #ffffff; box-shadow: 0 1px 2px rgba(0,0,0,0.25)';
+      v['lh' + i] = 'font-size: 13px; line-height: 19px; ' + (has ? 'color: #5b5d61' : 'color: #6b5000; font-weight: 600');
+      v['lm' + i] = has ? 'Confermata da [utente] il [gg/mm].' : 'Senza licenza il brano resta utilizzabile, ma verifica i diritti prima di pubblicare.';
+      v['lt' + i] = () => { const next = lic.slice(); next[i] = !has; this.setState({ lic: next }); };
+    }
+    return v;
+  }
+}
+</script>
+</body>
+</html>

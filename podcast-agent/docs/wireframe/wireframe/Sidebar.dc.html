@@ -1,0 +1,68 @@
+<!doctype html>
+<html lang="it">
+<head>
+<meta charset="utf-8">
+<title>Menu laterale</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&amp;family=IBM+Plex+Mono:wght@400;500&amp;display=swap">
+<style>
+body{margin:0}
+a{color:#1c1d1f}a:hover{color:#000}
+</style>
+</helmet>
+<nav aria-label="Menu principale" style="width: 100%; min-height: 100%; box-sizing: border-box; padding: 24px 16px; background: #ffffff; border-right: 1px solid #d5d5d1; display: flex; flex-direction: column; gap: 24px; font-family: 'IBM Plex Sans', 'Helvetica Neue', sans-serif; color: #1c1d1f">
+  <div style="display: flex; align-items: center; gap: 10px; padding: 0 8px">
+    <div style="width: 32px; height: 32px; border-radius: 8px; background: #1c1d1f; display: flex; align-items: center; justify-content: center">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#ffffff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="9" y="2" width="6" height="12" rx="3"></rect><path d="M5 10a7 7 0 0 0 14 0"></path><path d="M12 17v5"></path></svg>
+    </div>
+    <div style="font-weight: 700; font-size: 16px; letter-spacing: -0.01em">LIL Podcast</div>
+  </div>
+
+  <a href="01-Documento.dc.html" style="display: flex; align-items: center; justify-content: center; gap: 8px; min-height: 44px; border-radius: 8px; background: #1c1d1f; color: #ffffff; text-decoration: none; font-weight: 600; font-size: 15px">
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" aria-hidden="true"><path d="M12 5v14M5 12h14"></path></svg>
+    <span>Nuovo episodio</span>
+  </a>
+
+  <div style="display: flex; flex-direction: column; gap: 4px">
+    <sc-for list="{{main}}" as="it" hint-placeholder-count="1">
+      <a href="{{it.href}}" style="{{it.style}}">{{it.label}}</a>
+    </sc-for>
+  </div>
+
+  <div style="display: flex; flex-direction: column; gap: 4px">
+    <div style="padding: 0 12px 4px; font-size: 12px; font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase; color: #5b5d61">Librerie</div>
+    <sc-for list="{{libs}}" as="it" hint-placeholder-count="3">
+      <a href="{{it.href}}" style="{{it.style}}">{{it.label}}</a>
+    </sc-for>
+  </div>
+
+  <div style="display: flex; flex-direction: column; gap: 4px">
+    <div style="padding: 0 12px 4px; font-size: 12px; font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase; color: #5b5d61">Avanzate</div>
+    <a href="#" style="display: flex; align-items: center; min-height: 40px; padding: 0 12px; border-radius: 8px; color: #5b5d61; text-decoration: none; font-size: 15px">Lezioni</a>
+    <a href="#" style="display: flex; align-items: center; min-height: 40px; padding: 0 12px; border-radius: 8px; color: #5b5d61; text-decoration: none; font-size: 15px">Impostazioni</a>
+    <a href="#" style="display: flex; align-items: center; min-height: 40px; padding: 0 12px; border-radius: 8px; color: #5b5d61; text-decoration: none; font-size: 15px">Diagnostica</a>
+  </div>
+</nav>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"active":{"editor":"enum","options":["archivio","nuovo","documenti","voci","musiche"],"default":"archivio"},"$preview":{"width":240,"height":900}}'>
+class Component extends DCLogic {
+  renderVals() {
+    const active = this.props.active ?? 'archivio';
+    const base = 'display: flex; align-items: center; min-height: 40px; padding: 0 12px; border-radius: 8px; text-decoration: none; font-size: 15px; ';
+    const mk = (id, label, href) => ({
+      label, href,
+      style: base + (id === active ? 'background: #ececea; color: #1c1d1f; font-weight: 600' : 'color: #1c1d1f')
+    });
+    return {
+      main: [mk('archivio', 'Archivio', 'Main.dc.html')],
+      libs: [mk('documenti', 'Documenti', 'Documenti.dc.html'), mk('voci', 'Voci', 'Voci.dc.html'), mk('musiche', 'Musiche', 'Musiche.dc.html')]
+    };
+  }
+}
+</script>
+</body>
+</html>

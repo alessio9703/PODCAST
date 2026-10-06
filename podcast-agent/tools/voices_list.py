@@ -15,7 +15,7 @@ import argparse
 
 from _common import add_config_arg, bootstrap, emit, note, run_tool  # noqa: E402
 from src.registry import VoiceRegistry  # noqa: E402
-from src.voice_library import VoiceLibrary  # noqa: E402
+from src.voice_library import VoiceLibrary, spoken_name_guess  # noqa: E402
 
 
 def main() -> None:
@@ -45,9 +45,14 @@ def main() -> None:
     voices = []
     for voice in library.voices:
         voice_id, reason = registry.lookup(voice.name, voice.path, provider_name)
+        spoken, complete = spoken_name_guess(voice.name)
         voices.append(
             {
                 "name": voice.name,
+                # Proposta per la presentazione iniziale, da far confermare.
+                # name_complete=false: manca nome o cognome, va chiesto.
+                "spoken_name": spoken,
+                "name_complete": complete,
                 "path": str(voice.path),
                 "extension": voice.extension,
                 "size_mb": round(voice.size_bytes / (1024 * 1024), 2),

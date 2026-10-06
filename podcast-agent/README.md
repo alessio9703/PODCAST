@@ -399,6 +399,16 @@ qualunque parte lo generi. Python lo **valida e lo persiste**, non lo genera.
 | `tools/run_finalize.py` | `voci_usate.json` + copia del documento |
 | `tools/doctor.py` | diagnosi dell'installazione (Python, dipendenze, ffmpeg) |
 
+**Presentazione iniziale.** Quando lavora l'agente, ogni episodio si apre con una terza
+voce (il *presentatore*, scelta a ogni episodio fra le registrazioni in `voci_disponibili/`)
+che presenta chi prende parte: nome e cognome, chi è e di cosa si occupa. Il nome parte dal
+nome del file ("Voce Alessio Menegatto" → "Alessio Menegatto") e l'agente lo fa confermare,
+chiedendo il cognome se manca; il ruolo lo chiede lui all'utente. `script_save.py
+--presenter ... --participant "file|nome|ruolo"` rifiuta il copione che non apre con la
+presentazione o che non nomina tutti. Il presentatore è un turno come gli altri, quindi
+cache, retake e minutaggio non cambiano. Vale per il percorso dell'agente: `run.py` non la
+prevede.
+
 Ogni comando stampa un oggetto JSON su stdout e i messaggi umani su stderr, ed è
 utilizzabile anche a mano:
 

@@ -1,0 +1,107 @@
+<!doctype html>
+<html lang="it">
+<head>
+<meta charset="utf-8">
+<title>Documenti</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&amp;family=IBM+Plex+Mono:wght@400;500&amp;display=swap">
+<style>
+body{margin:0}
+a{color:#1c1d1f}a:hover{color:#000}
+</style>
+</helmet>
+<div style="min-height: 100vh; display: flex; flex-wrap: wrap; background: #f5f5f3; font-family: 'IBM Plex Sans', 'Helvetica Neue', sans-serif; color: #1c1d1f">
+  <div style="flex: 1 1 240px; display: flex">
+    <dc-import name="Sidebar" active="documenti" hint-size="100%,900px"></dc-import>
+  </div>
+  <main style="flex: 999 1 560px; min-width: 0; box-sizing: border-box; padding: 40px 48px 64px; display: flex; flex-direction: column; gap: 28px">
+    <div style="display: flex; flex-wrap: wrap; align-items: flex-end; justify-content: space-between; gap: 16px">
+      <div style="display: flex; flex-direction: column; gap: 6px">
+        <h1 style="margin: 0; font-size: 32px; line-height: 40px; font-weight: 700; letter-spacing: -0.02em">Documenti</h1>
+        <p style="margin: 0; font-size: 15px; color: #5b5d61">I documenti caricati, pronti da trasformare in episodi. Gli stessi che trovi al passo 1.</p>
+      </div>
+      <label style="display: flex; align-items: center; gap: 8px; min-height: 44px; padding: 0 20px; border-radius: 8px; background: #1c1d1f; color: #ffffff; font-weight: 600; font-size: 15px; cursor: pointer">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 16V4M7 9l5-5 5 5"></path><path d="M4 16v3a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1v-3"></path></svg>
+        <span>Carica documento</span>
+        <input type="file" accept=".pdf,.docx,.txt,.md" style="position: absolute; width: 1px; height: 1px; opacity: 0">
+      </label>
+    </div>
+
+    <div style="display: flex; align-items: center; justify-content: center; gap: 12px; min-height: 72px; padding: 0 24px; border: 2px dashed #b9b9b4; border-radius: 12px; background: #ffffff; font-size: 15px; color: #5b5d61">
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#5b5d61" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 16V4M7 9l5-5 5 5"></path><path d="M4 16v3a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1v-3"></path></svg>
+      <span>Trascina qui uno o più file · PDF, DOCX, TXT o MD</span>
+    </div>
+
+    <div style="display: flex; flex-wrap: wrap; align-items: center; gap: 12px">
+      <label style="display: flex; align-items: center; gap: 8px; flex: 1 1 280px; max-width: 420px; min-height: 44px; padding: 0 14px; background: #ffffff; border: 1px solid #d5d5d1; border-radius: 8px; box-sizing: border-box">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#5b5d61" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="11" cy="11" r="7"></circle><path d="M20 20l-4-4"></path></svg>
+        <span style="position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0)">Cerca documenti</span>
+        <input type="search" placeholder="Cerca per nome" style="flex: 1; min-width: 0; border: 0; outline: none; font: inherit; font-size: 15px; background: transparent">
+      </label>
+      <div role="group" aria-label="Filtra" style="display: flex; flex-wrap: wrap; gap: 8px">
+        <button type="button" aria-pressed="true" style="min-height: 40px; padding: 0 14px; border-radius: 999px; border: 1px solid #1c1d1f; background: #1c1d1f; color: #ffffff; font: inherit; font-size: 14px; font-weight: 600">Tutti</button>
+        <button type="button" aria-pressed="false" style="min-height: 40px; padding: 0 14px; border-radius: 999px; border: 1px solid #d5d5d1; background: #ffffff; color: #1c1d1f; font: inherit; font-size: 14px">Mai usati</button>
+        <button type="button" aria-pressed="false" style="min-height: 40px; padding: 0 14px; border-radius: 999px; border: 1px solid #d5d5d1; background: #ffffff; color: #1c1d1f; font: inherit; font-size: 14px">Già usati</button>
+        <button type="button" aria-pressed="false" style="min-height: 40px; padding: 0 14px; border-radius: 999px; border: 1px solid #d5d5d1; background: #ffffff; color: #1c1d1f; font: inherit; font-size: 14px">Con problemi</button>
+      </div>
+    </div>
+
+    <div style="overflow-x: auto; background: #ffffff; border: 1px solid #d5d5d1; border-radius: 12px">
+      <table style="width: 100%; min-width: 960px; border-collapse: collapse; font-size: 15px">
+        <thead>
+          <tr style="text-align: left; color: #5b5d61; font-size: 13px; font-weight: 600; letter-spacing: 0.03em; text-transform: uppercase">
+            <th style="padding: 14px 20px; border-bottom: 1px solid #d5d5d1">Documento</th>
+            <th style="padding: 14px 12px; border-bottom: 1px solid #d5d5d1">Contenuto</th>
+            <th style="padding: 14px 12px; border-bottom: 1px solid #d5d5d1">Caricato</th>
+            <th style="padding: 14px 12px; border-bottom: 1px solid #d5d5d1">Usato in</th>
+            <th style="padding: 14px 20px; border-bottom: 1px solid #d5d5d1; text-align: right">Azioni</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td style="padding: 16px 20px; border-bottom: 1px solid #ececea"><div style="display: flex; align-items: center; gap: 12px"><span style="flex: none; width: 36px; height: 44px; border-radius: 5px; background: #ececea; display: flex; align-items: center; justify-content: center; font-size: 10px; font-weight: 700; color: #3d3f42">PDF</span><span style="font-weight: 600">[documento-a].pdf</span></div></td>
+            <td style="padding: 16px 12px; border-bottom: 1px solid #ececea; color: #3d3f42">[n] pagine · [n] parole</td>
+            <td style="padding: 16px 12px; border-bottom: 1px solid #ececea; color: #5b5d61">[gg/mm]</td>
+            <td style="padding: 16px 12px; border-bottom: 1px solid #ececea"><a href="Main.dc.html" style="font-weight: 600">2 episodi</a></td>
+            <td style="padding: 16px 20px; border-bottom: 1px solid #ececea"><div style="display: flex; justify-content: flex-end; gap: 8px"><button type="button" aria-label="Apri l'anteprima del documento" style="min-height: 40px; padding: 0 14px; border-radius: 8px; border: 1px solid #d5d5d1; background: #ffffff; font: inherit; font-size: 14px; font-weight: 600">Anteprima</button><a href="01-Documento.dc.html" style="display: inline-flex; align-items: center; min-height: 40px; padding: 0 14px; border-radius: 8px; background: #1c1d1f; color: #ffffff; text-decoration: none; font-weight: 600; font-size: 14px">Crea episodio</a><button type="button" aria-label="Altre azioni" style="width: 40px; height: 40px; border-radius: 8px; border: 1px solid #d5d5d1; background: #ffffff; font: inherit; font-size: 18px; line-height: 1">⋯</button></div></td>
+          </tr>
+          <tr>
+            <td style="padding: 16px 20px; border-bottom: 1px solid #ececea"><div style="display: flex; align-items: center; gap: 12px"><span style="flex: none; width: 36px; height: 44px; border-radius: 5px; background: #ececea; display: flex; align-items: center; justify-content: center; font-size: 10px; font-weight: 700; color: #3d3f42">DOCX</span><span style="font-weight: 600">[documento-b].docx</span></div></td>
+            <td style="padding: 16px 12px; border-bottom: 1px solid #ececea; color: #3d3f42">[n] pagine · [n] parole</td>
+            <td style="padding: 16px 12px; border-bottom: 1px solid #ececea; color: #5b5d61">[gg/mm]</td>
+            <td style="padding: 16px 12px; border-bottom: 1px solid #ececea; color: #5b5d61">Mai usato</td>
+            <td style="padding: 16px 20px; border-bottom: 1px solid #ececea"><div style="display: flex; justify-content: flex-end; gap: 8px"><button type="button" style="min-height: 40px; padding: 0 14px; border-radius: 8px; border: 1px solid #d5d5d1; background: #ffffff; font: inherit; font-size: 14px; font-weight: 600">Anteprima</button><a href="01-Documento.dc.html" style="display: inline-flex; align-items: center; min-height: 40px; padding: 0 14px; border-radius: 8px; background: #1c1d1f; color: #ffffff; text-decoration: none; font-weight: 600; font-size: 14px">Crea episodio</a><button type="button" aria-label="Altre azioni" style="width: 40px; height: 40px; border-radius: 8px; border: 1px solid #d5d5d1; background: #ffffff; font: inherit; font-size: 18px; line-height: 1">⋯</button></div></td>
+          </tr>
+          <tr>
+            <td style="padding: 16px 20px; border-bottom: 1px solid #ececea"><div style="display: flex; align-items: center; gap: 12px"><span style="flex: none; width: 36px; height: 44px; border-radius: 5px; background: #ececea; display: flex; align-items: center; justify-content: center; font-size: 10px; font-weight: 700; color: #3d3f42">PDF</span><div style="display: flex; flex-direction: column; gap: 2px"><span style="font-weight: 600">[documento-c].pdf</span><span style="font-size: 13px; font-weight: 600; color: #6b5000">Testo non estraibile: sembra una scansione</span></div></div></td>
+            <td style="padding: 16px 12px; border-bottom: 1px solid #ececea; color: #5b5d61">—</td>
+            <td style="padding: 16px 12px; border-bottom: 1px solid #ececea; color: #5b5d61">[gg/mm]</td>
+            <td style="padding: 16px 12px; border-bottom: 1px solid #ececea; color: #5b5d61">Mai usato</td>
+            <td style="padding: 16px 20px; border-bottom: 1px solid #ececea"><div style="display: flex; justify-content: flex-end; gap: 8px"><button type="button" style="min-height: 40px; padding: 0 14px; border-radius: 8px; border: 1px solid #1c1d1f; background: #ffffff; font: inherit; font-size: 14px; font-weight: 600">Sostituisci file</button><button type="button" aria-label="Altre azioni" style="width: 40px; height: 40px; border-radius: 8px; border: 1px solid #d5d5d1; background: #ffffff; font: inherit; font-size: 18px; line-height: 1">⋯</button></div></td>
+          </tr>
+          <tr>
+            <td style="padding: 16px 20px"><div style="display: flex; align-items: center; gap: 12px"><span style="flex: none; width: 36px; height: 44px; border-radius: 5px; background: #ececea; display: flex; align-items: center; justify-content: center; font-size: 10px; font-weight: 700; color: #3d3f42">MD</span><span style="font-weight: 600">[documento-d].md</span></div></td>
+            <td style="padding: 16px 12px; color: #3d3f42">[n] parole</td>
+            <td style="padding: 16px 12px; color: #5b5d61">[gg/mm]</td>
+            <td style="padding: 16px 12px"><a href="Main.dc.html" style="font-weight: 600">1 episodio</a></td>
+            <td style="padding: 16px 20px"><div style="display: flex; justify-content: flex-end; gap: 8px"><button type="button" style="min-height: 40px; padding: 0 14px; border-radius: 8px; border: 1px solid #d5d5d1; background: #ffffff; font: inherit; font-size: 14px; font-weight: 600">Anteprima</button><a href="01-Documento.dc.html" style="display: inline-flex; align-items: center; min-height: 40px; padding: 0 14px; border-radius: 8px; background: #1c1d1f; color: #ffffff; text-decoration: none; font-weight: 600; font-size: 14px">Crea episodio</a><button type="button" aria-label="Altre azioni" style="width: 40px; height: 40px; border-radius: 8px; border: 1px solid #d5d5d1; background: #ffffff; font: inherit; font-size: 18px; line-height: 1">⋯</button></div></td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </main>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":1300}}'>
+class Component extends DCLogic {
+  renderVals() {
+    return {};
+  }
+}
+</script>
+</body>
+</html>

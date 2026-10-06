@@ -84,11 +84,11 @@ stderr. Leggi il JSON, non il testo.
 | Comando | Cosa fa | Ti restituisce |
 |---|---|---|
 | `tools/doc_extract.py DOC --save-to DIR` | estrae il testo | `chars`, `words`, `pages`, `preview`, `text_file` |
-| `tools/voices_list.py [--resolve NOME]` | elenca le voci, risolve i nomi | `voices[]` con `cached`, `resolved[]` con `match`/`candidates` |
+| `tools/voices_list.py [--resolve NOME]` | elenca le voci, risolve i nomi | `voices[]` con `cached`, `spoken_name` (nome ricavato dal file, es. "Voce Alessio Menegatto" -> "Alessio Menegatto"), `name_complete` (`false` = manca nome o cognome), `resolved[]` con `match`/`candidates` |
 | `tools/music_list.py [--resolve CATEGORIA NOME]` | elenca le musiche disponibili, risolve un nome | senza `--resolve`: `intro[]`/`outro[]`/`sottofondo[]` con `duration_seconds`, `has_licenza`, `parlato`, `usable`. Con `--resolve`: exit `0`/`1`/`3` (vedi sotto, **diverso** da `voices_list.py`) |
 | `tools/music_set.py --run-dir D [--intro N] [--outro N] [--sottofondo N] [--none CATEGORIA...]` | sceglie le musiche della run — **gratis, senza approvazione** | `intro`, `outro`, `sottofondo`, `warnings[]` (brani senza licenza) |
 | `tools/run_init.py --title "..."` | crea la cartella dell'episodio | `run_dir`, `session_file`, `script_file` |
-| `tools/script_save.py --run-dir D --script-json F --speakers A B` | **valida e salva il copione che hai scritto** | `version`, `warnings[]`, `rendered`, `approved` |
+| `tools/script_save.py --run-dir D --script-json F --speakers A B [P --presenter P --participant "A\|Nome Cognome\|ruolo" ...]` | **valida e salva il copione che hai scritto** (con la presentazione iniziale: vedi 3-quater) | `version`, `warnings[]`, `rendered`, `approved`, `presenter`, `participants[]` |
 | `tools/script_approve.py --run-dir D` | registra il sì dell'utente | `version`, `sha256` |
 | `tools/voices_prepare.py --speakers A B --out V --run-dir D [--dry-run]` | cache o clonazione | `voice_map`, `newly_cloned[]`, `reused[]`, `audio_paths_file` |
 | `tools/estimate.py --script S` | stima | `chars`, `duration_label`, `cost_usd`, `rendered`, `duration_with_music_seconds` se ci sono musiche |
@@ -225,6 +225,54 @@ Resta modificabile in ogni momento con `music_set.py`, anche dopo
 l'approvazione: cambiare musica non tocca il copione (vedi *Cambiare le
 musiche di un episodio*, sotto).
 
+### 3-quater. Presentazione iniziale: la terza voce
+
+**Ogni episodio si apre con una presentazione** di chi prende parte: nome e cognome,
+chi e' e di cosa si occupa. La legge una **terza voce**, il *presentatore*, che parla
+solo nei primi turni e poi sparisce. Va chiesta **a ogni episodio**, insieme al formato.
+
+Con `AskUserQuestion`, dopo aver risolto le voci e scelto il formato:
+
+1. **La voce di presentazione.** Una domanda con le voci di `voices[]` come opzioni,
+   **escluse le due che dialogano**. Se nella cartella non ce ne sono altre, dillo e chiedi
+   di aggiungere una registrazione: non farla leggere a uno dei due che parlano, e non
+   saltare la presentazione. Se l'utente l'ha gia' nominata nella richiesta, non
+   chiederla (vedi il passo 1). Risolvila con `voices_list.py --resolve`, come ogni voce.
+2. **Chi sono e di cosa si occupano**, una domanda **per ogni partecipante**: e' un dato
+   che tu non hai e non puoi dedurre dal documento. Risposta libera ("Altro"), con una
+   proposta solo se il documento dice davvero chi e' quella persona.
+3. **Il nome da pronunciare.** Parti da `spoken_name` di `voices_list.py`: e' il nome del
+   file senza "Voce" davanti. Se `name_complete` e' `false` (manca il cognome, es.
+   "Voce Sarah") **chiedi nome e cognome**. Se il file ha un ordine ambiguo (es.
+   "Giardini Margherita": e' nome-cognome o cognome-nome?) **proponi la lettura e fai
+   confermare**. Non indovinare mai il cognome di una persona vera. Puoi fare una sola
+   `AskUserQuestion` per partecipante con nome e ruolo insieme.
+
+Poi, in ogni `script_save.py`, passi il presentatore **anche in `--speakers`** e un
+`--participant` per ciascuno dei due che dialogano, nella forma
+`"<nome del file>|<nome pronunciato>|<ruolo>"`:
+
+```bash
+.venv/bin/python tools/script_save.py --run-dir output/<run> \
+  --script-json output/<run>/_bozza.json \
+  --speakers "Voce Mario Rossi" "Voce Giulia Bianchi" "Voce Narratore" \
+  --presenter "Voce Narratore" \
+  --participant "Voce Mario Rossi|Mario Rossi|responsabile del reparto acquisti" \
+  --participant "Voce Giulia Bianchi|Giulia Bianchi|analista dei dati di vendita"
+```
+
+Presentatore e partecipanti restano nella sessione: le revisioni successive non li
+ripassano. **Il copione che scrivi apre con uno o due turni del presentatore** (regole in
+`prompts/copione.md`, sezione *Presentazione iniziale*); il tool **rifiuta** il copione
+che non apre con lui, che lo fa parlare dopo l'apertura, o che non nomina per intero
+tutti i partecipanti.
+
+Il presentatore e' un turno come gli altri: la cache, i retake, `turn_at.py` e la stima
+funzionano senza accorgimenti. Dopo il suo turno la numerazione scala di uno (o due): se
+l'utente dice "la battuta 3", e' il numero che vede nel `rendered`. `voices_prepare.py`
+va chiamato con **tutti e tre** i nomi: anche la sua voce puo' risultare `cloned`, e vale
+la stessa regola sul consenso.
+
 ### 4. Crea la cartella dell'episodio
 
 ```bash
@@ -235,6 +283,9 @@ Va fatto **prima** del copione: il file di sessione delle revisioni vive lì den
 titolo definitivo lo sceglie il copione; questo serve solo a dare un nome alla cartella.
 
 ### 5. Scrivi il copione
+
+(Gli esempi qui sotto mostrano due speaker per brevita': in ogni episodio c'e' anche il
+presentatore del passo 3-quater, in `--speakers` e con `--presenter`/`--participant`.)
 
 **Leggi `prompts/copione.md`** e seguilo: è la stessa fonte che usa `run.py`, quindi il
 podcast suona uguale da qualunque parte lo generi. Lì dentro ci sono le regole di stile
@@ -326,6 +377,8 @@ Quando approva, e solo allora:
 Se l'utente non approva e non sa cosa cambiare, fermati lì: non sintetizzare "intanto".
 
 ### 7. Prepara le voci
+
+`--speakers` qui elenca **tutte e tre** le voci, presentatore compreso.
 
 ```bash
 .venv/bin/python tools/voices_prepare.py --speakers "Mario Rossi" "Giulia Bianchi" \

@@ -1,0 +1,58 @@
+<!doctype html>
+<html lang="it">
+<head>
+<meta charset="utf-8">
+<title>Stepper delle fasi</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&amp;family=IBM+Plex+Mono:wght@400;500&amp;display=swap">
+<style>
+body{margin:0}
+a{color:#1c1d1f}a:hover{color:#000}
+</style>
+</helmet>
+<div style="width: 100%; overflow-x: auto; font-family: 'IBM Plex Sans', 'Helvetica Neue', sans-serif; color: #1c1d1f">
+  <nav aria-label="Fasi dell'episodio" style="min-width: 900px; box-sizing: border-box; padding: 16px 24px; background: #ffffff; border: 1px solid #d5d5d1; border-radius: 12px; display: flex; flex-direction: column; gap: 12px">
+    <ol style="margin: 0; padding: 0; list-style: none; display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 8px">
+      <sc-for list="{{steps}}" as="s" hint-placeholder-count="7">
+        <li style="display: flex">
+          <a href="{{s.href}}" aria-current="{{s.aria}}" style="display: flex; align-items: center; gap: 10px; min-height: 44px; text-decoration: none; color: #1c1d1f">
+            <span style="{{s.dot}}">
+              <sc-if value="{{s.done}}" hint-placeholder-val="{{ false }}">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12l5 5L20 7"></path></svg>
+              </sc-if>
+              <sc-if value="{{s.notDone}}" hint-placeholder-val="{{ true }}">{{s.n}}</sc-if>
+            </span>
+            <span style="{{s.label}}">{{s.name}}</span>
+          </a>
+        </li>
+      </sc-for>
+    </ol>
+  </nav>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"step":{"editor":"int","min":1,"max":7,"default":1},"$preview":{"width":1120,"height":96}}'>
+class Component extends DCLogic {
+  renderVals() {
+    const cur = parseInt(this.props.step ?? 1, 10) || 1;
+    const names = ['Documento', 'Cast e formato', 'Musiche', 'Copione', 'Stima e consenso', 'Generazione', 'Episodio'];
+    const files = ['01-Documento', '02-Cast', '03-Musiche', '04-Copione', '05-Conferma', '06-Generazione', '07-Episodio'];
+    const steps = names.map((name, i) => {
+      const n = i + 1;
+      const done = n < cur, now = n === cur;
+      const dotBase = 'flex: none; width: 28px; height: 28px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 13px; font-weight: 700; box-sizing: border-box; ';
+      const dot = now ? dotBase + 'background: #1c1d1f; color: #ffffff'
+        : done ? dotBase + 'background: #ececea; color: #1c1d1f'
+        : dotBase + 'border: 1.5px solid #b9b9b4; color: #5b5d61';
+      const label = 'font-size: 14px; line-height: 18px; ' + (now ? 'font-weight: 700; color: #1c1d1f' : done ? 'font-weight: 500; color: #1c1d1f' : 'font-weight: 500; color: #5b5d61');
+      return { n, name, done, notDone: !done, dot, label, aria: now ? 'step' : 'false', href: done ? files[i] + '.dc.html' : '#' };
+    });
+    return { steps };
+  }
+}
+</script>
+</body>
+</html>
