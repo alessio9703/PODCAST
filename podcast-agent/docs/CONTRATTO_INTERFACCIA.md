@@ -128,6 +128,27 @@ senza `details`, con l'elenco dei disponibili nel testo.
 `VersionConflict` è il caso "due persone sullo stesso copione": la UI ricarica il
 copione e mostra la versione nuova, non riprova da sola.
 
+### Errori dell'API del modello (scrittura e revisione del copione)
+
+| error_type | exit | Quando | `details` |
+|---|---|---|---|
+| `ModelAuthError` | **2** | Chiave Anthropic non valida o senza permessi (HTTP 401/403) | `status` |
+| `ModelCreditExhausted` | **2** | Credito dell'account esaurito | `status` |
+| `ModelRateLimited` | 1 | Troppe richieste (HTTP 429) | `status`, `retry_after_seconds` (null se il servizio non lo indica) |
+| `ModelOverloaded` | 1 | Servizio sovraccarico o in errore (HTTP 5xx, 529) | `status`, `retry_after_seconds` |
+| `ModelUnreachable` | 1 | Rete assente o timeout | `status: null`, `retry_after_seconds: null` |
+| `ScriptWriterError` | 1 | Altro: rifiuto del modello, risposta non valida, altri errori HTTP | — |
+
+- Exit 2 vale come per il provider vocale: blocco, nessun "Riprova", si
+  interviene su account o configurazione.
+- Gli errori con exit 1 sono passeggeri: la UI può proporre di riprovare,
+  dopo `retry_after_seconds` se c'è.
+- **Euristica:** il credito esaurito non ha un codice dedicato. L'API risponde
+  400 con un messaggio sul saldo crediti, e lo si riconosce dal testo.
+- Nessuno di questi errori crea versioni del copione, e il lock di lavoro
+  viene rilasciato.
+- I messaggi non contengono mai intestazioni HTTP né la chiave.
+
 ### `LockTimeout` · exit 1
 
 Un file condiviso (per esempio il registro delle voci) è rimasto in uso da
@@ -246,6 +267,10 @@ Esempio reale (cast completo, con un'intro scelta al passo 3):
   pronti.
 - `warnings[]` avvisa, ad esempio, se esiste già un copione scritto con un cast
   diverso.
+- `approval_revoked`: se il copione era approvato e cambiano formato, voci,
+  nomi pronunciati o descrizioni dei ruoli, l'approvazione viene ritirata e
+  qui c'è quella ritirata (`{version, sha256, at, by}`); altrimenti `null`.
+  Titolo e durata non la toccano.
 
 | exit | Quando |
 |---|---|

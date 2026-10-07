@@ -647,6 +647,86 @@ def test_revise_concurrent_edit(root: Path, config: Path, run_dir: str) -> None:
     check("e lo segnala negli avvisi", any("nel frattempo" in w for w in result.warnings), str(result.warnings))
 
 
+def test_api_errors(root: Path, config: Path, run_dir: str) -> None:
+    print("\n[C1] errori dell'API Anthropic: esiti stabili")
+    responses = root / "anthropic_risposte.json"
+    session_file = Path(run_dir) / "_script_session.json"
+    versions_before = len(json.loads(session_file.read_text(encoding="utf-8"))["versions"])
+    cases = [
+        ("auth", None, 2, "ModelAuthError", None),
+        ("permission", None, 2, "ModelAuthError", None),
+        ("credit", None, 2, "ModelCreditExhausted", None),
+        ("rate_limit", 7, 1, "ModelRateLimited", 7.0),
+        ("overloaded", None, 1, "ModelOverloaded", None),
+        ("unavailable", 3, 1, "ModelOverloaded", 3.0),
+        ("connection", None, 1, "ModelUnreachable", None),
+    ]
+    for kind, retry_after, exit_code, error_type, expected_retry in cases:
+        answer = {"raise": kind}
+        if retry_after is not None:
+            answer["retry_after"] = retry_after
+        queue_responses(responses, answer)
+        code, out, err = tool("script_revise.py", "--run-dir", run_dir, "--instructions", "Accorcia", config=config)
+        check(f"{kind}: exit {exit_code} {error_type}", code == exit_code and out.get("error_type") == error_type, str(out))
+        if exit_code == 1:
+            check(f"{kind}: retry_after in details", out["details"]["retry_after_seconds"] == expected_retry, str(out.get("details")))
+        check(f"{kind}: nessuna intestazione o chiave nel JSON", "x-api-key" not in json.dumps(out).lower() and "authorization" not in json.dumps(out).lower())
+    versions_after = len(json.loads(session_file.read_text(encoding="utf-8"))["versions"])
+    check("nessuna versione creata dalle chiamate fallite", versions_after == versions_before)
+    from src.run_lock import current_work
+
+    check("il lock di lavoro e' stato rilasciato", current_work(Path(run_dir)) is None)
+
+
+def test_cast_change_revokes(root: Path, config: Path, run_dir: str) -> None:
+    print("\n[C1] cambio di cast dopo l'approvazione")
+    current = json.loads((Path(run_dir) / "_script_session.json").read_text(encoding="utf-8"))
+    version = str(len(current["versions"]))
+    code, out, err = tool("script_approve.py", "--run-dir", run_dir, "--version", version, "--by", "Utente A", config=config)
+    check("approvazione: exit 0", code == 0, err + str(out))
+
+    code, out, _ = episode(run_dir, config, "--titolo", "Il trimestre, versione breve", "--durata", "0:20")
+    check("titolo e durata: l'approvazione resta", out["approval_revoked"] is None, str(out.get("approval_revoked")))
+    code, out, _ = tool("script_show.py", "--run-dir", run_dir, config=config)
+    check("...e il copione risulta ancora approvato", out["approved"] is True)
+
+    code, out, _ = episode(run_dir, config, "--descrizione", "ospite=analista finanziaria")
+    check("stessa descrizione di prima: nessun cambio, nessun ritiro", out["approval_revoked"] is None)
+
+    code, out, _ = episode(run_dir, config, "--descrizione", "ospite=analista finanziaria senior")
+    check("descrizione del ruolo cambiata: approvazione ritirata", out["approval_revoked"] and out["approval_revoked"]["version"] == int(version), str(out.get("approval_revoked")))
+    check("...con un avviso", any("ritirata" in w for w in out["warnings"]), str(out["warnings"]))
+    code, out, _ = tool("script_show.py", "--run-dir", run_dir, config=config)
+    check("il copione non risulta piu' approvato", out["approved"] is False and out["approved_version"] is None, str(out.get("approved")))
+
+    for args in (("--nome", f"ospite={GUEST}"), ("--formato", "conversazione")):
+        tool("script_approve.py", "--run-dir", run_dir, "--version", version, config=config)
+        new_value = (args[0], f"ospite=Giulia Maria Bianchi") if args[0] == "--nome" else args
+        code, out, _ = episode(run_dir, config, *new_value)
+        check(f"{args[0]} cambiato: approvazione ritirata", out["approval_revoked"] is not None, str(out.get("approval_revoked")))
+    episode(run_dir, config, "--formato", "intervista", "--nome", f"ospite={GUEST}", "--descrizione", "ospite=analista finanziaria")
+
+
+def test_docx(root: Path, config: Path) -> None:
+    print("\n[C1] documenti DOCX")
+    import importlib.util
+
+    if importlib.util.find_spec("docx") is None:
+        SKIPPED.append("docx")
+        print("  skip estrazione DOCX (python-docx non installato nella .venv)")
+        return
+    import docx
+
+    document = docx.Document()
+    document.add_paragraph("I ricavi del trimestre sono cresciuti del dodici per cento.")
+    document.save(str(root / "documenti" / "nota.docx"))
+    code, out, err = tool("doc_extract.py", "nota.docx", config=config)
+    check("DOCX: exit 0, parole contate, pagine null", code == 0 and out["kind"] == "docx" and out["words"] == 10 and out["pages"] is None, err + str(out))
+    (root / "documenti" / "rotto.docx").write_bytes(b"non e' uno zip")
+    code, out, _ = tool("doc_extract.py", "rotto.docx", config=config)
+    check("DOCX corrotto -> DocumentNotExtractable illeggibile", code == 1 and out["details"]["motivo"] == "illeggibile", str(out))
+
+
 def test_legacy_paths(root: Path, config: Path) -> None:
     print("\n[C1] percorsi di prima invariati")
     responses = root / "anthropic_risposte.json"
@@ -690,6 +770,9 @@ def main() -> None:
     run_dir = test_run_init_and_episode(root, config)
     test_script_write_api(root, config, run_dir)
     test_revise_concurrent_edit(root, config, run_dir)
+    test_api_errors(root, config, run_dir)
+    test_cast_change_revokes(root, config, run_dir)
+    test_docx(root, config)
     test_legacy_paths(root, config)
 
     from tests.test_tools_cli import PASSED

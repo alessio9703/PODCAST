@@ -59,7 +59,7 @@ from src.music_library import MusicLibraryError  # noqa: E402
 from src.music_mixer import MusicChangedError, MusicMixerError  # noqa: E402
 from src.pdf_reader import DocumentError  # noqa: E402
 from src.script_session import ScriptSessionError  # noqa: E402
-from src.script_writer import ScriptWriterError  # noqa: E402
+from src.script_writer import ModelAccessError, ScriptWriterError  # noqa: E402
 from src.voice_library import VoiceLibraryError  # noqa: E402
 from src.voice_provider import VoiceProviderError  # noqa: E402
 
@@ -119,6 +119,11 @@ def _classify(exc: Exception) -> tuple[int, str]:
         return EXIT_NEEDS_USER, type(exc).__name__
     if isinstance(exc, VoiceProviderError):
         return EXIT_PROVIDER, type(exc).__name__
+    # Chiave Anthropic non valida o credito esaurito: come un errore del
+    # provider vocale, non si risolve riprovando (exit 2). Rate limit,
+    # sovraccarico e rete restano exit 1 (ModelTemporarilyUnavailable).
+    if isinstance(exc, ModelAccessError):
+        return EXIT_PROVIDER, exc.kind
     if isinstance(
         exc,
         (

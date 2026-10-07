@@ -25,6 +25,115 @@ from .pdf_reader import Document
 class ScriptWriterError(RuntimeError):
     """Errore durante la scrittura o la revisione dello script."""
 
+    #: Nome stabile per il JSON di errore (vedi tools/_common.py). None = nome
+    #: della classe, come per qualunque altra eccezione.
+    error_type: str | None = None
+    details: dict[str, Any] | None = None
+
+    @property
+    def kind(self) -> str:
+        return self.error_type or type(self).__name__
+
+
+class ModelAccessError(ScriptWriterError):
+    """Il servizio del modello rifiuta l'accesso: chiave non valida, permessi,
+    credito esaurito. Exit 2: non si risolve riprovando, serve un intervento
+    su account o configurazione (come un errore del provider vocale)."""
+
+    def __init__(self, message: str, *, error_type: str, status: int | None) -> None:
+        super().__init__(message)
+        self.error_type = error_type
+        self.details = {"status": status}
+
+
+class ModelTemporarilyUnavailable(ScriptWriterError):
+    """Problema passeggero: rate limit, servizio sovraccarico, rete. Exit 1:
+    si puo' riprovare, dopo `details.retry_after_seconds` se il servizio lo dice."""
+
+    def __init__(
+        self, message: str, *, error_type: str, status: int | None, retry_after: float | None
+    ) -> None:
+        super().__init__(message)
+        self.error_type = error_type
+        self.details = {"status": status, "retry_after_seconds": retry_after}
+
+
+def _retry_after(exc: Exception) -> float | None:
+    """Il valore dell'header retry-after (secondi), se il servizio l'ha mandato."""
+    response = getattr(exc, "response", None)
+    headers = getattr(response, "headers", None)
+    if not headers:
+        return None
+    value = headers.get("retry-after")
+    try:
+        return float(value) if value is not None else None
+    except (TypeError, ValueError):
+        return None
+
+
+#: Il credito esaurito NON ha una classe propria nella libreria: l'API risponde
+#: 400 (invalid_request_error) con un messaggio sul saldo crediti. Lo si
+#: riconosce dal testo: e' un'euristica, dichiarata nel contratto.
+_CREDIT_HINTS = ("credit balance", "billing", "insufficient credit")
+
+
+def classify_api_error(exc: Exception) -> ScriptWriterError:
+    """Traduce un errore della libreria anthropic in un ScriptWriterError stabile.
+
+    Il messaggio non include MAI la richiesta ne' gli header: la chiave API
+    viaggia negli header e non deve finire in un JSON o in un log.
+    """
+    status = getattr(exc, "status_code", None)
+    detail = getattr(exc, "message", None) or str(exc)
+    if isinstance(exc, (anthropic.AuthenticationError, anthropic.PermissionDeniedError)):
+        return ModelAccessError(
+            f"Accesso all'API Anthropic rifiutato (HTTP {status}): chiave non valida o "
+            "senza permessi. Controlla ANTHROPIC_API_KEY.",
+            error_type="ModelAuthError",
+            status=status,
+        )
+    if isinstance(exc, anthropic.BadRequestError) and any(h in detail.lower() for h in _CREDIT_HINTS):
+        return ModelAccessError(
+            "Credito dell'API Anthropic esaurito: ricarica il credito dell'account "
+            "prima di scrivere o rivedere il copione.",
+            error_type="ModelCreditExhausted",
+            status=status,
+        )
+    if isinstance(exc, anthropic.RateLimitError):
+        return ModelTemporarilyUnavailable(
+            "Rate limit dell'API Anthropic: troppe richieste, riprova fra poco.",
+            error_type="ModelRateLimited",
+            status=status,
+            retry_after=_retry_after(exc),
+        )
+    overloaded = tuple(
+        cls
+        for cls in (
+            getattr(anthropic, "OverloadedError", None),
+            getattr(anthropic, "ServiceUnavailableError", None),
+            getattr(anthropic, "InternalServerError", None),
+            getattr(anthropic, "DeadlineExceededError", None),
+        )
+        if cls is not None
+    )
+    if isinstance(exc, overloaded) or (status is not None and status >= 500):
+        return ModelTemporarilyUnavailable(
+            f"L'API Anthropic e' sovraccarica o non disponibile (HTTP {status}): riprova fra poco.",
+            error_type="ModelOverloaded",
+            status=status,
+            retry_after=_retry_after(exc),
+        )
+    if isinstance(exc, anthropic.APIConnectionError):  # comprende APITimeoutError
+        return ModelTemporarilyUnavailable(
+            "Impossibile contattare l'API Anthropic (rete o timeout): riprova fra poco.",
+            error_type="ModelUnreachable",
+            status=None,
+            retry_after=None,
+        )
+    if isinstance(exc, anthropic.APIStatusError):
+        return ScriptWriterError(f"Errore dell'API Anthropic (HTTP {status}): {detail}")
+    return ScriptWriterError(f"Errore dell'API Anthropic: {detail}")
+
 
 #: Le inline tag di espressivita' ([esitante], [ride], [enfasi]...) scritte
 #: dentro `testo`. Il provider le INTERPRETA e non le pronuncia: per tutto cio'
@@ -619,22 +728,8 @@ Durata indicativa: circa {self.target_minutes} minuti di parlato, cioe' all'inci
                     "format": {"type": "json_schema", "schema": _SCHEMA},
                 },
             )
-        except anthropic.AuthenticationError as exc:
-            raise ScriptWriterError(
-                f"API key Anthropic non valida: {exc}"
-            ) from exc
-        except anthropic.RateLimitError as exc:
-            raise ScriptWriterError(
-                f"Rate limit dell'API Anthropic: riprova fra qualche minuto. {exc}"
-            ) from exc
-        except anthropic.APIStatusError as exc:
-            raise ScriptWriterError(
-                f"Errore dell'API Anthropic (HTTP {exc.status_code}): {exc.message}"
-            ) from exc
-        except anthropic.APIConnectionError as exc:
-            raise ScriptWriterError(
-                f"Impossibile contattare l'API Anthropic: {exc}"
-            ) from exc
+        except anthropic.AnthropicError as exc:
+            raise classify_api_error(exc) from exc
 
         if response.stop_reason == "refusal":
             detail = getattr(response, "stop_details", None)
@@ -671,6 +766,9 @@ __all__ = [
     "ScriptWriter",
     "PodcastScript",
     "ScriptWriterError",
+    "ModelAccessError",
+    "ModelTemporarilyUnavailable",
+    "classify_api_error",
     "INLINE_TAG",
     "spoken_text",
 ]

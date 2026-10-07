@@ -40,7 +40,7 @@ _DEPENDENCIES = [
     ("yaml", "PyYAML", True),
     ("pypdf", "pypdf", True),
     ("imageio_ffmpeg", "imageio-ffmpeg", True),
-    ("docx", "python-docx", False),
+    ("docx", "python-docx", True),
     ("lameenc", "lameenc", False),
 ]
 

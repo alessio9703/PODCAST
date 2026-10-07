@@ -20,6 +20,10 @@ Forme ammesse per una risposta:
     {"text": "..."}             -> testo grezzo (per provare JSON non valido)
     {"stop_reason": "refusal"}  -> rifiuto del modello
     {"stop_reason": "max_tokens"}
+    {"raise": "auth" | "permission" | "credit" | "rate_limit" | "overloaded"
+              | "unavailable" | "connection", "retry_after": 7}
+                                -> solleva la stessa eccezione della libreria
+                                   anthropic che solleverebbe l'API vera
 
 Il log registra modello, system prompt e messaggi di ogni chiamata: i test lo
 leggono per verificare COSA e' stato chiesto al modello (formato, presentatore,
@@ -76,6 +80,9 @@ class FakeAnthropic:
         answer, rest = queue[0], queue[1:]
         self._responses_file.write_text(json.dumps(rest, ensure_ascii=False), encoding="utf-8")
 
+        if "raise" in answer:
+            raise _api_error(answer["raise"], answer.get("retry_after"))
+
         if "json" in answer:
             text = json.dumps(answer["json"], ensure_ascii=False)
         else:
@@ -85,6 +92,31 @@ class FakeAnthropic:
             stop_details=None,
             content=[SimpleNamespace(type="text", text=text)],
         )
+
+
+def _api_error(kind: str, retry_after: float | None) -> Exception:
+    """Le eccezioni VERE della libreria anthropic, con risposta HTTP finta."""
+    import anthropic
+    import httpx2
+
+    request = httpx2.Request("POST", "https://api.anthropic.com/v1/messages")
+    headers = {"retry-after": str(retry_after)} if retry_after is not None else {}
+
+    def response(status: int):  # noqa: ANN202
+        return httpx2.Response(status, headers=headers, request=request)
+
+    if kind == "connection":
+        return anthropic.APIConnectionError(request=request)
+    table = {
+        "auth": (anthropic.AuthenticationError, 401, "invalid x-api-key"),
+        "permission": (anthropic.PermissionDeniedError, 403, "permission denied"),
+        "credit": (anthropic.BadRequestError, 400, "Your credit balance is too low to access the Anthropic API."),
+        "rate_limit": (anthropic.RateLimitError, 429, "rate limit exceeded"),
+        "overloaded": (getattr(anthropic, "OverloadedError", anthropic.InternalServerError), 529, "Overloaded"),
+        "unavailable": (anthropic.InternalServerError, 500, "internal error"),
+    }
+    cls, status, message = table[kind]
+    return cls(message, response=response(status), body=None)
 
 
 def queue_responses(responses_file: Path, *answers: dict[str, Any]) -> None:

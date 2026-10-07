@@ -24,6 +24,7 @@ from .fileio import write_text_atomic
 from .music_context import music_durations
 from .pdf_reader import extract_text
 from .registry import VoiceRegistry
+from .run_lock import session_lock
 from .script_session import FILENAME as SESSION_FILENAME
 from .script_session import ScriptSession
 from .voice_library import VoiceLibrary, VoiceLibraryError, spoken_name_guess
@@ -58,6 +59,37 @@ def set_document(episode: EpisodeConfig, run_dir: Path, document_arg: str, confi
     return episode.documento
 
 
+def _cast_snapshot(episode: EpisodeConfig) -> tuple:
+    """Cio' che, se cambia, rende vecchia un'approvazione: formato e ruoli.
+
+    Titolo e durata NO: non cambiano chi parla ne' come viene presentato.
+    """
+    return (
+        episode.formato,
+        tuple(
+            sorted(
+                (role, data.get("voce"), data.get("nome_pronunciato"), data.get("descrizione"))
+                for role, data in episode.ruoli.items()
+            )
+        ),
+    )
+
+
+def revoke_approval_if_any(run_dir: Path) -> dict[str, Any] | None:
+    """Ritira l'approvazione del copione, se c'e'. Ritorna quella ritirata."""
+    session_path = Path(run_dir) / SESSION_FILENAME
+    if not session_path.is_file():
+        return None
+    with session_lock(run_dir):
+        session = ScriptSession.load(session_path)
+        if not session.approved:
+            return None
+        revoked = session.approved
+        session.approved = None
+        session.save()
+    return revoked
+
+
 def apply_changes(
     run_dir: Path,
     config: Any,
@@ -71,8 +103,14 @@ def apply_changes(
     descriptions: dict[str, str] | None = None,
     remove: list[str] | None = None,
     accept_incomplete_names: bool = False,
-) -> tuple[EpisodeConfig, list[str]]:
-    """Applica le modifiche sotto lock, tutte o nessuna. Ritorna (config, avvisi).
+) -> tuple[EpisodeConfig, list[str], dict[str, Any] | None]:
+    """Applica le modifiche sotto lock, tutte o nessuna.
+
+    Ritorna (config, avvisi, approvazione ritirata o None). Se cambiano
+    formato o ruoli (voce, nome pronunciato, descrizione) e il copione era
+    approvato, l'approvazione viene ritirata: il copione e' stato approvato
+    per un altro cast, anche se il suo testo (e quindi lo sha256) e' rimasto
+    uguale. Titolo e durata non la toccano.
 
     L'ordine conta ed e' quello dello schermo: formato prima dei ruoli (i ruoli
     ammessi dipendono dal formato), voce prima del nome (assegnare una voce
@@ -87,6 +125,7 @@ def apply_changes(
 
     with locked_update(run_dir):
         episode = EpisodeConfig.load(run_dir) or EpisodeConfig()
+        before = _cast_snapshot(episode)
         if title is not None:
             episode.set_title(title)
         if document is not None:
@@ -104,9 +143,16 @@ def apply_changes(
         for role, text in (descriptions or {}).items():
             episode.set_description(role, text)
         episode.save(run_dir)
+        cast_changed = _cast_snapshot(episode) != before
 
+    revoked = revoke_approval_if_any(run_dir) if cast_changed else None
+    if revoked:
+        warnings.append(
+            f"Il cast e' cambiato dopo l'approvazione della versione {revoked.get('version')}: "
+            "l'approvazione e' stata ritirata, il copione va riapprovato."
+        )
     warnings.extend(_script_mismatch(run_dir, episode))
-    return episode, warnings
+    return episode, warnings, revoked
 
 
 def _script_mismatch(run_dir: Path, episode: EpisodeConfig) -> list[str]:
@@ -201,4 +247,4 @@ def episode_view(run_dir: Path, config: Any, episode: EpisodeConfig | None = Non
     }
 
 
-__all__ = ["apply_changes", "episode_view", "resolve_voice", "set_document"]
+__all__ = ["apply_changes", "episode_view", "resolve_voice", "revoke_approval_if_any", "set_document"]

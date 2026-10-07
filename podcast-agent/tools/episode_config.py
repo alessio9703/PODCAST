@@ -23,6 +23,10 @@ Esiti:
   - nome da pronunciare senza cognome -> exit 3 SpokenNameIncomplete: si
     aggiunge il cognome, oppure si conferma con --accetta-nome-incompleto;
   - documento senza testo (scansione, protetto) -> exit 1 DocumentNotExtractable.
+
+Se il copione era approvato, cambiare formato, voci, nomi pronunciati o
+descrizioni dei ruoli ritira l'approvazione (`approval_revoked` nel JSON):
+il copione era stato approvato per un altro cast. Titolo e durata no.
 """
 
 from __future__ import annotations
@@ -91,8 +95,9 @@ def main() -> None:
 
     warnings: list[str] = []
     episode = None
+    revoked = None
     if any(v not in (None, {}, [], False) for k, v in changes.items() if k != "accept_incomplete_names"):
-        episode, warnings = apply_changes(run_dir, config, **changes)
+        episode, warnings, revoked = apply_changes(run_dir, config, **changes)
         note("Episodio aggiornato.")
     for warning in warnings:
         note(f"avviso: {warning}")
@@ -100,7 +105,7 @@ def main() -> None:
     view = episode_view(run_dir, config, episode)
     if view["mancanti"]:
         note("Manca ancora: " + ", ".join(m["campo"] + (f" ({m['ruolo']})" if m.get("ruolo") else "") for m in view["mancanti"]))
-    emit({**view, "warnings": warnings})
+    emit({**view, "warnings": warnings, "approval_revoked": revoked})
 
 
 if __name__ == "__main__":

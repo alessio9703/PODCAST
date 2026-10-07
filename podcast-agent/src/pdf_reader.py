@@ -160,8 +160,9 @@ def _read_docx(path: Path) -> Document:
         import docx  # type: ignore
     except ImportError as exc:
         raise DocumentError(
-            "Per leggere i .docx serve il pacchetto 'python-docx': "
-            "pip install python-docx"
+            "Per leggere i .docx serve il pacchetto 'python-docx', che e' fra le "
+            "dipendenze obbligatorie: .venv/bin/pip install -r requirements.txt "
+            "(tools/doctor.py dice cosa manca)."
         ) from exc
 
     try:

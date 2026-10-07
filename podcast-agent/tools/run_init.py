@@ -40,7 +40,7 @@ def main() -> None:
         extract_text(args.document, search_dir=config.documents_dir)
     run_dir = make_run_dir(config.output_dir, args.title)
     note(f"Cartella episodio creata: {run_dir}")
-    episode, _ = apply_changes(run_dir, config, title=args.title, document=args.document)
+    episode, _, _ = apply_changes(run_dir, config, title=args.title, document=args.document)
 
     emit(
         {
