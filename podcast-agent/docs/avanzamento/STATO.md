@@ -11,7 +11,7 @@ resoconti accanto a questo file:
 - `C2.md`, `C2-sicurezza.md`
 - `C3.md`, `C3-sicurezza.md`
 - `C4.md`, `C4-sicurezza.md`
-- `C5.md` (con il riepilogo finale dell'integrazione web)
+- `C5.md` (con il riepilogo finale dell'integrazione web), `C5-sicurezza.md`
 
 ## 1. Commit
 
@@ -35,7 +35,8 @@ resoconti accanto a questo file:
 | `7b6b434` | **C4** Archivio, librerie, impostazioni; lock delle lezioni; doctor senza percorsi |
 | `e13ed9f` | rapporto di sicurezza C4 |
 | `adbbab6` | sicurezza C4: medie e basse corrette |
-| (questo) | **C5** contratto completo, README, LEGENDA, verifica finale, riepilogo |
+| `62abef2` | **C5** contratto completo, README, LEGENDA, verifica finale, riepilogo |
+| (questo) | rapporto di sicurezza C5 |
 
 Test all'ultimo commit, sempre con `.venv/bin/python`: smoke 68, tools_cli 183 (+2
 saltati, servono `ANTHROPIC_API_KEY`), music 73, lessons 80, web_integration 617.
@@ -51,7 +52,7 @@ saltati, servono `ANTHROPIC_API_KEY`), music 73, lessons 80, web_integration 617
 | C2 | Produzione: passi 5 (stima e consenso) e 6 (generazione) | **fatta**; revisione: 1 alta, 4 medie, 5 basse, **tutte corrette** |
 | C3 | Episodio e correzioni: passo 7 | **fatta**; revisione (con le correzioni di C2): 0 alte, 2 medie, 6 basse, **tutte corrette** |
 | C4 | Archivio e librerie (Documenti, Voci, Musiche), Impostazioni, verifica di Lezioni e Diagnostica | **fatta**; revisione: 0 alte, 3 medie, 5 basse, **tutte corrette** |
-| C5 | Contratto completo + README/LEGENDA + riepilogo finale | **fatta** (verifica finale compresa); revisione di sicurezza da fare |
+| C5 | Contratto completo + README/LEGENDA + riepilogo finale | **fatta** (verifica finale compresa); revisione: 0 alte, 2 medie e 5 basse **in attesa di decisione** |
 | C6 | Allineamento di `run.py` a `src/music_context.py`, fase finale dedicata | da fare |
 
 A fine di **ogni** fase: revisione di sicurezza (`<fase>-sicurezza.md`), alte corrette
@@ -275,7 +276,11 @@ musiche → copione → modifica → approva → stima → consenso → produce 
 
 ## 4. Richieste ricevute e non ancora completate
 
-1. **Revisione di sicurezza di C5** (`adbbab6..HEAD`: contratto e documentazione).
+1. **Decidere medie e basse della revisione C5** (`C5-sicurezza.md`): MEDIA-1 file di
+   libreria con lo stesso nome e un'altra estensione; MEDIA-2 timeout di
+   `documents_list.py` troppo corto nel contratto; BASSA-1…5 (file serviti con percorsi
+   assoluti, frase sbagliata su README/LEGENDA, `--` davanti ai nomi posizionali, firma
+   dei file caricati per ffmpeg, flag di conferma nelle autorizzazioni).
 2. **OK per C6** (`run.py` su `src/music_context.py`; `lessons --propose` con
    `classify_api_error`).
 3. **Pulizia**: `.venv-vecchia-copia/` e i due `.DS_Store` tracciati.
