@@ -3006,8 +3006,91 @@ def test_c7_consent() -> None:
     check("la chiave delle revoche non e' una voce: non si conta, non si legge, non si registra", proc.stdout.split() == ["2", "True", "False", "rifiutato"], proc.stdout + proc.stderr)
 
 
+def test_c7_run_py() -> None:
+    """B1: run.py passa da src/voice_prep (lock, marcatore, hash) e chiede il consenso."""
+    print("\n[C7] B1 · run.py: stesse protezioni dei tool, consenso chiesto e registrato")
+    root = Path(tempfile.mkdtemp(prefix="podcast-web-c7-run-"))
+    setup(root)
+    config = write_c2_config(root, "config-c7-run.yaml")
+    failing = write_c2_config(root, "config-c7-run-guasto.yaml", fail_clone=True)
+
+    def step(voices: list[str], answers: list[str], cfg: Path = config) -> tuple[str, str]:
+        proc = run_python(
+            f"""
+            import builtins, importlib.util, json
+            from src.config import load_config
+            from src.voice_library import VoiceLibrary
+            spec = importlib.util.spec_from_file_location("run_cli", "run.py")
+            run = importlib.util.module_from_spec(spec); spec.loader.exec_module(run)
+            config = load_config({str(cfg)!r})
+            library = VoiceLibrary(config.voices_dir, config.accepted_extensions); library.scan()
+            selected = [v for v in library.voices if v.name in {voices!r}]
+            answers = iter({answers!r})
+            def fake_input(prompt=""):
+                value = next(answers)
+                print("DOMANDA", prompt.strip(), "->", value)
+                return value
+            builtins.input = fake_input
+            try:
+                print("MAPPA", json.dumps(run.step_prepare_voices(config, config.build_provider(), selected)))
+            except SystemExit as exc:
+                print("USCITA", exc.code)
+            """
+        )
+        return proc.stdout, proc.stderr
+
+    meta_file = root / "voci" / "Mario Rossi.json"
+    out, err = step(["Mario Rossi"], ["n"])
+    check("consenso non confermato -> esce, nessuna clonazione, niente registrato", "USCITA 1" in out and clone_attempts(root) == [] and not meta_file.exists(), out + err)
+    out, err = step(["Mario Rossi"], ["", "s", "", "Utente A"])
+    meta = json.loads(meta_file.read_text(encoding="utf-8")) if meta_file.exists() else {}
+    registry = json.loads((root / "voices_registry.json").read_text(encoding="utf-8")) if (root / "voices_registry.json").exists() else {}
+    from src.registry import file_hash as _file_hash
+    audio_hash = _file_hash(root / "voci" / "Mario Rossi.wav")
+    check(
+        "si' esplicito + chi conferma: consenso registrato come dal web, poi clonata una volta",
+        "MAPPA" in out and len(clone_attempts(root)) == 1 and (meta.get("consenso") or {}).get("da") == "Utente A"
+        and meta["consenso"]["audio_sha256"] == audio_hash,
+        out + err,
+    )
+    check("il registro lega il voice_id allo sha256 dei byte clonati", registry.get("Mario Rossi", {}).get("audio_hash") == audio_hash, str(registry))
+    out, err = step(["Mario Rossi"], [])
+    check("voce gia' clonata con consenso: riusata senza domande", "MAPPA" in out and len(clone_attempts(root)) == 1 and "DOMANDA" not in out, out + err)
+
+    proc = run_python(
+        f"""
+        from src.config import load_config
+        from src.voice_prep import _clone_marker
+        from src.voice_meta import record_consent
+        from pathlib import Path
+        config = load_config({str(config)!r})
+        record_consent(Path({str(root / "voci" / "Giulia Bianchi.wav")!r}), voice="Giulia Bianchi", by="Utente A")
+        _clone_marker(config, "Giulia Bianchi").write_text('{{"voce": "Giulia Bianchi", "dal": "2026-10-07T10:00:00"}}', encoding="utf-8")
+        """
+    )
+    out, err = step(["Giulia Bianchi"], [])
+    check("clonazione dall'esito incerto lasciata da un altro processo: run.py non ritenta", "USCITA 1" in out and "--confirm-clone-retry" in err and len(clone_attempts(root)) == 1, out + err)
+
+    run_python(
+        f"""
+        from src.config import load_config
+        from src.voice_prep import resolve_library_voice, revoke_voice_consent
+        config = load_config({str(config)!r})
+        revoke_voice_consent(config, resolve_library_voice(config, "Mario Rossi"), by="Utente B")
+        """
+    )
+    out, err = step(["Mario Rossi"], ["s", "Utente A"])
+    check("consenso revocato: run.py si ferma sempre, senza chiedere e senza riusare", "USCITA 1" in out and "revocato" in err and "DOMANDA" not in out and len(clone_attempts(root)) == 1, out + err)
+
+    out, err = step(["Anna Neri"], ["s", "Utente A"], cfg=failing)
+    check("clonazione fallita: un solo tentativo, esce", "USCITA 1" in out and len(clone_attempts(root)) == 2, out + err)
+    out, err = step(["Anna Neri"], [], cfg=failing)
+    check("rilanciato: il marcatore blocca, nessun secondo tentativo", "USCITA 1" in out and "--confirm-clone-retry" in err and len(clone_attempts(root)) == 2, out + err)
+
+
 def test_c7() -> None:
     test_c7_consent()
+    test_c7_run_py()
 
 
 def test_ffmpeg_input_confined() -> None:
