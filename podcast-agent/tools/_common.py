@@ -60,6 +60,8 @@ from src.lessons import LessonsError  # noqa: E402
 from src.music_library import MusicLibraryError  # noqa: E402
 from src.music_mixer import MusicChangedError, MusicMixerError  # noqa: E402
 from src.paths import confine_run_dir, confine_to  # noqa: E402
+from src.redaction import redact as _redact  # noqa: E402
+from src.redaction import register_roots as _register_roots  # noqa: E402
 from src.pdf_reader import DocumentError  # noqa: E402
 from src.script_session import ScriptSessionError  # noqa: E402
 from src.script_writer import ModelAccessError, ScriptWriterError  # noqa: E402
@@ -153,11 +155,16 @@ def web_mode() -> bool:
     return value not in ("", "0", "false", "no", "off")
 
 
-def parse_args(parser: argparse.ArgumentParser, *, web_forbidden: tuple[str, ...] = ()) -> argparse.Namespace:
+def parse_args(
+    parser: argparse.ArgumentParser, *, web_forbidden: tuple[str, ...] = (), web_allowed: bool = True
+) -> argparse.Namespace:
     """parser.parse_args() + il controllo della modalita' web.
 
     `web_forbidden`: argomenti da rifiutare in modalita' web solo in QUESTO
     tool, oltre a WEB_FORBIDDEN_ARGS (es. --document di script_write.py).
+    `web_allowed=False`: il tool intero non si usa dall'interfaccia (es.
+    voices_prepare.py: le voci le prepara produce.py, legato al copione
+    approvato).
 
     Il controllo guarda i valori GIA' interpretati da argparse e non il testo
     della riga di comando: cosi' valgono anche le abbreviazioni (`--trusted`,
@@ -186,6 +193,12 @@ def parse_args(parser: argparse.ArgumentParser, *, web_forbidden: tuple[str, ...
                 + ", ".join(used)
                 + ".",
                 details={"argomenti": used},
+            )
+        if not web_allowed:
+            command = Path(sys.argv[0]).name
+            raise NotAllowedInWebMode(
+                f"{command} non si usa dall'interfaccia web.",
+                details={"argomenti": [], "comando": command},
             )
     args._web_checked = True  # noqa: SLF001 - vedi bootstrap()
     return args
@@ -267,66 +280,6 @@ def _classify(exc: Exception) -> tuple[int, str]:
 def _kind(exc: Exception) -> str:
     """error_type esplicito se l'errore lo dichiara, altrimenti il nome della classe."""
     return getattr(exc, "kind", None) or type(exc).__name__
-
-
-#: Cartelle configurate (output/, documenti/, ...) da accorciare al loro nome
-#: nei messaggi: possono stare fuori dal progetto (es. /srv/podcast/output).
-#: Le registra bootstrap() appena letto config.yaml.
-_KNOWN_ROOTS: dict[str, str] = {}
-
-#: Cosa puo' seguire un percorso: un separatore, una virgoletta, uno spazio,
-#: la punteggiatura di una frase o la fine. Serve a non toccare
-#: /Users/mario2 quando la home e' /Users/mario.
-_PATH_END = r"(?=$|[\\/'\"\s,;:)\]])"
-
-
-def _register_roots(config: Config) -> None:
-    for attr in ("output_dir", "documents_dir", "voices_dir", "music_dir"):
-        try:
-            path = getattr(config, attr)
-        except Exception:  # noqa: BLE001 - una cartella non configurata non va accorciata
-            continue
-        _KNOWN_ROOTS[str(path)] = path.name
-
-
-def _replacements() -> list[tuple[str, str]]:
-    """(percorso assoluto, forma corta), dal piu' lungo al piu' corto."""
-    pairs = dict(_KNOWN_ROOTS)
-    pairs[str(PROJECT_ROOT)] = "."
-    home = str(Path.home())
-    if home and home not in (os.sep, "/"):
-        pairs.setdefault(home, "~")
-    return sorted(pairs.items(), key=lambda item: len(item[0]), reverse=True)
-
-
-def _redact(value: Any) -> Any:
-    """Toglie dai messaggi la parte del percorso che rivela il server.
-
-    I messaggi arrivano fino al browser: `/Users/<nome>/.../podcast-agent/
-    output/run/x.json` diventa `output/run/x.json`; una cartella configurata
-    fuori dal progetto diventa il suo nome; il resto sotto la home diventa
-    `~/...`. Vale anche per la forma `repr` dei percorsi Windows nei messaggi
-    degli OSError (`'C:\\\\Users\\\\...'`, barre raddoppiate).
-
-    I moduli in src/ usano gia' solo i nomi nei messaggi destinati alla UI:
-    questo e' il controllo di riserva per quelli che non lo fanno (revisioni
-    di sicurezza C0+C1, BASSA-2, e del diff delle correzioni, BASSA-4). Vale
-    per gli errori e per tutti i messaggi su stderr (note()); le risposte di
-    successo tengono le chiavi assolute che il subagent usa (vedi il
-    contratto).
-    """
-    if isinstance(value, str):
-        for absolute, short in _replacements():
-            for variant in {absolute, absolute.replace("\\", "\\\\")}:
-                prefix = "" if short == "." else short + "/"
-                value = re.sub(re.escape(variant) + r"[\\/]+", lambda _m, p=prefix: p, value)
-                value = re.sub(re.escape(variant) + _PATH_END, lambda _m, s=short: s, value)
-        return value
-    if isinstance(value, dict):
-        return {key: _redact(item) for key, item in value.items()}
-    if isinstance(value, (list, tuple)):
-        return [_redact(item) for item in value]
-    return value
 
 
 def _emit_error(kind: str, message: str, code: int, details: dict[str, Any] | None) -> None:

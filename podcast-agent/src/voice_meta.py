@@ -31,7 +31,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
-from .errors import DomainError
+from .errors import DomainError, NeedsUserDecision
 from .fileio import file_lock, write_json_atomic
 from .registry import file_hash
 
@@ -45,6 +45,15 @@ CONSENT_REVOKED = "revocato"
 
 class VoiceMetaError(DomainError):
     """File dei metadati di una voce illeggibile o richiesta non valida."""
+
+
+class RecordingChanged(NeedsUserDecision):
+    """La registrazione non e' quella che l'utente ha visto: consenso non registrato.
+
+    Revisione di sicurezza C2, MEDIA-3: fra la stima (dove l'utente vede la
+    voce) e il clic sulla casella del consenso il file puo' essere stato
+    sostituito. Il consenso si registra solo sullo sha256 atteso.
+    """
 
 
 def meta_path(audio_path: Path | str) -> Path:
@@ -67,7 +76,29 @@ def load_meta(audio_path: Path | str) -> dict[str, Any]:
         ) from exc
     if not isinstance(raw, dict):
         raise VoiceMetaError(f"{path.name} deve contenere un oggetto JSON.", details={"file": path.name})
+    _validate(raw, path)
     return raw
+
+
+def _validate(meta: dict[str, Any], path: Path) -> None:
+    """Tipi attesi: un file scritto a mano male e' un errore stabile, non un crash.
+
+    Revisione di sicurezza C2, BASSA-4.
+    """
+    for key in ("consenso", "consenso_revocato"):
+        value = meta.get(key)
+        if value is not None and not isinstance(value, dict):
+            raise VoiceMetaError(
+                f"{path.name}: '{key}' deve essere un oggetto o null.", details={"file": path.name, "campo": key}
+            )
+    consent = meta.get("consenso")
+    if consent is not None:
+        digest = consent.get("audio_sha256")
+        if not isinstance(digest, str) or not digest.startswith("sha256:"):
+            raise VoiceMetaError(
+                f"{path.name}: il consenso non ha uno sha256 valido della registrazione.",
+                details={"file": path.name, "campo": "consenso.audio_sha256"},
+            )
 
 
 def consent_state(
@@ -88,13 +119,31 @@ def consent_state(
     return CONSENT_GRANTED
 
 
+def consent_revoked(audio_path: Path | str) -> bool:
+    """True se il consenso e' stato revocato esplicitamente. Non calcola hash.
+
+    Serve a produce() per accorgersi di una revoca fra una battuta e l'altra.
+    Un file dei metadati illeggibile conta come revocato: nel dubbio ci si
+    ferma.
+    """
+    try:
+        meta = load_meta(audio_path)
+    except VoiceMetaError:
+        return True
+    return not meta.get("consenso") and bool(meta.get("consenso_revocato"))
+
+
 def consent_view(audio_path: Path | str, meta: dict[str, Any] | None = None) -> dict[str, Any]:
     """Cio' che la UI mostra del consenso: stato, chi e quando."""
     meta = load_meta(audio_path) if meta is None else meta
     consent = meta.get("consenso") or {}
     revoked = meta.get("consenso_revocato") or {}
+    current = file_hash(audio_path)
     return {
-        "stato": consent_state(audio_path, meta),
+        "stato": consent_state(audio_path, meta, audio_sha256=current),
+        # Lo sha256 della registrazione ATTUALE: e' quello che l'interfaccia
+        # ripassa a voice_meta.py --consent --expect-sha256.
+        "audio_sha256": current,
         "da": consent.get("da"),
         "il": consent.get("il"),
         "revocato_da": revoked.get("da") if not consent else None,
@@ -116,19 +165,33 @@ def _require_by(by: str | None) -> str:
     return " ".join(by.split())
 
 
-def record_consent(audio_path: Path | str, *, voice: str, by: str | None) -> dict[str, Any]:
-    """Registra il consenso della persona per la registrazione attuale."""
+def record_consent(
+    audio_path: Path | str, *, voice: str, by: str | None, expect_sha256: str | None = None
+) -> dict[str, Any]:
+    """Registra il consenso della persona per la registrazione attuale.
+
+    `expect_sha256`: lo sha256 della registrazione che l'utente ha visto
+    (consent_view()["audio_sha256"]). Se il file ora e' diverso, niente
+    consenso: exit 3 RecordingChanged.
+    """
     who = _require_by(by)
     audio_path = Path(audio_path)
     target = meta_path(audio_path)
     with file_lock(target):
+        current = file_hash(audio_path)
+        if expect_sha256 is not None and expect_sha256 != current:
+            raise RecordingChanged(
+                f"La registrazione di {voice} e' cambiata dopo che l'hai vista: il consenso non "
+                "e' stato registrato. Ricarica la pagina, riascolta e conferma di nuovo.",
+                details={"voce": voice, "atteso": expect_sha256, "attuale": current},
+            )
         meta = load_meta(audio_path)
         meta["schema_version"] = SCHEMA_VERSION
         meta["voce"] = voice
         meta["consenso"] = {
             "da": who,
             "il": _now(),
-            "audio_sha256": file_hash(audio_path),
+            "audio_sha256": current,
             "file": audio_path.name,
         }
         meta.pop("consenso_revocato", None)
@@ -161,7 +224,9 @@ __all__ = [
     "CONSENT_MISSING",
     "CONSENT_OUTDATED",
     "CONSENT_REVOKED",
+    "RecordingChanged",
     "VoiceMetaError",
+    "consent_revoked",
     "consent_state",
     "consent_view",
     "load_meta",

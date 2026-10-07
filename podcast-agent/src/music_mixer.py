@@ -34,8 +34,8 @@ from pathlib import Path
 from typing import Any, Callable
 
 from .audio_assembler import AudioAssembler, slugify
-from .ffmpeg_tool import find_ffmpeg, require_ffmpeg
-from .fileio import write_json_atomic
+from .ffmpeg_tool import FFMPEG_TIMEOUT_SECONDS, find_ffmpeg, require_ffmpeg
+from .fileio import atomic_output, write_json_atomic
 from .music_library import (
     CATEGORIES,
     MusicLibrary,
@@ -625,7 +625,12 @@ def _run_ffmpeg(args: list[str]) -> str:
     trovarlo (pacchetto imageio-ffmpeg, poi PATH di sistema)."""
     exe = require_ffmpeg()
     try:
-        result = subprocess.run([exe, *args], capture_output=True, text=True)
+        result = subprocess.run([exe, *args], capture_output=True, text=True, timeout=FFMPEG_TIMEOUT_SECONDS)
+    except subprocess.TimeoutExpired as exc:
+        raise MusicMixerError(
+            f"ffmpeg non ha finito entro {FFMPEG_TIMEOUT_SECONDS} secondi: fermato. "
+            "Controlla i file delle musiche e lo spazio su disco, poi rilancia."
+        ) from exc
     except OSError as exc:
         raise MusicMixerError(f"Impossibile eseguire ffmpeg ({exe}): {exc}") from exc
     if result.returncode != 0:
@@ -789,12 +794,16 @@ def _encode_mp3(src: Path, dst: Path, bitrate: int) -> None:
     """Codifica finale via ffmpeg. Il percorso musica richiede gia' ffmpeg per il
     mix (verificato in preflight()): non c'e' bisogno del ripiego lameenc che
     usa invece assemble() quando non c'e' nessuna musica."""
-    _run_ffmpeg([
-        "-y", "-loglevel", "error", "-i", str(src),
-        "-codec:a", "libmp3lame", "-b:a", f"{bitrate}k", str(dst),
-    ])
-    if not dst.is_file():
-        raise MusicMixerError("ffmpeg non ha prodotto il file mp3 finale.")
+    # Su un temporaneo, poi il nome finale: un'interruzione a meta' codifica
+    # non lascia un episodio troncato con il nome buono.
+    try:
+        with atomic_output(dst) as partial:
+            _run_ffmpeg([
+                "-y", "-loglevel", "error", "-i", str(src),
+                "-codec:a", "libmp3lame", "-b:a", f"{bitrate}k", str(partial),
+            ])
+    except OSError as exc:
+        raise MusicMixerError("ffmpeg non ha prodotto il file mp3 finale.") from exc
 
 
 # ----------------------------------------------------------------------

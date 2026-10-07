@@ -24,10 +24,11 @@ resoconti accanto a questo file:
 | `a6361f1` | sicurezza C0+C1: medie e basse chiuse, modalità web, python-docx installato |
 | `b3c6ed8` | correzioni della revisione del diff: limiti di lavoro e tempo, `InvalidArguments`, `_redact`, divieti web |
 | `dde378c` | **C2** produzione: consenso, stima per la run, `produce.py` con eventi e interruzione |
-| (questo) | sicurezza C2: ALTA-1 corretta (consenso ricontrollato sui byte clonati) |
+| `4d8ede8` | sicurezza C2: ALTA-1 corretta (consenso ricontrollato sui byte clonati) |
+| (questo) | sicurezza C2: medie e basse corrette |
 
 Test all'ultimo commit, sempre con `.venv/bin/python`: smoke 68, tools_cli 183 (+2
-saltati, servono `ANTHROPIC_API_KEY`), music 73, lessons 80, web_integration 401.
+saltati, servono `ANTHROPIC_API_KEY`), music 73, lessons 80, web_integration 430.
 
 ## 2. Fasi
 
@@ -37,7 +38,7 @@ saltati, servono `ANTHROPIC_API_KEY`), music 73, lessons 80, web_integration 401
 | C1 | Copione: passi 1–4 e pannello Confronto | **fatta** (+ decisioni sui dubbi) |
 | Sicurezza C0+C1 | Revisione, rapporto, correzione delle alte | **fatta**: alte, medie e basse corrette |
 | Correzioni + modalità web | MEDIA-1, BASSA-1/2/3, `PODCAST_AGENT_WEB=1` | **fatta**; revisione del diff: 0 alte, 2 medie e 4 basse, **tutte corrette** |
-| C2 | Produzione: passi 5 (stima e consenso) e 6 (generazione) | **fatta**; revisione: 1 alta **corretta**, 4 medie e 5 basse **in attesa di decisione** |
+| C2 | Produzione: passi 5 (stima e consenso) e 6 (generazione) | **fatta**; revisione: 1 alta, 4 medie, 5 basse, **tutte corrette** |
 | C3 | Episodio e correzioni: passo 7 | da fare |
 | C4 | Archivio e librerie (Documenti, Voci, Musiche), Impostazioni, verifica di Lezioni e Diagnostica | da fare |
 | C5 | Contratto completo + README/LEGENDA + riepilogo finale | da fare (il contratto è già aggiornato per C0–C1) |
@@ -174,6 +175,12 @@ musiche → copione → modifica → approva → stima → consenso → produce 
   `script_write.py` senza `episodio.json`.
 - **Motivo**: allineamento al wireframe senza togliere funzioni a chi le usa oggi.
 
+### D11 · Consenso per voce (2026-10-07)
+- **Decisione dell'utente**: il consenso vale per la voce (per la registrazione, legato
+  al suo sha256), non per il singolo episodio. Un consenso revocato blocca anche il riuso;
+  una registrazione sostituita va riconfermata. `clone_cost_usd` sta in
+  `providers.<nome>.clone_cost_usd`.
+
 ### D5 · Consenso
 - **Decisione del piano** (approvato il 2026-10-06): il blocco "niente clonazione senza
   consenso registrato" vale per i tool (`voices_prepare.py`, `produce.py`) e quindi per
@@ -256,12 +263,7 @@ musiche → copione → modifica → approva → stima → consenso → produce 
 
 ## 4. Richieste ricevute e non ancora completate
 
-1. **Decidere medie e basse della revisione C2** (`C2-sicurezza.md`): MEDIA-1 clonazione
-   dall'esito incerto ripetuta; MEDIA-2 `--events` su qualunque file della run (e non
-   vietato in web); MEDIA-3 consenso legato allo sha256 al momento del clic
-   (`--expect-sha256`); MEDIA-4 mp3 finale non atomico e ffmpeg senza timeout; BASSA-1…5.
-2. **Dubbi aperti di C2** (`C2.md`, sezione 4): consenso per voce o per episodio.
-3. **OK per C3.**
+1. **OK per C3.**
 
 ## 5. Annotazioni per le fasi successive e per la fase finale
 

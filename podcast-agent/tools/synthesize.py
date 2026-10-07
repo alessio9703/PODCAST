@@ -47,7 +47,8 @@ def main() -> None:
     add_gate_args(parser, run_dir_required=True)
     add_trusted_paths_arg(parser)
     add_config_arg(parser)
-    args = parse_args(parser)
+    # Dall'interfaccia si produce con produce.py.
+    args = parse_args(parser, web_allowed=False)
 
     config = bootstrap(args)
     run_dir = run_dir_arg(args.run_dir, config)

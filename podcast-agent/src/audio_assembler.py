@@ -35,8 +35,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable, Iterable
 
-from .ffmpeg_tool import find_ffmpeg
-from .fileio import write_bytes_atomic
+from .ffmpeg_tool import FFMPEG_TIMEOUT_SECONDS, find_ffmpeg
+from .fileio import atomic_output, write_bytes_atomic
 from .script_writer import PodcastScript, spoken_text
 from .voice_provider import VoiceProvider, VoiceProviderError
 
@@ -662,11 +662,12 @@ class AudioAssembler:
 
         master_wav = output_basename.with_suffix(".wav")
         master_wav.parent.mkdir(parents=True, exist_ok=True)
-        with wave.open(str(master_wav), "wb") as out:
-            out.setnchannels(params.nchannels)
-            out.setsampwidth(params.sampwidth)
-            out.setframerate(params.framerate)
-            out.writeframes(b"".join(frames))
+        with atomic_output(master_wav) as partial:
+            with wave.open(str(partial), "wb") as out:
+                out.setnchannels(params.nchannels)
+                out.setsampwidth(params.sampwidth)
+                out.setframerate(params.framerate)
+                out.writeframes(b"".join(frames))
 
         total_bytes = sum(len(chunk) for chunk in frames)
         duration = total_bytes / (params.framerate * params.nchannels * params.sampwidth)
@@ -711,20 +712,31 @@ class AudioAssembler:
     ) -> bool:
         ffmpeg = find_ffmpeg()
         if ffmpeg:
-            command = [
-                ffmpeg, "-y", "-loglevel", "error",
-                "-i", str(source_wav),
-                "-codec:a", "libmp3lame",
-                "-b:a", f"{self.output_mp3_bitrate}k",
-                str(target_mp3),
-            ]
-            result = subprocess.run(command, capture_output=True, text=True)
-            if result.returncode == 0 and target_mp3.is_file():
+            # Su un temporaneo, poi il nome finale: un'interruzione a meta'
+            # codifica non lascia un episodio troncato con il nome buono.
+            result = None
+            try:
+                with atomic_output(target_mp3) as partial:
+                    command = [
+                        ffmpeg, "-y", "-loglevel", "error",
+                        "-i", str(source_wav),
+                        "-codec:a", "libmp3lame",
+                        "-b:a", f"{self.output_mp3_bitrate}k",
+                        str(partial),
+                    ]
+                    result = subprocess.run(command, capture_output=True, text=True, timeout=FFMPEG_TIMEOUT_SECONDS)
+                    if result.returncode != 0:
+                        raise OSError("ffmpeg ha fallito")
                 return True
-            warnings.append(
-                f"ffmpeg ha fallito la codifica mp3 (exit {result.returncode}): "
-                f"{result.stderr.strip()[:300]}"
-            )
+            except subprocess.TimeoutExpired as exc:
+                raise AssemblyError(
+                    f"ffmpeg non ha finito la codifica entro {FFMPEG_TIMEOUT_SECONDS} secondi: fermato."
+                ) from exc
+            except OSError:
+                warnings.append(
+                    f"ffmpeg ha fallito la codifica mp3 (exit {result.returncode if result else '?'}): "
+                    f"{(result.stderr if result else '').strip()[:300]}"
+                )
 
         try:
             import lameenc  # type: ignore
@@ -746,7 +758,7 @@ class AudioAssembler:
         encoder.set_in_sample_rate(params.framerate)
         encoder.set_channels(params.nchannels)
         encoder.set_quality(2)
-        target_mp3.write_bytes(encoder.encode(pcm) + encoder.flush())
+        _write_atomic(target_mp3, encoder.encode(pcm) + encoder.flush())
         return True
 
     # -- percorso mp3 ------------------------------------------------------
@@ -757,9 +769,10 @@ class AudioAssembler:
         target = output_basename.with_suffix(".mp3")
         target.parent.mkdir(parents=True, exist_ok=True)
 
-        with target.open("wb") as out:
-            for segment in segments:
-                out.write(_strip_id3(segment.read_bytes()))
+        with atomic_output(target) as partial:
+            with partial.open("wb") as out:
+                for segment in segments:
+                    out.write(_strip_id3(segment.read_bytes()))
 
         return AssemblyResult(
             path=target,

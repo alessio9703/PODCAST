@@ -423,7 +423,12 @@ Se qualcosa compare in `newly_cloned`, è una clonazione nuova: annotalo per il 
 Exit code `2` → ti fermi, riporti l'errore, non ritenti.
 Exit code `3` con `ConsentRequired` → nessuna voce è stata clonata: chiedi il consenso
 per le voci in `details.voci` (vedi "Consenso vocale" in cima), registralo con
-`voice_meta.py --consent` e rilancia. Il dry-run riporta lo stato del consenso
+`voice_meta.py --consent` e rilancia.
+Exit code `3` con `CloneOutcomeUnknown` → una clonazione precedente di quella voce è
+finita male e la voce potrebbe già esistere sul provider. Non ritenti: lo dici
+all'utente, gli chiedi di controllare le voci sul provider (e cancellare un eventuale
+doppione), e solo dopo il suo ok esplicito esegui
+`voice_meta.py --name "NOME" --confirm-clone-retry --by "CHI"` e rilanci. Il dry-run riporta lo stato del consenso
 (`consent`) senza bloccare: usalo per chiedere prima.
 
 Con `--out` il tool salva da solo anche `_audio_paths.json` accanto alla voice map: è

@@ -24,6 +24,7 @@ Tre funzioni, usate dai tool:
 from __future__ import annotations
 
 import json
+import os
 import time
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -46,6 +47,8 @@ from .errors import DomainError
 from .fileio import write_json_atomic
 from .music_context import music_durations
 from .music_mixer import mix_episode, preflight
+from .paths import PathNotAllowed
+from .redaction import redact
 from .pdf_reader import DocumentError, locate_document
 from .registry import VoiceRegistry
 from .run_layout import archive_source_document, write_voices_used
@@ -54,9 +57,12 @@ from .script_session import FILENAME as SESSION_FILENAME
 from .script_session import ScriptSession
 from .script_writer import PodcastScript, spoken_text
 from .segment_cache import SCRIPT_FILENAME, VOICES_FILENAME
-from .voice_prep import ACTION_CLONE, plan_voices, prepare_voices
+from .voice_meta import consent_revoked
+from .voice_prep import ACTION_CLONE, ConsentRequired, plan_voices, prepare_voices
 
 AUDIO_PATHS_FILENAME = "_audio_paths.json"
+#: Il file degli eventi di produce.py: nome fisso, dentro la run.
+EVENTS_FILENAME = "_eventi.jsonl"
 TIMINGS_FILENAME = "_tempi_turni.json"
 
 #: Le fasi del passo 6, nell'ordine dello schermo "Generazione".
@@ -108,13 +114,30 @@ class EventLog:
         if self.path is None:
             return
         if self._handle is None:
-            self._handle = self.path.open("w", encoding="utf-8")
+            self._handle = self._open()
         line = json.dumps(
             {"evento": evento, "at": datetime.now().replace(microsecond=0).isoformat(), **data},
             ensure_ascii=False,
         )
         self._handle.write(line + "\n")
         self._handle.flush()
+
+    def _open(self) -> Any:
+        """Svuota e apre il file, senza seguire un link simbolico.
+
+        Il nome lo fissa il tool (`_eventi.jsonl` nella run): da fuori non si
+        sceglie quale file della run svuotare (revisione di sicurezza C2,
+        MEDIA-2). Un `_eventi.jsonl` che e' un link simbolico non si apre.
+        """
+        assert self.path is not None
+        flags = os.O_WRONLY | os.O_CREAT | os.O_TRUNC | os.O_APPEND | getattr(os, "O_NOFOLLOW", 0)
+        if self.path.is_symlink():
+            raise PathNotAllowed("Il file degli eventi non puo' essere un link simbolico.", details={"campo": "events"})
+        try:
+            fd = os.open(str(self.path), flags, 0o644)
+        except OSError as exc:
+            raise PathNotAllowed("Il file degli eventi non si puo' aprire.", details={"campo": "events"}) from exc
+        return os.fdopen(fd, "w", encoding="utf-8")
 
     def close(self) -> None:
         if self._handle is not None:
@@ -467,6 +490,19 @@ def estimate_run(run_dir: Path, config: Any, provider: Any) -> dict[str, Any]:
 # ----------------------------------------------------------------------
 
 
+def ui_path(path: Path, config: Any) -> str:
+    """Un file della run come lo vede la UI: `output/<run>/<file>`, mai assoluto.
+
+    produce.py e' il comando dell'interfaccia: il suo JSON non riporta la
+    struttura delle cartelle del server (revisione di sicurezza C2, BASSA-3).
+    """
+    root = Path(config.output_dir)
+    try:
+        return f"{root.name}/{Path(path).resolve().relative_to(root.resolve()).as_posix()}"
+    except ValueError:
+        return Path(path).name
+
+
 def _interrupted(done: int, total: int, missing: list[int]) -> ProductionInterrupted:
     return ProductionInterrupted(
         f"Produzione interrotta: {done} battute pronte su {total}. Le battute pronte restano "
@@ -495,142 +531,205 @@ def produce(
     accept_changed_music: bool = False,
     note: Note = _noop,
 ) -> dict[str, Any]:
-    """Il passo 6 per intero. Vedi la docstring del modulo."""
+    """Il passo 6 per intero. Vedi la docstring del modulo.
+
+    Anche gli eventi finali (`interrotta`, `errore`) si scrivono qui, ancora
+    sotto il lock di lavoro: scritti dopo, potrebbero finire nel file eventi
+    della produzione successiva (revisione di sicurezza C2, BASSA-1).
+    """
     run_dir = Path(run_dir)
     with work_lock(run_dir, "produzione"):
-        script = load_run_script(run_dir)
-        approval = approval_state(run_dir, script)
-        if not approval["approved"]:
-            raise ApprovalRequired(
-                f"Passo bloccato: {approval['approval_problem']}",
-                details={"approval_problem": approval["approval_problem"]},
+        try:
+            return _produce_locked(
+                run_dir, config, events=events, should_stop=should_stop,
+                accept_changed_music=accept_changed_music, note=note,
             )
-        total = len(script.turni)
-        events.emit("iniziata", totale=total, fasi=list(PHASES))
+        except ProductionInterrupted as exc:
+            if events.opened:
+                events.emit("interrotta", **(exc.details or {}))
+            raise
+        except BaseException as exc:
+            if events.opened:
+                kind = "Interrupted" if isinstance(exc, KeyboardInterrupt) else getattr(exc, "kind", None) or type(exc).__name__
+                events.emit("errore", error_type=kind, error=redact(str(exc)))
+            raise
+        finally:
+            events.close()
 
-        # Musiche: tutto validato PRIMA di spendere (clonazione compresa).
-        music_choice, music_warnings = preflight(run_dir, config, accept_changed_music=accept_changed_music)
-        for warning in music_warnings:
-            events.emit("avviso", testo=warning)
 
-        provider = config.build_provider()
+def _produce_locked(
+    run_dir: Path,
+    config: Any,
+    *,
+    events: EventLog,
+    should_stop: Callable[[], bool],
+    accept_changed_music: bool,
+    note: Note,
+) -> dict[str, Any]:
+    script = load_run_script(run_dir)
+    approval = approval_state(run_dir, script)
+    if not approval["approved"]:
+        raise ApprovalRequired(
+            f"Passo bloccato: {approval['approval_problem']}",
+            details={"approval_problem": approval["approval_problem"]},
+        )
+    total = len(script.turni)
+    events.emit("iniziata", totale=total, fasi=list(PHASES))
 
-        # -- voci ----------------------------------------------------------
-        events.emit("fase_iniziata", fase="preparazione_voci")
-        prepared = prepare_voices(
+    # Musiche: tutto validato PRIMA di spendere (clonazione compresa).
+    music_choice, music_warnings = preflight(run_dir, config, accept_changed_music=accept_changed_music)
+    for warning in music_warnings:
+        events.emit("avviso", testo=warning)
+
+    provider = config.build_provider()
+
+    # -- voci ----------------------------------------------------------
+    events.emit("fase_iniziata", fase="preparazione_voci")
+    prepared = prepare_voices(
+        config,
+        list(script.speakers),
+        provider=provider,
+        on_voice=lambda speaker, action: events.emit("voce", speaker=speaker, azione=action),
+        should_stop=should_stop,
+        note=note,
+    )
+    if len(prepared.voice_map) < len(script.speakers):
+        # Fermata fra una clonazione e l'altra: nessuna battuta toccata.
+        raise _interrupted(0, total, list(range(1, total + 1)))
+    write_json_atomic(run_dir / VOICES_FILENAME, prepared.voice_map)
+    write_json_atomic(run_dir / AUDIO_PATHS_FILENAME, prepared.audio_paths)
+    events.emit(
+        "fase_finita",
+        fase="preparazione_voci",
+        riusate=len(prepared.reused),
+        clonate=len(prepared.newly_cloned),
+    )
+
+    # -- sintesi, montaggio, mix ----------------------------------------
+    to_generate = set(missing_turns(run_dir, script, prepared.voice_map, provider))
+    timing = {"last_start": None, "durations": []}
+
+    def progress(index: int, count: int, speaker: str, cached: bool) -> None:
+        now = time.monotonic()
+        if timing["last_start"] is not None:
+            timing["durations"].append(now - timing["last_start"])
+            timing["last_start"] = None
+        remaining = len([n for n in to_generate if n >= index])
+        durations = timing["durations"]
+        eta = round(sum(durations) / len(durations) * remaining, 1) if durations else None
+        events.emit("battuta", n=index, totale=count, speaker=speaker, cached=cached, eta_seconds=eta)
+        note(f"  [{index:>3}/{count}] {speaker}{' (in cache)' if cached else ''}")
+        if not cached:
+            timing["last_start"] = now
+
+    def phase(name: str, state: str) -> None:
+        events.emit(f"fase_{state}", fase=name)
+
+    # Una revoca del consenso a produzione in corso la ferma alla battuta
+    # successiva (revisione di sicurezza C2, BASSA-2): basta rileggere i
+    # metadati (piccoli) fra una battuta e l'altra, senza calcolare hash.
+    revoked: list[str] = []
+
+    def stop_or_revoked() -> bool:
+        if should_stop():
+            return True
+        revoked.extend(speaker for speaker, path in prepared.audio_paths.items() if consent_revoked(path))
+        return bool(revoked)
+
+    try:
+        render = render_episode(
+            run_dir,
             config,
-            list(script.speakers),
+            script,
+            prepared.voice_map,
             provider=provider,
-            on_voice=lambda speaker, action: events.emit("voce", speaker=speaker, azione=action),
-            should_stop=should_stop,
+            music_choice=music_choice,
+            music_warnings=music_warnings,
+            accept_changed_music=accept_changed_music,
+            progress=progress,
+            should_stop=stop_or_revoked,
+            on_phase=phase,
             note=note,
         )
-        if len(prepared.voice_map) < len(script.speakers):
-            # Fermata fra una clonazione e l'altra: nessuna battuta toccata.
-            raise _interrupted(0, total, list(range(1, total + 1)))
-        write_json_atomic(run_dir / VOICES_FILENAME, prepared.voice_map)
-        write_json_atomic(run_dir / AUDIO_PATHS_FILENAME, prepared.audio_paths)
-        events.emit(
-            "fase_finita",
-            fase="preparazione_voci",
-            riusate=len(prepared.reused),
-            clonate=len(prepared.newly_cloned),
+    except SynthesisStopped as stop:
+        if revoked:
+            speakers = sorted(set(revoked))
+            raise ConsentRequired(
+                "Il consenso di " + ", ".join(speakers) + " e' stato revocato durante la "
+                f"produzione: mi sono fermato ({stop.done} battute pronte su {stop.total}). "
+                "Le battute con questa voce non vanno usate.",
+                details={
+                    "voci": [
+                        {"speaker": name, "azione": "reuse", "stato": "revocato", "file": Path(prepared.audio_paths[name]).name}
+                        for name in speakers
+                    ],
+                    "done": stop.done,
+                    "total": stop.total,
+                    "missing": stop.missing,
+                },
+            ) from stop
+        raise _interrupted(stop.done, stop.total, stop.missing) from stop
+
+    for warning in render.warnings:
+        if warning not in music_warnings:
+            events.emit("avviso", testo=warning)
+
+    # -- chiusura ---------------------------------------------------------
+    events.emit("fase_iniziata", fase="chiusura")
+    registry = VoiceRegistry(config.registry_file, project_root=config.registry_file.parent)
+    write_voices_used(run_dir, config.active_provider, prepared.voice_map, prepared.audio_paths, registry)
+    warnings = list(render.warnings)
+    document_note = None
+    try:
+        document_note = _archive_document(run_dir, config)
+    except DocumentError:
+        warnings.append(
+            "Il documento di partenza non e' piu' nella libreria Documenti: la copia "
+            "nella cartella dell'episodio non e' stata fatta."
         )
+        events.emit("avviso", testo=warnings[-1])
+    events.emit("fase_finita", fase="chiusura")
 
-        # -- sintesi, montaggio, mix ----------------------------------------
-        to_generate = set(missing_turns(run_dir, script, prepared.voice_map, provider))
-        timing = {"last_start": None, "durations": []}
-
-        def progress(index: int, count: int, speaker: str, cached: bool) -> None:
-            now = time.monotonic()
-            if timing["last_start"] is not None:
-                timing["durations"].append(now - timing["last_start"])
-                timing["last_start"] = None
-            remaining = len([n for n in to_generate if n >= index])
-            durations = timing["durations"]
-            eta = round(sum(durations) / len(durations) * remaining, 1) if durations else None
-            events.emit("battuta", n=index, totale=count, speaker=speaker, cached=cached, eta_seconds=eta)
-            note(f"  [{index:>3}/{count}] {speaker}{' (in cache)' if cached else ''}")
-            if not cached:
-                timing["last_start"] = now
-
-        def phase(name: str, state: str) -> None:
-            events.emit(f"fase_{state}", fase=name)
-
-        try:
-            render = render_episode(
-                run_dir,
-                config,
-                script,
-                prepared.voice_map,
-                provider=provider,
-                music_choice=music_choice,
-                music_warnings=music_warnings,
-                accept_changed_music=accept_changed_music,
-                progress=progress,
-                should_stop=should_stop,
-                on_phase=phase,
-                note=note,
-            )
-        except SynthesisStopped as stop:
-            raise _interrupted(stop.done, stop.total, stop.missing) from stop
-
-        for warning in render.warnings:
-            if warning not in music_warnings:
-                events.emit("avviso", testo=warning)
-
-        # -- chiusura ---------------------------------------------------------
-        events.emit("fase_iniziata", fase="chiusura")
-        registry = VoiceRegistry(config.registry_file, project_root=config.registry_file.parent)
-        write_voices_used(run_dir, config.active_provider, prepared.voice_map, prepared.audio_paths, registry)
-        warnings = list(render.warnings)
-        document_note = None
-        try:
-            document_note = _archive_document(run_dir, config)
-        except DocumentError:
-            warnings.append(
-                "Il documento di partenza non e' piu' nella libreria Documenti: la copia "
-                "nella cartella dell'episodio non e' stata fatta."
-            )
-            events.emit("avviso", testo=warnings[-1])
-        events.emit("fase_finita", fase="chiusura")
-
-        synthesis = render.synthesis
-        payload = {
-            "run": run_dir.name,
-            "output": str(render.output_path),
-            "file": render.output_path.name,
-            "format": render.output_format,
-            "duration_seconds": round(render.duration_seconds, 1) if render.duration_seconds else None,
-            "duration_label": duration_label(render.duration_seconds),
-            "segments": len(synthesis.paths),
-            "generated_turns": synthesis.generated_turns,
-            "reused_turns": synthesis.reused_turns,
-            "tts_calls": len(synthesis.generated_turns),
-            "voices": {"riusate": prepared.reused, "clonate": prepared.newly_cloned},
-            "approved_version": approval["approved_version"],
-            "documento": document_note,
-            "timings_file": str(render.timings_file) if render.timings_file else None,
-            "warnings": warnings,
-            **render.music_payload,
-        }
-        events.emit(
-            "finita",
-            file=render.output_path.name,
-            duration_seconds=payload["duration_seconds"],
-            tts_calls=payload["tts_calls"],
-        )
-        return payload
+    synthesis = render.synthesis
+    payload = {
+        "run": run_dir.name,
+        "output": ui_path(render.output_path, config),
+        "file": render.output_path.name,
+        "format": render.output_format,
+        "duration_seconds": round(render.duration_seconds, 1) if render.duration_seconds else None,
+        "duration_label": duration_label(render.duration_seconds),
+        "segments": len(synthesis.paths),
+        "generated_turns": synthesis.generated_turns,
+        "reused_turns": synthesis.reused_turns,
+        "tts_calls": len(synthesis.generated_turns),
+        "voices": {"riusate": prepared.reused, "clonate": prepared.newly_cloned},
+        "approved_version": approval["approved_version"],
+        "documento": document_note,
+        "timings_file": ui_path(render.timings_file, config) if render.timings_file else None,
+        "warnings": warnings,
+        **render.music_payload,
+    }
+    if payload.get("musiche_usate_file"):
+        payload["musiche_usate_file"] = ui_path(Path(payload["musiche_usate_file"]), config)
+    events.emit(
+        "finita",
+        file=render.output_path.name,
+        duration_seconds=payload["duration_seconds"],
+        tts_calls=payload["tts_calls"],
+    )
+    return payload
 
 
 __all__ = [
     "AUDIO_PATHS_FILENAME",
+    "EVENTS_FILENAME",
     "ApprovalRequired",
     "EventLog",
     "PHASES",
     "ProductionInterrupted",
     "RenderResult",
     "approval_state",
+    "ui_path",
     "duration_label",
     "estimate_run",
     "load_run_script",

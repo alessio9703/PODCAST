@@ -46,7 +46,9 @@ def main() -> None:
     add_gate_args(parser, run_dir_required=False)
     add_trusted_paths_arg(parser)
     add_config_arg(parser)
-    args = parse_args(parser)
+    # Le voci dall'interfaccia le prepara produce.py, legato al copione
+    # approvato (revisione di sicurezza C2, BASSA-5).
+    args = parse_args(parser, web_allowed=False)
 
     config = bootstrap(args)
     if args.run_dir:

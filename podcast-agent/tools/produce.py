@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Produce l'episodio: il passo 6 dell'interfaccia ("Genera l'episodio").
 
-    python tools/produce.py --run-dir output/<run> [--events output/<run>/_eventi.jsonl]
+    python tools/produce.py --run-dir output/<run> [--events]
 
 In un comando solo, tenendo il lock di lavoro della run per tutta la durata
 (lo stato "in generazione" si deriva da quel lock):
@@ -16,8 +16,9 @@ In un comando solo, tenendo il lock di lavoro della run per tutta la durata
   5. scrive tempi, segnali, voci_usate.json e la copia del documento.
 
 Con --events scrive l'avanzamento in JSONL (fasi, voci, battuta i/N con
-`cached` ed `eta_seconds`, avvisi, fine, interruzione, errore). Il file deve
-stare dentro la cartella della run.
+`cached` ed `eta_seconds`, avvisi, fine, interruzione, errore) nel file
+`_eventi.jsonl` della run. Il nome lo fissa il tool: da fuori non si sceglie
+quale file della run svuotare.
 
 SIGTERM o Ctrl-C fermano la produzione fra una battuta e l'altra: le battute
 pronte restano in cache, il comando esce con exit 1 ProductionInterrupted e
@@ -30,15 +31,16 @@ from __future__ import annotations
 import argparse
 import signal
 
-from _common import _redact, add_config_arg, bootstrap, emit, note, parse_args, run_dir_arg, run_tool  # noqa: E402
-from src.paths import confine_to  # noqa: E402
-from src.production import EventLog, ProductionInterrupted, produce  # noqa: E402
+from _common import add_config_arg, bootstrap, emit, note, parse_args, run_dir_arg, run_tool  # noqa: E402
+from src.production import EVENTS_FILENAME, EventLog, produce, ui_path  # noqa: E402
 
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--run-dir", required=True, help="Cartella dell'episodio")
-    parser.add_argument("--events", default=None, help="File JSONL degli eventi, dentro la cartella della run")
+    parser.add_argument(
+        "--events", action="store_true", help=f"Scrive l'avanzamento in {EVENTS_FILENAME} nella cartella della run"
+    )
     parser.add_argument(
         "--accept-changed-music",
         action="store_true",
@@ -49,7 +51,7 @@ def main() -> None:
 
     config = bootstrap(args)
     run_dir = run_dir_arg(args.run_dir, config)
-    events_path = confine_to(args.events, run_dir, field="events") if args.events else None
+    events_path = run_dir / EVENTS_FILENAME if args.events else None
 
     stop = {"requested": False}
 
@@ -62,29 +64,18 @@ def main() -> None:
     signal.signal(signal.SIGTERM, request_stop)
     signal.signal(signal.SIGINT, request_stop)
 
-    events = EventLog(events_path)
-    try:
-        payload = produce(
-            run_dir,
-            config,
-            events=events,
-            should_stop=lambda: stop["requested"],
-            accept_changed_music=args.accept_changed_music,
-            note=note,
-        )
-    except ProductionInterrupted as exc:
-        if events.opened:
-            events.emit("interrotta", **(exc.details or {}))
-        raise
-    except BaseException as exc:
-        if events.opened:
-            kind = "Interrupted" if isinstance(exc, KeyboardInterrupt) else getattr(exc, "kind", None) or type(exc).__name__
-            events.emit("errore", error_type=kind, error=_redact(str(exc)))
-        raise
-    finally:
-        events.close()
+    # Gli eventi finali (interrotta, errore) li scrive produce(), ancora sotto
+    # il lock di lavoro.
+    payload = produce(
+        run_dir,
+        config,
+        events=EventLog(events_path),
+        should_stop=lambda: stop["requested"],
+        accept_changed_music=args.accept_changed_music,
+        note=note,
+    )
 
-    emit({**payload, "events_file": str(events_path) if events_path else None})
+    emit({**payload, "events_file": ui_path(events_path, config) if events_path else None})
 
 
 if __name__ == "__main__":

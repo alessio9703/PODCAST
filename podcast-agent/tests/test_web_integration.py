@@ -1384,11 +1384,12 @@ def test_web_mode(root: Path, config: Path, run_dir: str) -> None:
         from pathlib import Path, PureWindowsPath
         sys.path.insert(0, "tools")
         import _common
-        _common._KNOWN_ROOTS["/srv/podcast/output"] = "output"
+        import src.redaction as redaction
+        redaction.KNOWN_ROOTS["/srv/podcast/output"] = "output"
         print(_common._redact("Manca /srv/podcast/output/run-a/voci.json."))
         home = str(Path.home())
         print(_common._redact(home + "2/altro"))
-        _common.PROJECT_ROOT = Path(r"C:\\Users\\me\\podcast-agent")
+        redaction.PROJECT_ROOT = Path(r"C:\\Users\\me\\podcast-agent")
         print(_common._redact(r"[Errno 2] No such file: 'C:\\\\Users\\\\me\\\\podcast-agent\\\\output\\\\r\\\\x.json'"))
         """
     )
@@ -1526,7 +1527,7 @@ def test_c2_estimate_and_produce(root: Path, config: Path) -> str:
 
     print("\n[C2] passo 6: produzione con consenso mancante")
     events = Path(run_dir) / "_eventi.jsonl"
-    code, out, _ = tool("produce.py", "--run-dir", run_dir, "--events", str(events), config=config)
+    code, out, _ = tool("produce.py", "--run-dir", run_dir, "--events", config=config)
     check("consenso mancante -> exit 3 ConsentRequired con le voci", code == 3 and out.get("error_type") == "ConsentRequired" and [v["speaker"] for v in out["details"]["voci"]] == ["Giulia Bianchi"] and out["details"]["voci"][0]["stato"] == "mancante", str(out))
     check("nessun tentativo di clonazione, nemmeno per la voce con il consenso", clone_attempts(root) == [], str(clone_attempts(root)))
     check("nessuna voce nel registro", not (root / "voices_registry.json").exists() or "Mario Rossi" not in json.loads((root / "voices_registry.json").read_text(encoding="utf-8")))
@@ -1540,11 +1541,17 @@ def test_c2_estimate_and_produce(root: Path, config: Path) -> str:
     wav.write_bytes(original)
 
     print("\n[C2] passo 6: produzione completa con eventi")
-    code, out, err = tool("produce.py", "--run-dir", run_dir, "--events", str(events), config=config)
+    code, out, err = tool("produce.py", "--run-dir", run_dir, "--events", config=config)
     check("produce: exit 0", code == 0, err[-500:] + str(out)[:300])
     check("due voci clonate, tutte le battute sintetizzate", sorted(out["voices"]["clonate"]) == ["Giulia Bianchi", "Mario Rossi"] and out["tts_calls"] == 6 and out["reused_turns"] == [], str(out)[:400])
     check("una clonazione per voce", sorted(clone_attempts(root)) == ["Giulia Bianchi", "Mario Rossi"], str(clone_attempts(root)))
-    check("file finale nella run, nome relativo per la UI", Path(out["output"]).is_file() and out["file"] == Path(out["output"]).name and out["run"] == Path(run_dir).name)
+    check(
+        "file finale nella run, percorsi relativi per la UI (output/<run>/...)",
+        (root / out["output"]).is_file() and out["output"] == f"output/{Path(run_dir).name}/{out['file']}"
+        and out["timings_file"] == f"output/{Path(run_dir).name}/_tempi_turni.json"
+        and out["events_file"] == f"output/{Path(run_dir).name}/_eventi.jsonl" and str(root) not in json.dumps(out),
+        str({k: out.get(k) for k in ("output", "timings_file", "events_file")}),
+    )
     for name in ("voci.json", "_audio_paths.json", "voci_usate.json", "documento_originale.txt", "_tempi_turni.json"):
         check(f"scritto {name}", (Path(run_dir) / name).is_file())
     check("versione approvata nel JSON", out["approved_version"] == 1)
@@ -1567,7 +1574,7 @@ def test_c2_estimate_and_produce(root: Path, config: Path) -> str:
     check("eta: null alla prima, poi un numero", turns_ev[0]["eta_seconds"] is None and all(isinstance(r["eta_seconds"], (int, float)) for r in turns_ev[1:]), str([r["eta_seconds"] for r in turns_ev]))
     check("ogni evento ha l'ora", all(r.get("at") for r in rows))
 
-    code, out, _ = tool("produce.py", "--run-dir", run_dir, "--events", str(events), config=config)
+    code, out, _ = tool("produce.py", "--run-dir", run_dir, "--events", config=config)
     check("rilancio: niente da pagare, voci riusate", code == 0 and out["tts_calls"] == 0 and sorted(out["voices"]["riusate"]) == ["Giulia Bianchi", "Mario Rossi"], str(out)[:300])
     check("rilancio: nessuna nuova clonazione", len(clone_attempts(root)) == 2)
     check("il file eventi riparte da capo a ogni produzione", read_events(events)[0]["evento"] == "iniziata" and sum(1 for r in read_events(events) if r["evento"] == "iniziata") == 1)
@@ -1581,8 +1588,20 @@ def test_c2_estimate_and_produce(root: Path, config: Path) -> str:
     tool("voice_meta.py", "--name", "Mario Rossi", "--consent", "--by", "Utente A", config=config)
 
     print("\n[C2] produzione: controlli prima di spendere")
-    code, out, _ = tool("produce.py", "--run-dir", run_dir, "--events", str(root / "fuori.jsonl"), config=config)
-    check("--events fuori dalla run -> PathNotAllowed", code == 1 and out.get("error_type") == "PathNotAllowed" and not (root / "fuori.jsonl").exists(), str(out))
+    outside = root / "fuori.jsonl"
+    outside.write_text("NON TOCCARE\n", encoding="utf-8")
+    saved_events = events.read_bytes()
+    events.unlink()
+    events.symlink_to(outside)
+    code, out, _ = tool("produce.py", "--run-dir", run_dir, "--events", config=config)
+    check("_eventi.jsonl link simbolico -> PathNotAllowed, il file puntato resta intatto", code == 1 and out.get("error_type") == "PathNotAllowed" and outside.read_text(encoding="utf-8") == "NON TOCCARE\n", str(out))
+    events.unlink()
+    events.write_bytes(saved_events)
+    proc = subprocess.run(
+        [PYTHON, str(PROJECT_ROOT / "tools" / "produce.py"), "--run-dir", run_dir, "--events", str(Path(run_dir) / "conversazione.json"), "--config", str(config)],
+        capture_output=True, text=True, cwd=str(PROJECT_ROOT), env=clean_env(),
+    )
+    check("--events non accetta piu' un percorso (il nome lo fissa il tool)", proc.returncode == 1 and json.loads(proc.stdout)["error_type"] == "InvalidArguments" and json.loads((Path(run_dir) / "conversazione.json").read_text(encoding="utf-8"))["turni"], proc.stdout[-300:])
     edited = Path(run_dir) / "conversazione.json"
     saved = edited.read_text(encoding="utf-8")
     payload = json.loads(saved)
@@ -1596,7 +1615,7 @@ def test_c2_estimate_and_produce(root: Path, config: Path) -> str:
 
     events.write_text("CONTENUTO DELLA PRODUZIONE IN CORSO\n", encoding="utf-8")
     with work_lock(Path(run_dir), "produzione"):
-        code, out, _ = tool("produce.py", "--run-dir", run_dir, "--events", str(events), config=config)
+        code, out, _ = tool("produce.py", "--run-dir", run_dir, "--events", config=config)
         check("produzione gia' in corso -> RunBusy", code == 1 and out.get("error_type") == "RunBusy", str(out))
         code, out, _ = tool("script_show.py", "--run-dir", run_dir, config=config)
         check("lo stato 'in generazione' si deriva dal lock", out["in_corso"]["operazione"] == "produzione", str(out.get("in_corso")))
@@ -1615,7 +1634,7 @@ def test_c2_interrupt(root: Path) -> None:
     events = Path(run_dir) / "_eventi.jsonl"
     env = clean_env()
     proc = subprocess.Popen(
-        [PYTHON, str(PROJECT_ROOT / "tools" / "produce.py"), "--run-dir", run_dir, "--events", str(events), "--config", str(slow)],
+        [PYTHON, str(PROJECT_ROOT / "tools" / "produce.py"), "--run-dir", run_dir, "--events", "--config", str(slow)],
         stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, cwd=str(PROJECT_ROOT), env=env,
     )
     deadline = time.monotonic() + 60
@@ -1653,11 +1672,41 @@ def test_c2_clone_errors(root: Path, config: Path) -> None:
     run_dir = approved_run(root, failing, "Con Anna", script)
     events = Path(run_dir) / "_eventi.jsonl"
     before = len(clone_attempts(root))
-    code, out, _ = tool("produce.py", "--run-dir", run_dir, "--events", str(events), config=failing)
+    code, out, _ = tool("produce.py", "--run-dir", run_dir, "--events", config=failing)
     check("clonazione fallita -> exit 2 (errore del provider)", code == 2 and out.get("error_type") == "ProviderQuotaError", str(out))
     check("un solo tentativo di clonazione", clone_attempts(root)[before:] == ["Anna Neri"], str(clone_attempts(root)[before:]))
     check("evento 'errore' in fondo al file", read_events(events)[-1]["evento"] == "errore" and read_events(events)[-1]["error_type"] == "ProviderQuotaError")
     check("nessuna battuta sintetizzata", not (Path(run_dir) / "segmenti").exists() or not any((Path(run_dir) / "segmenti").glob("*.wav")))
+
+    print("\n[sicurezza C2] clonazione dall'esito incerto: niente nuovo tentativo senza conferma")
+    before = len(clone_attempts(root))
+    code, out, _ = tool("produce.py", "--run-dir", run_dir, config=config)
+    check("rilancio dopo l'errore -> exit 3 CloneOutcomeUnknown", code == 3 and out.get("error_type") == "CloneOutcomeUnknown" and out["details"]["speaker"] == "Anna Neri" and out["details"]["dal"], str(out))
+    check("...senza nessun nuovo tentativo", clone_attempts(root)[before:] == [], str(clone_attempts(root)[before:]))
+    code, out, _ = tool("estimate.py", "--run-dir", run_dir, config=config)
+    check("la stima segnala la clonazione incerta", {v["speaker"]: v["clonazione_incerta"] for v in out["voices"]}["Anna Neri"] is True, str(out["voices"]))
+    code, out, _ = tool("voice_meta.py", "--name", "Anna Neri", "--confirm-clone-retry", config=config)
+    check("conferma senza --by -> InvalidArguments", code == 1 and out.get("error_type") == "InvalidArguments", str(out))
+    code, out, _ = tool("voice_meta.py", "--name", "Anna Neri", "--confirm-clone-retry", "--by", "Utente A", config=config)
+    check("conferma: marcatore tolto", code == 0 and out["clonazione_incerta_tolta"] and out["clonazione_incerta"] is None, str(out))
+
+    slow_failing = write_c2_config(root, "config-c2-guasto-lento.yaml", fail_clone=True, clone_delay_seconds=1.5)
+    before = len(clone_attempts(root))
+    procs = [
+        subprocess.Popen(
+            [PYTHON, str(PROJECT_ROOT / "tools" / "voices_prepare.py"), "--speakers", "Anna Neri", "--no-approval-gate", "--config", str(slow_failing)],
+            stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, cwd=str(PROJECT_ROOT), env=clean_env(),
+        )
+        for _ in range(2)
+    ]
+    outs = [json.loads(p.communicate(timeout=60)[0]) for p in procs]
+    check(
+        "due processi, la clonazione del primo fallisce: il secondo non ritenta (exit 2 + exit 3)",
+        sorted(p.returncode for p in procs) == [2, 3] and sorted(o["error_type"] for o in outs) == ["CloneOutcomeUnknown", "ProviderQuotaError"],
+        str(outs),
+    )
+    check("...un solo tentativo in tutto", clone_attempts(root)[before:] == ["Anna Neri"], str(clone_attempts(root)[before:]))
+    tool("voice_meta.py", "--name", "Anna Neri", "--confirm-clone-retry", "--by", "Utente A", config=config)
 
     print("\n[C2] due produzioni insieme con la stessa voce nuova: una clonazione")
     slow_clone = write_c2_config(root, "config-c2-clone-lento.yaml", clone_delay_seconds=1.5)
@@ -1691,7 +1740,7 @@ def test_c2_music(root: Path, config: Path) -> None:
     code, out, _ = tool("music_set.py", "--run-dir", run_dir, "--intro", "Piano calmo", config=config)
     check("intro scelta", code == 0, str(out)[:300])
     events = Path(run_dir) / "_eventi.jsonl"
-    code, out, err = tool("produce.py", "--run-dir", run_dir, "--events", str(events), config=config)
+    code, out, err = tool("produce.py", "--run-dir", run_dir, "--events", config=config)
     check("produce con musica: exit 0, mp3", code == 0 and out["format"] == "mp3" and out["musiche_usate_file"], err[-400:] + str(out)[:300])
     phases = [(r["evento"], r["fase"]) for r in read_events(events) if r["evento"].startswith("fase_")]
     check(
@@ -1759,6 +1808,104 @@ def test_c2_consent_during_clone(root: Path, config: Path) -> None:
     check("nessuna copia temporanea lasciata nella libreria", leftovers == [], str(leftovers))
 
 
+def test_c2_fixes(root: Path, config: Path) -> None:
+    """Revisione di sicurezza C2: MEDIA-3, MEDIA-4, BASSA-2, BASSA-4, BASSA-5."""
+    print("\n[sicurezza C2] consenso solo sulla registrazione vista (--expect-sha256)")
+    make_wav(root / "voci" / "Fabio Neri.wav", 1.0, 450)
+    code, out, _ = tool("voice_meta.py", "--name", "Fabio Neri", config=config)
+    seen = out["consenso"]["audio_sha256"]
+    check("lo stato del consenso dice lo sha256 della registrazione attuale", seen.startswith("sha256:"), str(out))
+    make_wav(root / "voci" / "Fabio Neri.wav", 1.2, 460)
+    code, out, _ = tool("voice_meta.py", "--name", "Fabio Neri", "--consent", "--by", "Utente A", "--expect-sha256", seen, config=config)
+    check("file cambiato dopo che l'utente l'ha visto -> exit 3 RecordingChanged, niente registrato", code == 3 and out.get("error_type") == "RecordingChanged" and not (root / "voci" / "Fabio Neri.json").exists(), str(out))
+    current = tool("voice_meta.py", "--name", "Fabio Neri", config=config)[1]["consenso"]["audio_sha256"]
+    code, out, _ = tool("voice_meta.py", "--name", "Fabio Neri", "--consent", "--by", "Utente A", "--expect-sha256", current, config=config)
+    check("con lo sha256 giusto: registrato", code == 0 and out["consenso"]["stato"] == "registrato", str(out))
+    code, out, _ = run_tool_env("voice_meta.py", ["--name", "Mario Rossi", "--consent", "--by", "U"], web=True)
+    check("in modalita' web --consent senza --expect-sha256 -> InvalidArguments", code == 1 and out.get("error_type") == "InvalidArguments", str(out))
+    code, out, _ = tool("estimate.py", "--run-dir", tool("run_init.py", "--title", "Hash", config=config)[1]["run_dir"], config=config)
+    check("stima di una run senza copione -> ScriptMissing", code == 1 and out.get("error_type") == "ScriptMissing", str(out))
+
+    print("\n[sicurezza C2] metadati scritti male: errore stabile")
+    meta = root / "voci" / "Fabio Neri.json"
+    good = meta.read_text(encoding="utf-8")
+    for bad in ({"consenso": "si"}, {"consenso": {"da": "x"}}, {"consenso_revocato": ["x"]}):
+        meta.write_text(json.dumps(bad), encoding="utf-8")
+        code, out, _ = tool("voice_meta.py", "--name", "Fabio Neri", config=config)
+        check(f"metadati {bad} -> exit 1 VoiceMetaError", code == 1 and out.get("error_type") == "VoiceMetaError", str(out))
+    meta.write_text(good, encoding="utf-8")
+
+    print("\n[sicurezza C2] revoca durante la sintesi: ci si ferma")
+    slow = write_c2_config(root, "config-c2-lenta2.yaml", tts_delay_seconds=0.6)
+    script = {"titolo": "Revocata", "turni": [
+        {"speaker": "Mario Rossi" if i % 2 == 0 else "Giulia Bianchi", "testo": f"Battuta {i + 1} di una produzione con una revoca a meta'."}
+        for i in range(8)
+    ]}
+    run_dir = approved_run(root, slow, "Revocata", script)
+    events = Path(run_dir) / "_eventi.jsonl"
+    proc = subprocess.Popen(
+        [PYTHON, str(PROJECT_ROOT / "tools" / "produce.py"), "--run-dir", run_dir, "--events", "--config", str(slow)],
+        stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, cwd=str(PROJECT_ROOT), env=clean_env(),
+    )
+    deadline = time.monotonic() + 60
+    while time.monotonic() < deadline and not any(r["evento"] == "battuta" and r["n"] >= 3 for r in read_events(events)):
+        time.sleep(0.1)
+    tool("voice_meta.py", "--name", "Giulia Bianchi", "--revoke-consent", "--by", "Utente B", config=config)
+    stdout, stderr = proc.communicate(timeout=60)
+    out = json.loads(stdout) if stdout.strip() else {}
+    details = out.get("details") or {}
+    check(
+        "revoca a sintesi in corso -> exit 3 ConsentRequired 'revocato', con le battute pronte",
+        proc.returncode == 3 and out.get("error_type") == "ConsentRequired" and details["voci"][0]["speaker"] == "Giulia Bianchi"
+        and details["voci"][0]["stato"] == "revocato" and details["missing"] and details["done"] + len(details["missing"]) == 8,
+        stdout[-400:] + stderr[-300:],
+    )
+    check("evento 'errore' ConsentRequired scritto ancora sotto il lock", read_events(events)[-1]["evento"] == "errore" and read_events(events)[-1]["error_type"] == "ConsentRequired")
+    tool("voice_meta.py", "--name", "Giulia Bianchi", "--consent", "--by", "Utente A", config=config)
+    code, out, _ = tool("produce.py", "--run-dir", run_dir, config=slow)
+    check("riconfermato il consenso, la ripresa paga solo le mancanti", code == 0 and out["generated_turns"] == details.get("missing"), str(out.get("generated_turns")))
+
+    print("\n[sicurezza C2] file finali scritti in modo atomico, ffmpeg con timeout")
+    proc = run_python(
+        f"""
+        from pathlib import Path
+        from src.fileio import atomic_output
+        target = Path({str(root / "atomico.mp3")!r})
+        target.write_bytes(b"EPISODIO BUONO")
+        try:
+            with atomic_output(target) as partial:
+                partial.write_bytes(b"MEZZO EPIS")
+                raise KeyboardInterrupt
+        except KeyboardInterrupt:
+            pass
+        print(target.read_bytes().decode(), sorted(p.name for p in target.parent.glob(".atomico*")))
+        with atomic_output(target) as partial:
+            partial.write_bytes(b"EPISODIO NUOVO")
+        print(target.read_bytes().decode())
+        import src.music_mixer as mixer
+        mixer.FFMPEG_TIMEOUT_SECONDS = 0.001
+        try:
+            mixer._run_ffmpeg(["-f", "lavfi", "-i", "sine=duration=30", "-f", "null", "-"])
+            print("NESSUN TIMEOUT")
+        except mixer.MusicMixerError as exc:
+            print("TIMEOUT" if "secondi" in str(exc) else str(exc))
+        """
+    )
+    lines = proc.stdout.strip().splitlines()
+    check("interruzione a meta' scrittura: resta il file vecchio intero, nessun temporaneo", lines[:1] == ["EPISODIO BUONO []"], proc.stdout + proc.stderr)
+    check("scrittura completa: il file nuovo prende il nome finale", lines[1:2] == ["EPISODIO NUOVO"], proc.stdout)
+    check("ffmpeg oltre il timeout -> MusicMixerError", lines[2:3] == ["TIMEOUT"], proc.stdout + proc.stderr)
+    produced = Path(run_dir)
+    check("nella run nessun file parziale rimasto", not [p.name for p in produced.iterdir() if ".parziale" in p.name])
+
+    print("\n[sicurezza C2] voices_prepare e synthesize non si usano dall'interfaccia")
+    for name, args in (("voices_prepare.py", ["--speakers", "Mario Rossi", "--run-dir", "x"]), ("synthesize.py", ["--run-dir", "x"])):
+        code, out, _ = run_tool_env(name, args, web=True)
+        check(f"web: {name} rifiutato per intero", code == 1 and out.get("error_type") in ("NotAllowedInWebMode", "InvalidArguments"), str(out)[:200])
+    code, out, _ = run_tool_env("voices_prepare.py", ["--speakers", "Mario Rossi"], web=True)
+    check("web: voices_prepare senza argomenti vietati -> NotAllowedInWebMode con il comando", code == 1 and out.get("error_type") == "NotAllowedInWebMode" and out["details"]["comando"] == "voices_prepare.py", str(out))
+
+
 def test_c2() -> None:
     root = Path(tempfile.mkdtemp(prefix="podcast-web-c2-"))
     setup(root)
@@ -1769,6 +1916,7 @@ def test_c2() -> None:
     test_c2_interrupt(root)
     test_c2_clone_errors(root, config)
     test_c2_consent_during_clone(root, config)
+    test_c2_fixes(root, config)
 
 
 # ----------------------------------------------------------------------

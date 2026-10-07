@@ -171,7 +171,35 @@ def write_json_atomic(target: Path | str, payload: Any) -> Path:
     )
 
 
+@contextmanager
+def atomic_output(target: Path | str) -> Iterator[Path]:
+    """Un percorso temporaneo da far scrivere a un altro programma (ffmpeg).
+
+    Il temporaneo sta nella stessa cartella, comincia con '.' e tiene
+    l'estensione del file finale (ffmpeg la usa per scegliere il formato). Se
+    il blocco finisce senza errori e il file e' stato scritto, prende il nome
+    finale con os.replace: chi legge trova il file vecchio intero o quello
+    nuovo intero, mai uno troncato da un'interruzione a meta' codifica
+    (revisione di sicurezza C2, MEDIA-4). Altrimenti il temporaneo si cancella.
+    """
+    target = Path(target)
+    fd, name = tempfile.mkstemp(prefix=f".{target.stem}.", suffix=f".parziale{target.suffix}", dir=str(target.parent))
+    os.close(fd)
+    tmp = Path(name)
+    try:
+        yield tmp
+        if not tmp.is_file() or tmp.stat().st_size == 0:
+            raise OSError(f"{target.name} non e' stato scritto.")
+        os.replace(tmp, target)
+    finally:
+        try:
+            tmp.unlink()
+        except FileNotFoundError:
+            pass
+
+
 __all__ = [
+    "atomic_output",
     "DEFAULT_LOCK_TIMEOUT",
     "LockTimeout",
     "file_lock",

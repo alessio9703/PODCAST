@@ -4,13 +4,23 @@
     python tools/voice_meta.py --name "Mario Rossi"
     python tools/voice_meta.py --name "Mario Rossi" --consent --by "Utente A"
     python tools/voice_meta.py --name "Mario Rossi" --revoke-consent --by "Utente A"
+    python tools/voice_meta.py --name "Mario Rossi" --confirm-clone-retry --by "Utente A"
 
 Il consenso si registra SOLO dopo che la persona lo ha dato davvero: e' la
 casella "Confermo che [Nome Cognome] ha dato il consenso..." del passo 5. Vale
 per la registrazione attuale: se il file audio viene sostituito, va registrato
 di nuovo (stato "superato").
 
-Senza --consent / --revoke-consent mostra lo stato e basta. Il nome deve
+--expect-sha256 lega il consenso alla registrazione che l'utente ha visto
+(`consenso.audio_sha256` della stima o di questo comando): se il file e'
+cambiato nel frattempo, exit 3 RecordingChanged e niente registrato. In
+modalita' web e' obbligatorio con --consent.
+
+--confirm-clone-retry: dopo una clonazione dall'esito incerto (exit 3
+CloneOutcomeUnknown) l'utente ha controllato le voci sul provider e accetta
+di clonare di nuovo.
+
+Senza azioni mostra lo stato e basta. Il nome deve
 corrispondere a una voce della libreria (maiuscole e accenti a parte): un nome
 incerto da' exit 3 AmbiguousName con i candidati, mai una scelta al posto
 dell'utente.
@@ -20,9 +30,9 @@ from __future__ import annotations
 
 import argparse
 
-from _common import add_config_arg, bootstrap, emit, note, parse_args, run_tool  # noqa: E402
+from _common import InvalidArguments, add_config_arg, bootstrap, emit, note, parse_args, run_tool, web_mode  # noqa: E402
 from src.voice_meta import consent_view, load_meta, record_consent, revoke_consent  # noqa: E402
-from src.voice_prep import resolve_library_voice  # noqa: E402
+from src.voice_prep import confirm_clone_retry, pending_clone, resolve_library_voice  # noqa: E402
 
 
 def main() -> None:
@@ -31,17 +41,39 @@ def main() -> None:
     action = parser.add_mutually_exclusive_group()
     action.add_argument("--consent", action="store_true", help="Registra il consenso della persona")
     action.add_argument("--revoke-consent", action="store_true", help="Revoca il consenso")
+    action.add_argument(
+        "--confirm-clone-retry",
+        action="store_true",
+        help="Dopo una clonazione dall'esito incerto: verificato sul provider, si puo' ritentare",
+    )
     parser.add_argument("--by", default=None, help="Chi registra o revoca il consenso")
+    parser.add_argument("--expect-sha256", default=None, help="sha256 della registrazione che l'utente ha visto")
     add_config_arg(parser)
     args = parse_args(parser)
 
     config = bootstrap(args)
+    if args.consent and web_mode() and not args.expect_sha256:
+        raise InvalidArguments(
+            "Dall'interfaccia il consenso si registra solo con --expect-sha256: lo sha256 della "
+            "registrazione che l'utente ha visto.",
+            details={"messaggio": "manca --expect-sha256"},
+        )
     voice = resolve_library_voice(config, args.name)
 
     revoked = None
+    cleared = None
     if args.consent:
-        record_consent(voice.path, voice=voice.name, by=args.by)
+        record_consent(voice.path, voice=voice.name, by=args.by, expect_sha256=args.expect_sha256)
         note(f"Consenso registrato per {voice.name}.")
+    elif args.confirm_clone_retry:
+        if not args.by or not args.by.strip():
+            raise InvalidArguments("Serve --by: chi ha controllato sul provider.", details={"messaggio": "manca --by"})
+        cleared = confirm_clone_retry(config, voice.name)
+        note(
+            f"{voice.name}: la prossima produzione potra' clonare di nuovo (confermato da {args.by.strip()})."
+            if cleared is not None
+            else f"{voice.name}: nessuna clonazione dall'esito incerto."
+        )
     elif args.revoke_consent:
         _, revoked = revoke_consent(voice.path, voice=voice.name, by=args.by)
         note(
@@ -57,6 +89,8 @@ def main() -> None:
             "file": voice.path.name,
             "consenso": consent_view(voice.path, meta),
             "consenso_revocato": revoked,
+            "clonazione_incerta": pending_clone(config, voice.name),
+            "clonazione_incerta_tolta": cleared,
         }
     )
 

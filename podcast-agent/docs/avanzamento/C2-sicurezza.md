@@ -193,8 +193,28 @@ decidere con l'utente.
   - nessuna copia temporanea lasciata nella libreria.
 - Suite: web_integration 401, le altre invariate e verdi.
 
-### Aperte (da decidere con l'utente)
-MEDIA-1 (clonazione dall'esito incerto ripetuta), MEDIA-2 (`--events` su qualunque file
-della run), MEDIA-3 (consenso sullo sha256 al momento del clic), MEDIA-4 (mp3 finale non
-atomico, ffmpeg senza timeout), BASSA-1…5.
+### Medie e basse · corrette (decisione dell'utente: tutte, prima di C3)
+- **MEDIA-1**: marcatore `.clonazione-<digest>.json` accanto al lock per voce, scritto prima
+  di chiamare il provider e tolto solo dopo `registry.record`. Se c'è, chi arriva dopo
+  (altro processo o rilancio) non clona: exit 3 `CloneOutcomeUnknown`, finché l'utente non
+  conferma con `voice_meta.py --confirm-clone-retry --by U`. Clonazione e registrazione
+  con SIGTERM/SIGINT rinviati (`pthread_sigmask`, dove esiste). La stima segnala
+  `clonazione_incerta`.
+- **MEDIA-2**: `--events` è un flag; il file è sempre `_eventi.jsonl` nella run, aperto con
+  `O_NOFOLLOW` (un link simbolico dà `PathNotAllowed`) e in append.
+- **MEDIA-3**: `consenso.audio_sha256` nella vista; `voice_meta.py --consent
+  --expect-sha256 H`, obbligatorio in modalità web: hash calcolato dentro il lock, se
+  diverso exit 3 `RecordingChanged` e niente scritto.
+- **MEDIA-4**: `fileio.atomic_output` per mp3 finale (mix e montaggio), master wav e
+  concatenazione mp3; `FFMPEG_TIMEOUT_SECONDS = 900` su tutte le esecuzioni di ffmpeg del
+  montaggio e del mix.
+- **BASSA-1**: `interrotta`/`errore` emessi dentro `produce()`, sotto il lock; il messaggio
+  passa da `src/redaction.py` (spostato da `tools/_common.py`).
+- **BASSA-2**: fra una battuta e l'altra si rileggono i metadati delle voci; una revoca
+  ferma la produzione con exit 3 `ConsentRequired` (+ `done`/`total`/`missing`).
+- **BASSA-3**: il JSON di `produce.py` usa percorsi `output/<run>/<file>`.
+- **BASSA-4**: tipi dei metadati validati: `VoiceMetaError`.
+- **BASSA-5**: `voices_prepare.py` e `synthesize.py` rifiutati per intero in modalità web
+  (`parse_args(web_allowed=False)`).
+- Test: web_integration da 401 a 430; le altre suite invariate e verdi.
 

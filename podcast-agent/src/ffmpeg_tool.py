@@ -32,6 +32,14 @@ class FfmpegNotFoundError(RuntimeError):
     """Ne' imageio-ffmpeg ne' un ffmpeg di sistema sono disponibili."""
 
 
+#: Tempo massimo di una singola esecuzione di ffmpeg nel montaggio e nel mix.
+#: Un ffmpeg appeso (file patologico, disco pieno) terrebbe altrimenti il
+#: processo vivo per sempre, e con lui il lock di lavoro della run: l'episodio
+#: resterebbe "in generazione" (revisione di sicurezza C2, MEDIA-4). 15 minuti
+#: bastano per codificare ore di audio.
+FFMPEG_TIMEOUT_SECONDS = 900
+
+
 def find_ffmpeg() -> str | None:
     """Percorso dell'eseguibile ffmpeg, o None se non trovato.
 
