@@ -22,7 +22,7 @@ from __future__ import annotations
 import argparse
 import json
 
-from _common import add_config_arg, bootstrap, emit, note, run_dir_arg, run_tool  # noqa: E402
+from _common import add_config_arg, bootstrap, emit, note, parse_args, run_dir_arg, run_tool  # noqa: E402
 from src.episode_timeline import (  # noqa: E402
     attach_texts,
     label,
@@ -54,7 +54,7 @@ def main() -> None:
     # accettato per uniformita' con gli altri tool: qui non serve nessun
     # provider, la timeline sta gia' nella cartella dell'episodio
     add_config_arg(parser)
-    args = parser.parse_args()
+    args = parse_args(parser)
 
     config = bootstrap(args)
     run_dir = run_dir_arg(args.run_dir, config)

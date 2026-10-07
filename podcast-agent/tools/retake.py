@@ -26,7 +26,7 @@ import wave
 from pathlib import Path
 
 from _approval import add_gate_args, enforce  # noqa: E402
-from _common import add_config_arg, bootstrap, emit, note, run_dir_arg, run_tool  # noqa: E402
+from _common import add_config_arg, bootstrap, emit, note, parse_args, run_dir_arg, run_tool  # noqa: E402
 from src.audio_assembler import AudioAssembler  # noqa: E402
 from src.music_mixer import preflight, render_bed_under  # noqa: E402
 from src.segment_cache import RunCache  # noqa: E402
@@ -58,7 +58,7 @@ def main() -> None:
     )
     add_gate_args(parser, run_dir_required=True)
     add_config_arg(parser)
-    args = parser.parse_args()
+    args = parse_args(parser)
 
     modes = [args.turn is not None, args.list is not None, args.choose is not None]
     if sum(modes) != 1:

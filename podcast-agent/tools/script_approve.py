@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Registra l'approvazione dell'utente sul copione corrente.
 
-    python tools/script_approve.py --run-dir output/<run>
+    python tools/script_approve.py --run-dir output/<run> --current
 
 Va chiamato SOLO dopo aver mostrato il copione per intero all'utente e aver
 ricevuto un si' esplicito (AskUserQuestion). Non e' una formalita': finche'
@@ -19,7 +19,11 @@ Dall'interfaccia:
 
 `--version` e' la versione che l'utente ha letto: se nel frattempo il copione
 e' cambiato il comando si ferma (exit 1, VersionConflict) invece di approvare
-un testo che nessuno ha visto. Una versione con errori bloccanti (solo dal
+un testo che nessuno ha visto. Per approvare serve `--version` oppure
+`--current` (la versione corrente, qualunque sia: e' il flag esplicito per il
+subagent, che ha appena mostrato il copione all'utente nella stessa
+conversazione). Senza nessuno dei due: exit 1, VersionRequired. L'interfaccia
+passa sempre `--version`. Una versione con errori bloccanti (solo dal
 percorso API) non si approva: exit 1, ScriptHasErrors.
 """
 
@@ -29,7 +33,8 @@ import argparse
 import json
 from pathlib import Path
 
-from _common import add_config_arg, bootstrap, emit, note, run_dir_arg, run_tool  # noqa: E402
+from _common import add_config_arg, bootstrap, emit, note, parse_args, run_dir_arg, run_tool  # noqa: E402
+from src.errors import DomainError  # noqa: E402
 from src.run_lock import session_lock  # noqa: E402
 from src.script_editing import check_expected_version  # noqa: E402
 from src.script_session import FILENAME as SESSION_FILENAME  # noqa: E402
@@ -44,10 +49,16 @@ def main() -> None:
     parser.add_argument(
         "--revoke", action="store_true", help="Ritira un'approvazione data prima"
     )
-    parser.add_argument("--version", type=int, default=None, help="Versione che l'utente ha letto e approva")
+    which = parser.add_mutually_exclusive_group()
+    which.add_argument("--version", type=int, default=None, help="Versione che l'utente ha letto e approva")
+    which.add_argument(
+        "--current",
+        action="store_true",
+        help="Approva la versione corrente senza indicarne il numero (uso locale, subagent)",
+    )
     parser.add_argument("--by", default=None, help="Chi approva (o ritira l'approvazione)")
     add_config_arg(parser)
-    args = parser.parse_args()
+    args = parse_args(parser)
 
     config = bootstrap(args)
     # --session vale come la sua cartella: stessa regola di --run-dir.
@@ -71,11 +82,20 @@ def _approve_or_revoke(args, session_path) -> None:  # type: ignore[no-untyped-d
                 "revoked": revoked,
                 "revoked_by": args.by,
                 "current_version": session.version_count,
+                "run": session_path.parent.name,
                 "session_file": str(session_path),
             }
         )
         return
 
+    if args.version is None and not args.current:
+        raise DomainError(
+            "Per approvare indica la versione che l'utente ha letto (--version N): "
+            "un'approvazione senza versione potrebbe valere su un copione che nel "
+            "frattempo e' cambiato. In locale, --current approva la versione corrente.",
+            error_type="VersionRequired",
+            details={"current_version": session.version_count},
+        )
     check_expected_version(session, args.version)
 
     # L'approvazione vale sul copione che sta davvero su disco.
@@ -104,6 +124,7 @@ def _approve_or_revoke(args, session_path) -> None:  # type: ignore[no-untyped-d
             "sha256": approval["sha256"],
             "at": approval["at"],
             "by": approval.get("by"),
+            "run": session_path.parent.name,
             "session_file": str(session_path),
         }
     )

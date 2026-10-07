@@ -139,6 +139,12 @@ def write_draft(
             note(f"Scrivo il copione con {writer.model} (effort={writer.effort})...")
         script = writer.run(prompt)
 
+    # Nella sessione va solo il testo che il modello ha visto (troncato a
+    # script.max_document_chars): la sessione si riscrive a ogni modifica di
+    # battuta, approvazione e ripristino, e il documento intero sta gia' in
+    # documento_estratto.txt (revisione di sicurezza C0+C1, MEDIA-1).
+    session_text, _ = document.truncated(writer.max_document_chars)
+
     with session_lock(run_dir):
         session_path = run_dir / SESSION_FILENAME
         music_snapshot = capture_music_context(run_dir, config)
@@ -149,7 +155,7 @@ def write_draft(
             # annullare", che valevano per il copione precedente.
             session = ScriptSession.load(session_path)
             session.document_path = str(document.path)
-            session.document_text = document.text
+            session.document_text = session_text
             session.speakers = list(cast.speakers)
             session.prompt = prompt
             session.music_context = music_snapshot
@@ -159,7 +165,7 @@ def write_draft(
         else:
             session = ScriptSession.create(
                 document_path=str(document.path),
-                document_text=document.text,
+                document_text=session_text,
                 speakers=list(cast.speakers),
                 prompt=prompt,
                 path=session_path,

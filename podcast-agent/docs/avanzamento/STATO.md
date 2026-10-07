@@ -1,12 +1,13 @@
 # Stato dell'integrazione web
 
-Ultimo aggiornamento: 2026-10-07. Branch `integrazione-web`.
+Ultimo aggiornamento: 2026-10-07 (correzioni di sicurezza e modalità web). Branch `integrazione-web`.
 
 Il metodo di lavoro e le regole sono in `CLAUDE.md`. I dettagli di ogni fase sono nei
 resoconti accanto a questo file:
 - `C0.md`
 - `C1.md`
 - `C0+C1-sicurezza.md`
+- `C0+C1-correzioni.md`, `C0+C1-correzioni-sicurezza.md`
 
 ## 1. Commit
 
@@ -18,11 +19,11 @@ resoconti accanto a questo file:
 | `5240ce2` | C1: decisioni sui dubbi aperti (DOCX, errori API, ritiro approvazione su cambio cast) |
 | `649be02` | toglie due `.DS_Store` entrati per errore |
 | `b2f89ce` | sicurezza C0+C1: correzioni ALTA-1 e ALTA-2, subagent `security-reviewer` |
-| (questo) | `CLAUDE.md` e questo `STATO.md` |
+| `d29ae0c` | `CLAUDE.md` e questo `STATO.md` |
+| (questo) | sicurezza C0+C1: medie e basse chiuse, modalità web, python-docx installato |
 
 Test all'ultimo commit, sempre con `.venv/bin/python`: smoke 68, tools_cli 183 (+2
-saltati, servono `ANTHROPIC_API_KEY`), music 73, lessons 80, web_integration 175 (+1
-saltato: DOCX, finché `python-docx` non è installato).
+saltati, servono `ANTHROPIC_API_KEY`), music 73, lessons 80, web_integration 283.
 
 ## 2. Fasi
 
@@ -30,7 +31,8 @@ saltato: DOCX, finché `python-docx` non è installato).
 |---|---|---|
 | C0 | Trasversale: esiti strutturati, lock e scritture atomiche, client Anthropic finto | **fatta** |
 | C1 | Copione: passi 1–4 e pannello Confronto | **fatta** (+ decisioni sui dubbi) |
-| Sicurezza C0+C1 | Revisione, rapporto, correzione delle alte | **alte corrette**; medie e basse **in attesa di decisione** |
+| Sicurezza C0+C1 | Revisione, rapporto, correzione delle alte | **fatta**: alte, medie e basse corrette |
+| Correzioni + modalità web | MEDIA-1, BASSA-1/2/3, `PODCAST_AGENT_WEB=1` | **fatta**; revisione del diff: 0 alte, 2 medie e 4 basse **in attesa di decisione** |
 | C2 | Produzione: passi 5 (stima e consenso) e 6 (generazione) | da fare (in attesa dell'OK dell'utente) |
 | C3 | Episodio e correzioni: passo 7 | da fare |
 | C4 | Archivio e librerie (Documenti, Voci, Musiche), Impostazioni, verifica di Lezioni e Diagnostica | da fare |
@@ -129,6 +131,7 @@ prima della fase successiva.
 
 **C6 · run.py**: usa `src/music_context.py` al posto della sua copia di `_music_context`,
 senza cambiare il comportamento visibile.
+Inoltre `tools/lessons.py --propose` passa a `classify_api_error`.
 
 **Verifica finale**: un flusso completo da CLI su una run fittizia: documento → cast →
 musiche → copione → modifica → approva → stima → consenso → produce interrotto e ripreso
@@ -147,10 +150,7 @@ musiche → copione → modifica → approva → stima → consenso → produce 
 - **Condizione di sicurezza** (checklist del revisore, punto 5): le indicazioni devono
   essere una **whitelist** da configurazione. Nessun testo libero arriva al TTS fuori dal
   copione approvato. Da verificare nella revisione di C3.
-- **Da confermare**: l'utente ha parlato di "retake con whitelist di tag **e
-  condizioni**". In questa sessione non risultano condizioni oltre a quelle sopra. Se ce
-  ne sono altre (per esempio un numero massimo di tag per take, o l'esclusione di certe
-  tag), vanno scritte qui.
+- **Confermato (2026-10-07)**: solo la whitelist, nessun'altra condizione.
 
 ### D2 · Metadati delle voci accanto all'audio (2026-10-06)
 - **Decisione**: `voci_disponibili/<nome>.json` accanto alla registrazione, con nome
@@ -174,7 +174,10 @@ musiche → copione → modifica → approva → stima → consenso → produce 
 - **Decisione del piano** (approvato il 2026-10-06): il blocco "niente clonazione senza
   consenso registrato" vale per i tool (`voices_prepare.py`, `produce.py`) e quindi per
   l'adattatore e il subagent.
-- **Da confermare: "consenso anche in run.py"**. L'utente l'ha indicato come decisione
+- **Confermato (2026-10-07): il blocco vale solo nei tool**; `run.py` resta invariato.
+  Il nome di chi registra il consenso si passa con `--by`, come nei tool del copione
+  (`--confirmed-by` non si usa).
+- Storia della domanda: **"consenso anche in run.py"**. L'utente l'ha indicato come decisione
   presa, ma in questa sessione non risulta. Risulta il contrario: il piano proponeva
   "`run.py` resta invariato (nessun blocco sul consenso)", e quella proposta non è mai
   stata confermata né respinta. Va confermato all'inizio di C2.
@@ -194,8 +197,7 @@ musiche → copione → modifica → approva → stima → consenso → produce 
 - **Decisione**: `python-docx==1.2.0` è obbligatorio in `requirements.txt` e in
   `doctor.py`.
 - **Motivo**: il wireframe accetta DOCX.
-- **Stato**: **non installato** nella `.venv`. L'utente vuole essere consultato prima;
-  la richiesta è aperta (sezione 4).
+- **Stato**: installato nella `.venv` il 2026-10-07 con il permesso dell'utente.
 
 ### D7 · Errori dell'API Anthropic (2026-10-07)
 - **Decisione**: `src/script_writer.classify_api_error`.
@@ -250,25 +252,17 @@ musiche → copione → modifica → approva → stima → consenso → produce 
 
 ## 4. Richieste ricevute e non ancora completate
 
-1. **Decidere medie e basse della revisione C0+C1** (`C0+C1-sicurezza.md`). Proposte del
-   revisore:
-   - **MEDIA-1**:
-     - limiti su dimensione, pagine e caratteri dei documenti, controllati prima di
-       leggere, con errore `DocumentTooLarge`;
-     - estrazione fuori dal lock di `episodio.json`;
-     - niente doppia estrazione in `run_init`;
-     - testo troncato nella sessione.
-   - **BASSA-1**: `script_approve.py --version` obbligatorio per approvare (flag
-     esplicito per il subagent).
-   - **BASSA-2**: nomi relativi al posto dei percorsi assoluti, e niente `pid`, nei campi
-     destinati alla UI e nei messaggi.
-   - **BASSA-3**: creazione atomica della cartella della run (ciclo `mkdir` + suffisso).
-   - Domanda all'utente: quali, e se prima di C2 o dentro C2.
-2. **Installare `python-docx==1.2.0` nella `.venv`**: in attesa del permesso. Il test DOCX
-   in `test_web_integration.py` gira appena è installato.
-3. **Confermare D5** ("consenso anche in run.py", `--confirmed-by`) e le eventuali
-   "condizioni" di D1.
-4. **OK per iniziare C2.**
+1. **Decidere medie e basse della revisione del diff delle correzioni**
+   (`C0+C1-correzioni-sicurezza.md`):
+   - MEDIA-1: costo dell'estrazione PDF non limitato (budget sui byte decodificati,
+     scadenza in secondi, timeout lato adattatore);
+   - MEDIA-2: DOCX con XML enorme o zip con moltissime entrate;
+   - BASSA-1: `--current` da vietare in modalità web;
+   - BASSA-2: `--out`, `--voices`, `--audio-paths` confinati a `output/` e non alla run;
+   - BASSA-3: errore di argparse = exit 2 senza JSON;
+   - BASSA-4: `_redact` (Windows, fuori dalla home) e percorsi assoluti nei messaggi di
+     successo su stderr.
+2. **C2**: autorizzata dall'utente ("procedi con C2") il 2026-10-07.
 
 ## 5. Annotazioni per le fasi successive e per la fase finale
 
@@ -292,10 +286,14 @@ musiche → copione → modifica → approva → stima → consenso → produce 
   - `--trusted-paths`, `--save-to`, `--text-file`, `--session`, `--script-json`,
     `--script`;
   - `--no-approval-gate` e, quando ci sarà, `--no-consent-gate`.
+  - Dal 2026-10-07 sono anche **rifiutati** dai tool in modalità web
+    (`PODCAST_AGENT_WEB=1`, `NotAllowedInWebMode`). Il contratto lo documenta già.
 - **Fase finale (C6)**: `run.py` allineato a `src/music_context.py`.
+- **Fase finale (richiesta dell'utente, 2026-10-07)**: `tools/lessons.py --propose` deve
+  usare la stessa classificazione degli errori API del copione
+  (`src/script_writer.classify_api_error`): oggi i suoi errori escono con exit 1 e il nome
+  della classe della libreria.
 - **Fuori perimetro, da segnalare nel riepilogo finale**:
-  - `tools/lessons.py --propose` chiama l'API fuori da `classify_api_error` (errori con
-    exit 1 e nome della classe della libreria).
   - In modalità libera (`run.py`, `--trusted-paths`) un file senza estensione si legge
     ancora come testo: è uso locale.
 - **README e LEGENDA** non sono ancora aggiornati per C0–C1 (previsto in C5).

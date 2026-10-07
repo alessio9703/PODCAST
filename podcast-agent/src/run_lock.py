@@ -70,11 +70,17 @@ def work_lock(run_dir: Path | str, operation: str, **info: Any) -> Iterator[None
         yield
 
 
+#: Campi di `_lavoro.json` che restano nel file (servono a chi indaga sul
+#: server) ma non vanno nella vista: la UI non deve vedere i pid dei processi.
+_PRIVATE_WORK_FIELDS = ("pid",)
+
+
 def current_work(run_dir: Path | str) -> dict[str, Any] | None:
     """L'operazione lunga in corso ORA sulla run, o None.
 
     Deriva dal lock, non dal file: `_lavoro.json` conta solo se il lock e'
-    effettivamente tenuto da qualcuno.
+    effettivamente tenuto da qualcuno. Il `pid` resta nel file e non viene
+    restituito (revisione di sicurezza C0+C1, BASSA-2).
     """
     run_dir = Path(run_dir)
     if not is_locked(_work_target(run_dir)):
@@ -84,7 +90,9 @@ def current_work(run_dir: Path | str) -> dict[str, Any] | None:
         info = json.loads(info_file.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError):
         info = {}
-    return info if isinstance(info, dict) and info else {"operazione": "sconosciuta"}
+    if not isinstance(info, dict) or not info:
+        return {"operazione": "sconosciuta"}
+    return {key: value for key, value in info.items() if key not in _PRIVATE_WORK_FIELDS}
 
 
 @contextmanager

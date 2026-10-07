@@ -17,7 +17,7 @@ from __future__ import annotations
 import argparse
 
 from _approval import add_gate_args, enforce  # noqa: E402
-from _common import add_config_arg, add_trusted_paths_arg, bootstrap, emit, file_arg, note, run_dir_arg, run_tool  # noqa: E402
+from _common import add_config_arg, add_trusted_paths_arg, bootstrap, emit, file_arg, note, parse_args, run_dir_arg, run_tool  # noqa: E402
 from src.fileio import write_json_atomic  # noqa: E402
 from src.registry import VoiceRegistry  # noqa: E402
 from src.voice_library import VoiceLibrary, VoiceLibraryError  # noqa: E402
@@ -35,7 +35,7 @@ def main() -> None:
     add_gate_args(parser, run_dir_required=False)
     add_trusted_paths_arg(parser)
     add_config_arg(parser)
-    args = parser.parse_args()
+    args = parse_args(parser)
 
     config = bootstrap(args)
     if args.run_dir:

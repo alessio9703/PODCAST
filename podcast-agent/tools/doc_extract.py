@@ -27,6 +27,7 @@ from _common import (  # noqa: E402
     emit,
     file_arg,
     note,
+    parse_args,
     run_tool,
 )
 from src.pdf_reader import extract_text  # noqa: E402
@@ -42,11 +43,14 @@ def main() -> None:
     )
     add_trusted_paths_arg(parser)
     add_config_arg(parser)
-    args = parser.parse_args()
+    args = parse_args(parser)
 
     config = bootstrap(args)
     document = extract_text(
-        args.document, search_dir=config.documents_dir, confined=documents_confined(args)
+        args.document,
+        search_dir=config.documents_dir,
+        confined=documents_confined(args),
+        limits=config.document_limits,
     )
 
     text_file = None

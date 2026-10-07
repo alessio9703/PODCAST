@@ -19,7 +19,7 @@ from __future__ import annotations
 
 import argparse
 
-from _common import add_config_arg, bootstrap, emit, note, run_tool  # noqa: E402
+from _common import add_config_arg, bootstrap, emit, note, parse_args, run_tool  # noqa: E402
 from src.errors import AmbiguousName  # noqa: E402
 from src.music_library import CATEGORIES, MusicLibrary, MusicTrack  # noqa: E402
 
@@ -31,7 +31,7 @@ def main() -> None:
         help="Risolve un nome dentro una categoria (intro|outro|sottofondo)",
     )
     add_config_arg(parser)
-    args = parser.parse_args()
+    args = parse_args(parser)
 
     config = bootstrap(args)
     library = MusicLibrary(config.music_dir, config.accepted_extensions)

@@ -19,7 +19,7 @@ from __future__ import annotations
 
 import argparse
 
-from _common import add_config_arg, bootstrap, emit, note, run_dir_arg, run_tool  # noqa: E402
+from _common import add_config_arg, bootstrap, emit, note, parse_args, run_dir_arg, run_tool  # noqa: E402
 from src.script_editing import edit_turn  # noqa: E402
 from src.script_view import script_payload  # noqa: E402
 
@@ -32,7 +32,7 @@ def main() -> None:
     parser.add_argument("--expected-version", type=int, default=None, help="Versione che l'utente stava guardando")
     parser.add_argument("--by", default=None, help="Chi fa la modifica")
     add_config_arg(parser)
-    args = parser.parse_args()
+    args = parse_args(parser)
 
     config = bootstrap(args)
     run_dir = run_dir_arg(args.run_dir, config)

@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import zipfile
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Any
 
 TEXT_EXTENSIONS = {".txt", ".md", ".markdown", ".rst", ".text"}
 
@@ -35,6 +37,62 @@ class UnsupportedDocument(DocumentError):
     def __init__(self, message: str, *, extension: str, supported: list[str]) -> None:
         super().__init__(message)
         self.details = {"estensione": extension, "ammesse": supported}
+
+
+class DocumentTooLarge(DocumentError):
+    """Il documento supera uno dei limiti di `documents:` in config.yaml.
+
+    Il controllo avviene PRIMA di leggere il contenuto (dimensione del file,
+    numero di pagine, dimensione scompattata di un DOCX) oppure durante
+    l'estrazione (caratteri): un file enorme non deve occupare memoria e
+    tempo, ne' tenere preso il lock di una bozza, solo per sentirsi dire che
+    e' troppo grande. `details`: {"limite", "massimo", "valore", "file"}.
+    """
+
+    def __init__(self, message: str, *, limit: str, maximum: int, value: int, file: Path) -> None:
+        super().__init__(message)
+        self.details = {"limite": limit, "massimo": maximum, "valore": value, "file": file.name}
+
+
+@dataclass(frozen=True)
+class DocumentLimits:
+    """Limiti sui documenti di partenza (sezione `documents:` di config.yaml).
+
+    - `max_bytes`: dimensione del file;
+    - `max_pages`: pagine di un PDF;
+    - `max_chars`: caratteri del testo estratto;
+    - `max_unpacked_bytes`: somma delle dimensioni scompattate delle parti di
+      un DOCX (che e' uno zip: un file piccolo puo' contenere un XML enorme).
+    """
+
+    max_bytes: int = 20 * 1024 * 1024
+    max_pages: int = 500
+    max_chars: int = 2_000_000
+    max_unpacked_bytes: int = 100 * 1024 * 1024
+
+    @classmethod
+    def from_settings(cls, settings: dict[str, Any] | None) -> "DocumentLimits":
+        settings = settings or {}
+        defaults = cls()
+        values = {}
+        for key in ("max_bytes", "max_pages", "max_chars", "max_unpacked_bytes"):
+            raw = settings.get(key)
+            value = getattr(defaults, key) if raw is None else int(raw)
+            if value <= 0:
+                raise ValueError(f"documents.{key} deve essere un numero positivo.")
+            values[key] = value
+        return cls(**values)
+
+
+def _too_large(path: Path, limit: str, maximum: int, value: int, what: str) -> DocumentTooLarge:
+    return DocumentTooLarge(
+        f"Il documento {path.name} e' troppo grande: {what} ({value}) oltre il massimo "
+        f"consentito ({maximum}). Usa un estratto piu' breve.",
+        limit=limit,
+        maximum=maximum,
+        value=value,
+        file=path,
+    )
 
 
 @dataclass
@@ -99,9 +157,9 @@ def locate_document(
     if bare_name and search_dir is not None:
         raise DocumentError(
             f"Documento non trovato: ne' '{raw.name}' dentro "
-            f"{Path(search_dir)}, ne' come percorso {resolved}."
+            f"{Path(search_dir).name}/, ne' come percorso."
         )
-    raise DocumentError(f"Documento non trovato: {resolved}")
+    raise DocumentError(f"Documento non trovato: '{raw.name}'.")
 
 
 def _locate_confined(raw: Path, bare_name: bool, search_dir: str | Path | None) -> Path:
@@ -129,16 +187,31 @@ def _locate_confined(raw: Path, bare_name: bool, search_dir: str | Path | None) 
 
 
 def extract_text(
-    path: str | Path, search_dir: str | Path | None = None, *, confined: bool = False
+    path: str | Path,
+    search_dir: str | Path | None = None,
+    *,
+    confined: bool = False,
+    limits: DocumentLimits | None = None,
 ) -> Document:
+    """Estrae il testo, rispettando `limits` (default: DocumentLimits())."""
+    limits = limits or DocumentLimits()
     doc_path = locate_document(path, search_dir, confined=confined)
+    size = doc_path.stat().st_size
+    if size > limits.max_bytes:
+        raise _too_large(doc_path, "byte", limits.max_bytes, size, "dimensione in byte")
     suffix = doc_path.suffix.lower()
     if suffix == ".pdf":
-        return _read_pdf(doc_path)
-    if suffix == ".docx":
-        return _read_docx(doc_path)
-    if suffix in TEXT_EXTENSIONS or suffix == "":
-        return _read_plain(doc_path)
+        document = _read_pdf(doc_path, limits)
+    elif suffix == ".docx":
+        document = _read_docx(doc_path, limits)
+    elif suffix in TEXT_EXTENSIONS or suffix == "":
+        document = _read_plain(doc_path)
+    else:
+        document = None
+    if document is not None:
+        if document.char_count > limits.max_chars:
+            raise _too_large(doc_path, "caratteri", limits.max_chars, document.char_count, "caratteri del testo")
+        return document
     raise UnsupportedDocument(
         f"Estensione '{suffix}' non supportata. Formati gestiti: PDF, DOCX, "
         f"{', '.join(sorted(TEXT_EXTENSIONS))}.",
@@ -147,7 +220,7 @@ def extract_text(
     )
 
 
-def _read_pdf(path: Path) -> Document:
+def _read_pdf(path: Path, limits: DocumentLimits) -> Document:
     try:
         from pypdf import PdfReader
     except ImportError as exc:  # pragma: no cover
@@ -179,7 +252,17 @@ def _read_pdf(path: Path) -> Document:
                 file=path,
             )
 
+    try:
+        page_count = len(reader.pages)
+    except Exception as exc:  # noqa: BLE001 - albero delle pagine rotto
+        raise DocumentNotExtractable(
+            f"Impossibile leggere le pagine del PDF {path.name}: {exc}", motivo="illeggibile", file=path
+        ) from exc
+    if page_count > limits.max_pages:
+        raise _too_large(path, "pagine", limits.max_pages, page_count, "numero di pagine")
+
     chunks: list[str] = []
+    chars = 0
     for number, page in enumerate(reader.pages, start=1):
         try:
             content = page.extract_text() or ""
@@ -187,6 +270,10 @@ def _read_pdf(path: Path) -> Document:
             content = ""
         if content.strip():
             chunks.append(f"[pagina {number}]\n{content.strip()}")
+            chars += len(chunks[-1])
+            # Fermarsi appena si supera il limite: e' inutile estrarre il resto.
+            if chars > limits.max_chars:
+                raise _too_large(path, "caratteri", limits.max_chars, chars, "caratteri del testo")
 
     text = "\n\n".join(chunks).strip()
     if not text:
@@ -197,10 +284,34 @@ def _read_pdf(path: Path) -> Document:
             motivo="scansione",
             file=path,
         )
-    return Document(path=path, text=text, kind="pdf", pages=len(reader.pages))
+    return Document(path=path, text=text, kind="pdf", pages=page_count)
 
 
-def _read_docx(path: Path) -> Document:
+def _check_docx_unpacked(path: Path, limits: DocumentLimits) -> None:
+    """Somma le dimensioni scompattate dichiarate nello zip, PRIMA di aprirlo.
+
+    python-docx carica in memoria tutte le parti del pacchetto: un DOCX di
+    pochi KB con un document.xml molto comprimibile (bomba zip) occuperebbe
+    GB. La dimensione dichiarata nell'indice dello zip e' quella che
+    zipfile fa poi rispettare in lettura (un'entrata che si scompatta oltre
+    la dimensione dichiarata da' errore).
+    """
+    try:
+        with zipfile.ZipFile(path) as archive:
+            unpacked = sum(info.file_size for info in archive.infolist())
+    except (zipfile.BadZipFile, OSError) as exc:
+        raise DocumentNotExtractable(
+            f"Impossibile aprire il DOCX {path.name}: non e' un file DOCX valido.",
+            motivo="illeggibile",
+            file=path,
+        ) from exc
+    if unpacked > limits.max_unpacked_bytes:
+        raise _too_large(
+            path, "byte_scompattati", limits.max_unpacked_bytes, unpacked, "dimensione scompattata"
+        )
+
+
+def _read_docx(path: Path, limits: DocumentLimits) -> Document:
     try:
         import docx  # type: ignore
     except ImportError as exc:
@@ -210,6 +321,7 @@ def _read_docx(path: Path) -> Document:
             "(tools/doctor.py dice cosa manca)."
         ) from exc
 
+    _check_docx_unpacked(path, limits)
     try:
         document = docx.Document(str(path))
     except Exception as exc:
@@ -241,7 +353,9 @@ def _read_plain(path: Path) -> Document:
 __all__ = [
     "Document",
     "DocumentError",
+    "DocumentLimits",
     "DocumentNotExtractable",
+    "DocumentTooLarge",
     "SUPPORTED_EXTENSIONS",
     "UnsupportedDocument",
     "extract_text",

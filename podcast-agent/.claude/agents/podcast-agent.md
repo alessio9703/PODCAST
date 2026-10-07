@@ -92,7 +92,7 @@ stderr. Leggi il JSON, non il testo.
 | `tools/script_edit.py --run-dir D --turn N --text "..."` | cambia il testo (tag comprese) di **una** battuta senza riscrivere tutta la bozza: nuova versione, l'approvazione decade da sola | come `script_save.py`; exit `1` `ScriptInvalid` se la modifica rompe una regola (non salva) |
 | `tools/script_show.py --run-dir D` | rilegge il copione corrente | `rendered`, `version`, `approved`, `approval_problem`, `versions[]` |
 | `tools/script_versions.py --run-dir D --list \| --diff A [B] \| --restore N` | storico, confronto fra versioni, ripristino (= nuova versione da riapprovare) | `versions[]` / `righe[]` con `stato` (invariata, modificata, aggiunta, rimossa) / la versione nuova |
-| `tools/script_approve.py --run-dir D` | registra il sì dell'utente | `version`, `sha256` |
+| `tools/script_approve.py --run-dir D --current` | registra il sì dell'utente (sulla versione corrente; `--version V` al posto di `--current` la fissa) | `version`, `sha256` |
 | `tools/voices_prepare.py --speakers A B --out V --run-dir D [--dry-run]` | cache o clonazione | `voice_map`, `newly_cloned[]`, `reused[]`, `audio_paths_file` |
 | `tools/estimate.py --script S` | stima | `chars`, `duration_label`, `cost_usd`, `rendered`, `duration_with_music_seconds` se ci sono musiche |
 | `tools/estimate.py --script S --run-dir D` | stima **incrementale**: conta solo i turni non in cache | `turns_to_generate`, `chars_to_generate`, `cost_to_generate_usd` |
@@ -388,8 +388,11 @@ Poi **rimostri il copione e richiedi conferma**. Cicli finché non approva.
 Quando approva, e solo allora:
 
 ```bash
-.venv/bin/python tools/script_approve.py --run-dir output/<run>
+.venv/bin/python tools/script_approve.py --run-dir output/<run> --current
 ```
+
+`--current` è obbligatorio (oppure `--version V`, con V la versione che hai appena
+mostrato): senza nessuno dei due il comando non approva (exit 1, `VersionRequired`).
 
 Se l'utente non approva e non sa cosa cambiare, fermati lì: non sintetizzare "intanto".
 

@@ -12,7 +12,7 @@ from __future__ import annotations
 import argparse
 import json
 
-from _common import add_config_arg, add_trusted_paths_arg, bootstrap, documents_confined, emit, file_arg, note, run_dir_arg, run_tool  # noqa: E402
+from _common import add_config_arg, add_trusted_paths_arg, bootstrap, documents_confined, emit, file_arg, note, parse_args, run_dir_arg, run_tool  # noqa: E402
 from src.pdf_reader import locate_document  # noqa: E402
 from src.registry import VoiceRegistry  # noqa: E402
 from src.run_layout import archive_source_document, write_voices_used  # noqa: E402
@@ -30,7 +30,7 @@ def main() -> None:
     )
     add_trusted_paths_arg(parser)
     add_config_arg(parser)
-    args = parser.parse_args()
+    args = parse_args(parser)
 
     config = bootstrap(args)
     run_dir = run_dir_arg(args.run_dir, config)
@@ -55,6 +55,7 @@ def main() -> None:
 
     emit(
         {
+            "run": run_dir.name,
             "run_dir": str(run_dir),
             "voci_usate": str(voices_file),
             "documento": source_note,

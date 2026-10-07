@@ -22,7 +22,7 @@ from .episode_config import (
 from .errors import AmbiguousName
 from .fileio import write_text_atomic
 from .music_context import music_durations
-from .pdf_reader import extract_text
+from .pdf_reader import Document, extract_text
 from .registry import VoiceRegistry
 from .run_lock import session_lock
 from .script_session import FILENAME as SESSION_FILENAME
@@ -46,22 +46,35 @@ def resolve_voice(library: VoiceLibrary, query: str, role: str) -> str:
             details={"campo": "voce", "ruolo": role, "query": query, "candidates": [c.name for c in candidates]},
         )
     raise VoiceLibraryError(
-        f"'{query}' non corrisponde a nessuna voce in {library.dir}. "
+        f"'{query}' non corrisponde a nessuna voce in {library.dir.name}/. "
         f"Disponibili: {', '.join(library.names) or 'nessuna'}."
     )
 
 
-def set_document(
-    episode: EpisodeConfig, run_dir: Path, document_arg: str, config: Any, *, trusted_paths: bool = False
-) -> dict[str, Any]:
-    """Estrae il documento, lo registra e ne salva il testo nella run.
+def load_document(document_arg: str, config: Any, *, trusted_paths: bool = False) -> Document:
+    """Estrae il documento, con i limiti di config.yaml (`documents:`).
 
     Il documento deve stare nella libreria documenti/ (src/pdf_reader,
-    modalita' confinata), salvo `trusted_paths` per l'uso locale.
+    modalita' confinata), salvo `trusted_paths` per l'uso locale. Si chiama
+    FUORI dal lock di episodio.json: l'estrazione di un PDF lungo non deve
+    far aspettare chi lavora sulla stessa bozza.
     """
-    document = extract_text(document_arg, search_dir=config.documents_dir, confined=not trusted_paths)
-    episode.documento = document_record(document)
-    write_text_atomic(Path(run_dir) / EXTRACTED_TEXT_FILENAME, document.text)
+    return extract_text(
+        document_arg,
+        search_dir=config.documents_dir,
+        confined=not trusted_paths,
+        limits=config.document_limits,
+    )
+
+
+def set_document(episode: EpisodeConfig, run_dir: Path, record: dict[str, Any], text: str) -> dict[str, Any]:
+    """Registra un documento GIA' estratto e ne salva il testo nella run.
+
+    `record` e' document_record(document), calcolato anch'esso fuori dal lock
+    (legge il file per lo sha256): qui dentro si scrive soltanto.
+    """
+    episode.documento = record
+    write_text_atomic(Path(run_dir) / EXTRACTED_TEXT_FILENAME, text)
     return episode.documento
 
 
@@ -101,7 +114,7 @@ def apply_changes(
     config: Any,
     *,
     title: str | None = None,
-    document: str | None = None,
+    document: str | Document | None = None,
     script_format: str | None = None,
     minutes: int | None = None,
     voices: dict[str, str] | None = None,
@@ -122,6 +135,10 @@ def apply_changes(
     L'ordine conta ed e' quello dello schermo: formato prima dei ruoli (i ruoli
     ammessi dipendono dal formato), voce prima del nome (assegnare una voce
     nuova azzera il nome della persona precedente).
+
+    `document` e' il nome nella libreria (si estrae qui) oppure un Document
+    gia' estratto da chi chiama (run_init.py, per non estrarlo due volte).
+    In entrambi i casi l'estrazione avviene PRIMA di prendere il lock.
     """
     run_dir = Path(run_dir)
     warnings: list[str] = []
@@ -129,14 +146,19 @@ def apply_changes(
     if voices:
         library = VoiceLibrary(config.voices_dir, config.accepted_extensions)
         library.scan()
+    document_data = None
+    if document is not None:
+        if not isinstance(document, Document):
+            document = load_document(document, config, trusted_paths=trusted_paths)
+        document_data = (document_record(document), document.text)
 
     with locked_update(run_dir):
         episode = EpisodeConfig.load(run_dir) or EpisodeConfig()
         before = _cast_snapshot(episode)
         if title is not None:
             episode.set_title(title)
-        if document is not None:
-            set_document(episode, run_dir, document, config, trusted_paths=trusted_paths)
+        if document_data is not None:
+            set_document(episode, run_dir, *document_data)
         if script_format is not None:
             warnings.extend(episode.set_format(script_format))
         if minutes is not None:
@@ -232,6 +254,7 @@ def episode_view(run_dir: Path, config: Any, episode: EpisodeConfig | None = Non
     target_seconds = (episode.durata_minuti or 0) * 60
 
     return {
+        "run": run_dir.name,
         "run_dir": str(run_dir),
         "episodio_file": str(EpisodeConfig.path_for(run_dir)),
         "titolo": episode.titolo,
@@ -254,4 +277,11 @@ def episode_view(run_dir: Path, config: Any, episode: EpisodeConfig | None = Non
     }
 
 
-__all__ = ["apply_changes", "episode_view", "resolve_voice", "revoke_approval_if_any", "set_document"]
+__all__ = [
+    "apply_changes",
+    "episode_view",
+    "load_document",
+    "resolve_voice",
+    "revoke_approval_if_any",
+    "set_document",
+]

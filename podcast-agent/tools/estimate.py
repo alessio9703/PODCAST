@@ -17,7 +17,7 @@ from __future__ import annotations
 import argparse
 import json
 
-from _common import add_config_arg, add_trusted_paths_arg, bootstrap, emit, file_arg, note, run_dir_arg, run_tool  # noqa: E402
+from _common import add_config_arg, add_trusted_paths_arg, bootstrap, emit, file_arg, note, parse_args, run_dir_arg, run_tool  # noqa: E402
 from src.audio_assembler import load_choices, script_segment_keys, segment_path  # noqa: E402
 from src.cost_estimate import estimate as compute  # noqa: E402
 from src.music_context import music_durations  # noqa: E402
@@ -35,7 +35,7 @@ def main() -> None:
     )
     add_trusted_paths_arg(parser)
     add_config_arg(parser)
-    args = parser.parse_args()
+    args = parse_args(parser)
 
     config = bootstrap(args)
     script = PodcastScript.from_dict(
@@ -141,6 +141,7 @@ def _incremental(run_dir, script: PodcastScript, provider) -> dict[str, object]:
         + " — gli altri sono gia' in cache"
     )
     return {
+        "run": run_dir.name,
         "run_dir": str(run_dir),
         "turns_to_generate": len(missing),
         "turns_to_generate_list": missing,

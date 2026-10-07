@@ -23,7 +23,7 @@ from __future__ import annotations
 import argparse
 
 from _approval import add_gate_args, enforce  # noqa: E402
-from _common import add_config_arg, bootstrap, emit, note, run_dir_arg, run_tool  # noqa: E402
+from _common import add_config_arg, bootstrap, emit, note, parse_args, run_dir_arg, run_tool  # noqa: E402
 from src.audio_assembler import AudioAssembler  # noqa: E402
 from src.music_mixer import mix_episode, preflight  # noqa: E402
 from src.segment_cache import RunCache  # noqa: E402
@@ -40,7 +40,7 @@ def main() -> None:
     )
     add_gate_args(parser, run_dir_required=True)
     add_config_arg(parser)
-    args = parser.parse_args()
+    args = parse_args(parser)
 
     config = bootstrap(args)
     run_dir = run_dir_arg(args.run_dir, config)

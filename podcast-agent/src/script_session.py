@@ -59,6 +59,10 @@ VERSION_KINDS = ("prima_stesura", "riscrittura", "revisione", "modifica_manuale"
 @dataclass
 class ScriptSession:
     document_path: str
+    #: Il testo che il modello ha visto, cioe' gia' troncato a
+    #: script.max_document_chars (il documento intero sta in
+    #: documento_estratto.txt). Le sessioni scritte prima lo hanno intero:
+    #: si leggono lo stesso.
     document_text: str
     speakers: list[str]
     prompt: str
@@ -141,19 +145,19 @@ class ScriptSession:
         session_path = Path(path)
         if not session_path.is_file():
             raise ScriptSessionError(
-                f"Sessione non trovata: {session_path}\n"
+                f"Sessione non trovata: {session_path.parent.name}/{session_path.name}\n"
                 "Serve il file creato dalla scrittura del copione. Se non c'e', "
                 "riparti dalla scrittura invece che dalla revisione."
             )
         try:
             raw = json.loads(session_path.read_text(encoding="utf-8"))
         except json.JSONDecodeError as exc:
-            raise ScriptSessionError(f"{session_path} non e' un JSON valido: {exc}") from exc
+            raise ScriptSessionError(f"{session_path.name} non e' un JSON valido: {exc}") from exc
 
         missing = {"document_path", "speakers", "prompt"} - set(raw)
         if missing:
             raise ScriptSessionError(
-                f"{session_path} non contiene i campi {sorted(missing)}: "
+                f"{session_path.name} non contiene i campi {sorted(missing)}: "
                 "non e' un file di sessione valido."
             )
         return cls(

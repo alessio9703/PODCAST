@@ -13,7 +13,7 @@ from __future__ import annotations
 
 import argparse
 
-from _common import add_config_arg, bootstrap, emit, note, run_tool  # noqa: E402
+from _common import add_config_arg, bootstrap, emit, note, parse_args, run_tool  # noqa: E402
 from src.registry import VoiceRegistry  # noqa: E402
 from src.voice_library import VoiceLibrary, spoken_name_guess  # noqa: E402
 
@@ -31,7 +31,7 @@ def main() -> None:
         "--require", type=int, default=0, help="Fallisci se ci sono meno di N voci"
     )
     add_config_arg(parser)
-    args = parser.parse_args()
+    args = parse_args(parser)
 
     config = bootstrap(args)
     library = VoiceLibrary(config.voices_dir, config.accepted_extensions)

@@ -33,7 +33,7 @@ from __future__ import annotations
 
 import argparse
 
-from _common import add_config_arg, add_trusted_paths_arg, bootstrap, emit, note, run_dir_arg, run_tool  # noqa: E402
+from _common import add_config_arg, add_trusted_paths_arg, bootstrap, emit, note, parse_args, run_dir_arg, run_tool  # noqa: E402
 from src.episode_config import ALL_ROLES, parse_duration  # noqa: E402
 from src.episode_setup import apply_changes, episode_view  # noqa: E402
 
@@ -71,12 +71,12 @@ def main() -> None:
     )
     add_trusted_paths_arg(parser)
     add_config_arg(parser)
-    args = parser.parse_args()
+    args = parse_args(parser)
 
     config = bootstrap(args)
     run_dir = run_dir_arg(args.run_dir, config)
     if not run_dir.is_dir():
-        raise FileNotFoundError(f"Cartella della run inesistente: {run_dir}. Chiama prima run_init.py.")
+        raise FileNotFoundError(f"Cartella della run inesistente: {run_dir.name}. Chiama prima run_init.py.")
 
     minutes = parse_duration(args.durata) if args.durata is not None else args.minuti
     changes = dict(

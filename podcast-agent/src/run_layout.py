@@ -27,15 +27,27 @@ from .registry import VoiceRegistry
 
 
 def make_run_dir(output_root: Path, title: str) -> Path:
-    """Crea output/<data>_<slug>/ evitando collisioni con un suffisso numerico."""
+    """Crea output/<data>_<slug>/ evitando collisioni con un suffisso numerico.
+
+    Il controllo e' il mkdir stesso, che e' atomico: due utenti che creano
+    nello stesso minuto un episodio con lo stesso titolo ottengono due
+    cartelle diverse. Con "exists() e poi mkdir()" entrambi potevano vedere
+    la cartella libera e il secondo falliva (revisione di sicurezza C0+C1,
+    BASSA-3).
+    """
+    output_root = Path(output_root)
+    output_root.mkdir(parents=True, exist_ok=True)
     stamp = datetime.now().strftime("%Y-%m-%d_%H-%M")
-    run_dir = output_root / f"{stamp}_{slugify(title)}"
+    base = f"{stamp}_{slugify(title)}"
+    run_dir = output_root / base
     suffix = 2
-    while run_dir.exists():
-        run_dir = output_root / f"{stamp}_{slugify(title)}-{suffix}"
-        suffix += 1
-    run_dir.mkdir(parents=True)
-    return run_dir
+    while True:
+        try:
+            run_dir.mkdir(parents=False)
+            return run_dir
+        except FileExistsError:
+            run_dir = output_root / f"{base}-{suffix}"
+            suffix += 1
 
 
 def write_voices_used(

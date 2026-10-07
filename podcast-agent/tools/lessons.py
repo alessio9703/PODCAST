@@ -26,7 +26,7 @@ import json
 import os
 from pathlib import Path
 
-from _common import NeedsUserInput, PROJECT_ROOT, add_config_arg, bootstrap, emit, note, run_tool  # noqa: E402
+from _common import NeedsUserInput, PROJECT_ROOT, add_config_arg, bootstrap, emit, note, parse_args, run_tool  # noqa: E402
 from src import lessons as lessons_mod  # noqa: E402
 from src.episode_signals import SIGNALS_FILENAME  # noqa: E402
 
@@ -207,7 +207,7 @@ def main() -> None:
     parser.add_argument("--remove-id", default=None, help="Con --accept: quale lezione attiva togliere se serve spazio")
     parser.add_argument("--reason", default=None, help="Con --reject: perche' si scarta")
     add_config_arg(parser)
-    args = parser.parse_args()
+    args = parse_args(parser)
 
     config = bootstrap(args)
     lessons_config = config.lessons

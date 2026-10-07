@@ -107,7 +107,7 @@ def file_lock(target: Path | str, timeout: float = DEFAULT_LOCK_TIMEOUT) -> Iter
                     f"{Path(target).name} e' in uso da un'altra operazione da piu' di "
                     f"{timeout:g} secondi. Riprova fra poco; se resta bloccato, "
                     f"controlla che nessun comando sia rimasto appeso.",
-                    details={"file": str(target), "timeout_seconds": timeout},
+                    details={"file": Path(target).name, "timeout_seconds": timeout},
                 )
             time.sleep(_POLL_SECONDS)
         try:

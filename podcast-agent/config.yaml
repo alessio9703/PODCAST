@@ -97,6 +97,22 @@ paths:
   # un errore.
   music_dir: ./musiche
 
+# Limiti sui documenti di partenza. Si controllano PRIMA di leggere il
+# contenuto: un file enorme non deve occupare memoria e tempo (e il lock della
+# bozza) solo per sentirsi dire che e' troppo grande. Oltre un limite il
+# comando esce con exit 1, error_type DocumentTooLarge.
+documents:
+  # Dimensione del file (20 MB).
+  max_bytes: 20971520
+  # Pagine di un PDF.
+  max_pages: 500
+  # Caratteri del testo estratto. Al modello ne arrivano comunque al massimo
+  # script.max_document_chars: questo e' il limite di cio' che si accetta.
+  max_chars: 2000000
+  # Dimensione scompattata di un DOCX (100 MB): un DOCX e' uno zip, e un file
+  # piccolo puo' contenere un XML enorme.
+  max_unpacked_bytes: 104857600
+
 audio:
   # Ritaglia il silenzio che il TTS mette in testa e in coda a ogni segmento
   # PRIMA di montarlo. Senza, la pausa percepita fra due turni non e' quella

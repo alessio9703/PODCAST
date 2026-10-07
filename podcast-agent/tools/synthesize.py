@@ -17,7 +17,7 @@ import shutil
 from pathlib import Path
 
 from _approval import add_gate_args, enforce  # noqa: E402
-from _common import add_config_arg, add_trusted_paths_arg, bootstrap, emit, file_arg, note, run_dir_arg, run_tool  # noqa: E402
+from _common import add_config_arg, add_trusted_paths_arg, bootstrap, emit, file_arg, note, parse_args, run_dir_arg, run_tool  # noqa: E402
 from src.audio_assembler import AudioAssembler, slugify  # noqa: E402
 from src.episode_signals import collect_and_write, record_synthesis_event  # noqa: E402
 from src.fileio import write_json_atomic  # noqa: E402
@@ -50,7 +50,7 @@ def main() -> None:
     add_gate_args(parser, run_dir_required=True)
     add_trusted_paths_arg(parser)
     add_config_arg(parser)
-    args = parser.parse_args()
+    args = parse_args(parser)
 
     config = bootstrap(args)
     run_dir = run_dir_arg(args.run_dir, config)

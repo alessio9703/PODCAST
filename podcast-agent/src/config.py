@@ -96,6 +96,20 @@ class Config:
         return dict(self.raw.get("lessons") or {})
 
     @property
+    def document_limits(self) -> Any:
+        """Limiti sui documenti di partenza (sezione `documents:`).
+
+        Mancano nei config.yaml creati prima: valgono i default di
+        src.pdf_reader.DocumentLimits.
+        """
+        from .pdf_reader import DocumentLimits
+
+        try:
+            return DocumentLimits.from_settings(self.raw.get("documents"))
+        except (TypeError, ValueError) as exc:
+            raise ConfigError(f"Sezione 'documents' di config.yaml non valida: {exc}") from exc
+
+    @property
     def accepted_extensions(self) -> list[str]:
         exts = self.audio.get("accepted_extensions") or [".wav", ".mp3"]
         return [str(e).lower() if str(e).startswith(".") else f".{e}".lower() for e in exts]

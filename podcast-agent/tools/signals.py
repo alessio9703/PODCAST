@@ -14,7 +14,7 @@ from __future__ import annotations
 import argparse
 import json
 
-from _common import add_config_arg, bootstrap, emit, note, run_dir_arg, run_tool  # noqa: E402
+from _common import add_config_arg, bootstrap, emit, note, parse_args, run_dir_arg, run_tool  # noqa: E402
 from src.episode_signals import collect_and_write  # noqa: E402
 
 
@@ -22,12 +22,12 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--run-dir", required=True, help="Cartella dell'episodio")
     add_config_arg(parser)
-    args = parser.parse_args()
+    args = parse_args(parser)
 
     config = bootstrap(args)
     run_dir = run_dir_arg(args.run_dir, config)
     if not run_dir.is_dir():
-        raise FileNotFoundError(f"Cartella della run inesistente: {run_dir}.")
+        raise FileNotFoundError(f"Cartella della run inesistente: {run_dir.name}.")
 
     threshold = float((config.lessons or {}).get("turn_similarity_threshold", 0.35))
 

@@ -16,7 +16,7 @@ from __future__ import annotations
 
 import argparse
 
-from _common import add_config_arg, bootstrap, emit, run_dir_arg, run_tool  # noqa: E402
+from _common import add_config_arg, bootstrap, emit, parse_args, run_dir_arg, run_tool  # noqa: E402
 from src.run_lock import current_work  # noqa: E402
 from src.script_editing import versions_list  # noqa: E402
 from src.script_rules import validate_script  # noqa: E402
@@ -29,19 +29,19 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--run-dir", required=True, help="Cartella dell'episodio")
     add_config_arg(parser)
-    args = parser.parse_args()
+    args = parse_args(parser)
 
     config = bootstrap(args)
     run_dir = run_dir_arg(args.run_dir, config)
     if not run_dir.is_dir():
-        raise FileNotFoundError(f"Cartella della run inesistente: {run_dir}.")
+        raise FileNotFoundError(f"Cartella della run inesistente: {run_dir.name}.")
 
     in_progress = current_work(run_dir)
     session_path = run_dir / SESSION_FILENAME
     session = ScriptSession.load(session_path) if session_path.is_file() else None
 
     if session is None or session.current_script is None:
-        emit({"run_dir": str(run_dir), "has_script": False, "in_corso": in_progress})
+        emit({"run": run_dir.name, "run_dir": str(run_dir), "has_script": False, "in_corso": in_progress})
         return
 
     script = session.script()
@@ -63,6 +63,7 @@ def main() -> None:
     )
     emit(
         {
+            "run": run_dir.name,
             "run_dir": str(run_dir),
             "has_script": True,
             "in_corso": in_progress,

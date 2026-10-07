@@ -521,7 +521,7 @@ def test_script_write_api(root: Path, config: Path, run_dir: str) -> None:
     check("prompt: il documento della run", "dodici per cento" in prompt)
     check("copione con errore bloccante: salvato ma non approvabile", out["errors"] and out["approvable"] is False and out["version"] == 1, str(out.get("errors")))
     check("problems (chiave storica) = errori", out["problems"] == out["errors"])
-    code, out, _ = tool("script_approve.py", "--run-dir", run_dir, config=config)
+    code, out, _ = tool("script_approve.py", "--run-dir", run_dir, "--version", "1", config=config)
     check("approvare una versione con errori -> exit 1 ScriptHasErrors", code == 1 and out.get("error_type") == "ScriptHasErrors", str(out))
 
     print("\n[C1] modifica diretta di una battuta")
@@ -804,6 +804,481 @@ def test_legacy_paths(root: Path, config: Path) -> None:
 
 
 # ----------------------------------------------------------------------
+# Sicurezza C0+C1: medie e basse (MEDIA-1, BASSA-1, BASSA-2, BASSA-3)
+# ----------------------------------------------------------------------
+
+
+def write_limits_config(root: Path) -> Path:
+    """Come config-web.yaml, con limiti sui documenti piccoli da superare nei test."""
+    text = (root / "config-web.yaml").read_text(encoding="utf-8")
+    text += textwrap.dedent(
+        """
+        documents:
+          max_bytes: 100000
+          max_pages: 2
+          max_chars: 200
+          max_unpacked_bytes: 1000000
+        """
+    )
+    text = text.replace("  target_minutes: 3\n", "  target_minutes: 3\n  max_document_chars: 20\n")
+    config = root / "config-limiti.yaml"
+    config.write_text(text, encoding="utf-8")
+    return config
+
+
+def make_pdf_pages(path: Path, pages: int) -> None:
+    from pypdf import PdfWriter
+
+    writer = PdfWriter()
+    for _ in range(pages):
+        writer.add_blank_page(width=200, height=200)
+    with path.open("wb") as handle:
+        writer.write(handle)
+
+
+def test_document_limits(root: Path) -> None:
+    print("\n[sicurezza] MEDIA-1: limiti sui documenti")
+    config = write_limits_config(root)
+    docs = root / "documenti"
+
+    (docs / "enorme.txt").write_text("parola " * 20000, encoding="utf-8")  # 140.000 byte
+    code, out, _ = tool("doc_extract.py", "enorme.txt", config=config)
+    check(
+        "file oltre max_bytes -> exit 1 DocumentTooLarge con details",
+        code == 1 and out.get("error_type") == "DocumentTooLarge"
+        and out["details"] == {"limite": "byte", "massimo": 100000, "valore": 140000, "file": "enorme.txt"},
+        str(out),
+    )
+
+    make_pdf_pages(docs / "tre_pagine.pdf", 3)
+    code, out, _ = tool("doc_extract.py", "tre_pagine.pdf", config=config)
+    check(
+        "PDF oltre max_pages -> DocumentTooLarge prima di estrarre (non 'scansione')",
+        code == 1 and out.get("error_type") == "DocumentTooLarge" and out["details"]["limite"] == "pagine"
+        and out["details"]["valore"] == 3,
+        str(out),
+    )
+    make_pdf_pages(docs / "due_pagine.pdf", 2)
+    code, out, _ = tool("doc_extract.py", "due_pagine.pdf", config=config)
+    check("PDF entro il limite di pagine: si arriva all'estrazione (scansione)", code == 1 and out["details"].get("motivo") == "scansione", str(out))
+
+    (docs / "lungo.txt").write_text("a" * 300, encoding="utf-8")
+    code, out, _ = tool("doc_extract.py", "lungo.txt", config=config)
+    check(
+        "testo oltre max_chars -> DocumentTooLarge caratteri",
+        code == 1 and out.get("error_type") == "DocumentTooLarge" and out["details"]["limite"] == "caratteri"
+        and out["details"]["massimo"] == 200,
+        str(out),
+    )
+
+    import zipfile
+
+    import docx
+
+    normal = docx.Document()
+    normal.add_paragraph("Un DOCX normale.")
+    normal.save(str(docs / "normale.docx"))
+    code, out, err = tool("doc_extract.py", "normale.docx", config=config)
+    check("DOCX normale entro i limiti: exit 0", code == 0, err + str(out))
+    bomb = docs / "bomba.docx"
+    with zipfile.ZipFile(docs / "normale.docx") as source, zipfile.ZipFile(bomb, "w", zipfile.ZIP_DEFLATED) as target:
+        for info in source.infolist():
+            data = source.read(info.filename)
+            if info.filename == "word/document.xml":
+                data = data.replace(b"Un DOCX normale.", b"x" + b" " * 3_000_000)
+            target.writestr(info.filename, data)
+    check("la bomba e' piccola su disco", bomb.stat().st_size < 100000, str(bomb.stat().st_size))
+    code, out, _ = tool("doc_extract.py", "bomba.docx", config=config)
+    check(
+        "DOCX che si scompatta oltre max_unpacked_bytes -> DocumentTooLarge prima di aprirlo",
+        code == 1 and out.get("error_type") == "DocumentTooLarge" and out["details"]["limite"] == "byte_scompattati",
+        str(out),
+    )
+
+    from src.config import ConfigError, load_config
+
+    check("config.yaml del progetto: limiti dichiarati", load_config().document_limits.max_pages == 500)
+    bad = root / "config-limiti-rotti.yaml"
+    bad.write_text((root / "config-web.yaml").read_text(encoding="utf-8") + "documents:\n  max_pages: 0\n", encoding="utf-8")
+    try:
+        load_config(bad).document_limits
+        ok = False
+    except ConfigError:
+        ok = True
+    check("limite non positivo -> ConfigError", ok)
+
+    before = set((root / "output").iterdir())
+    code, out, _ = tool("run_init.py", "--title", "Troppo", "--document", "enorme.txt", config=config)
+    check("run_init con documento troppo grande: exit 1, nessuna bozza", code == 1 and out.get("error_type") == "DocumentTooLarge" and set((root / "output").iterdir()) == before, str(out))
+
+    print("\n[sicurezza] MEDIA-1: estrazione fuori dal lock, una volta sola")
+    run_dir = tool("run_init.py", "--title", "Lock e documenti", config=config)[1]["run_dir"]
+    from src.episode_config import locked_update
+
+    with locked_update(Path(run_dir)):
+        started = time.monotonic()
+        code, out, _ = episode(run_dir, config, "--documento", "enorme.txt")
+        elapsed = time.monotonic() - started
+    check(
+        "con episodio.json bloccato, un documento troppo grande si rifiuta subito (estratto prima del lock)",
+        code == 1 and out.get("error_type") == "DocumentTooLarge" and elapsed < 10,
+        f"{out} in {elapsed:.1f}s",
+    )
+
+    proc = run_python(
+        f"""
+        import runpy, sys
+        sys.path.insert(0, "tools")
+        import src.episode_setup as setup
+        calls = []
+        original = setup.extract_text
+        def counting(*args, **kwargs):
+            calls.append(args[0])
+            return original(*args, **kwargs)
+        setup.extract_text = counting
+        sys.argv = ["run_init.py", "--title", "Una volta", "--document", "report.txt", "--config", {str(config)!r}]
+        try:
+            runpy.run_path("tools/run_init.py", run_name="__main__")
+        except SystemExit as exc:
+            print("EXIT", exc.code, file=sys.stderr)
+        print("CHIAMATE", len(calls), file=sys.stderr)
+        """
+    )
+    check("run_init --document estrae il documento una volta sola", "CHIAMATE 1" in proc.stderr, proc.stderr[-500:])
+
+    print("\n[sicurezza] MEDIA-1: nella sessione solo il testo troncato")
+    responses = root / "anthropic_risposte.json"
+    long_text = "I ricavi sono cresciuti del dodici per cento nel trimestre."
+    run_dir = tool("run_init.py", "--title", "Sessione corta", config=config)[1]["run_dir"]
+    text_file = Path(run_dir) / "testo.txt"
+    text_file.write_text(long_text, encoding="utf-8")
+    queue_responses(responses, {"json": SCRIPT})
+    code, out, err = tool(
+        "script_write.py", "--text-file", str(text_file), "--speakers", "Mario Rossi", "Giulia Bianchi",
+        "--run-dir", run_dir, config=config,
+    )
+    check("scrittura con max_document_chars 20: exit 0", code == 0, err + str(out))
+    session_file = Path(run_dir) / "_script_session.json"
+    session = json.loads(session_file.read_text(encoding="utf-8"))
+    check("document_text nella sessione = i 20 caratteri visti dal modello", session["document_text"] == long_text[:20], repr(session["document_text"]))
+
+    session["document_text"] = "testo intero di una sessione vecchia " * 50
+    session_file.write_text(json.dumps(session), encoding="utf-8")
+    code, out, err = tool("script_show.py", "--run-dir", run_dir, config=config)
+    check("una sessione vecchia con il testo intero si legge ancora", code == 0 and out["has_script"], err + str(out))
+
+    big = Path(run_dir) / "grande.txt"
+    big.write_text("x" * 150000, encoding="utf-8")
+    code, out, _ = tool("script_write.py", "--text-file", str(big), "--speakers", "Mario Rossi", "Giulia Bianchi", "--run-dir", run_dir, config=config)
+    check("--text-file oltre max_bytes -> DocumentTooLarge", code == 1 and out.get("error_type") == "DocumentTooLarge", str(out))
+
+
+def test_approve_requires_version(root: Path, config: Path) -> None:
+    print("\n[sicurezza] BASSA-1: approvare richiede --version (o --current)")
+    responses = root / "anthropic_risposte.json"
+    run_dir = tool("run_init.py", "--title", "Approva con versione", config=config)[1]["run_dir"]
+    (Path(run_dir) / "testo.txt").write_text("I ricavi sono cresciuti.", encoding="utf-8")
+    queue_responses(responses, {"json": SCRIPT})
+    tool("script_write.py", "--text-file", str(Path(run_dir) / "testo.txt"), "--speakers", "Mario Rossi", "Giulia Bianchi", "--run-dir", run_dir, config=config)
+
+    code, out, _ = tool("script_approve.py", "--run-dir", run_dir, config=config)
+    check(
+        "senza --version ne' --current -> exit 1 VersionRequired, niente approvato",
+        code == 1 and out.get("error_type") == "VersionRequired" and out["details"] == {"current_version": 1},
+        str(out),
+    )
+    code, out, _ = tool("script_show.py", "--run-dir", run_dir, config=config)
+    check("la sessione resta non approvata", out["approved"] is False)
+    code, out, err = tool("script_approve.py", "--run-dir", run_dir, "--current", config=config)
+    check("--current approva la versione corrente", code == 0 and out["approved"] and out["version"] == 1, err + str(out))
+    code, out, _ = tool("script_approve.py", "--run-dir", run_dir, "--revoke", config=config)
+    check("--revoke non richiede la versione", code == 0 and out["approved"] is False, str(out))
+    code, out, _ = tool("script_approve.py", "--run-dir", run_dir, "--version", "1", "--by", "Utente A", config=config)
+    check("--version V approva come prima", code == 0 and out["approved"] and out["by"] == "Utente A", str(out))
+    proc = subprocess.run(
+        [PYTHON, str(PROJECT_ROOT / "tools" / "script_approve.py"), "--run-dir", run_dir, "--version", "1", "--current", "--config", str(config)],
+        capture_output=True, text=True, cwd=str(PROJECT_ROOT), env=clean_env(),
+    )
+    check("--version e --current insieme: rifiutati da argparse", proc.returncode != 0)
+
+
+def test_ui_fields(root: Path, config: Path) -> None:
+    print("\n[sicurezza] BASSA-2: nomi relativi per la UI, niente pid")
+    code, out, _ = tool("run_init.py", "--title", "Campi UI", "--document", "report.txt", config=config)
+    run_dir = out["run_dir"]
+    check("run_init: 'run' = nome della cartella", out["run"] == Path(run_dir).name, str(out.get("run")))
+    check("vista dell'episodio: 'run' e documento.nome", out["episodio"]["run"] == Path(run_dir).name and out["episodio"]["documento"]["nome"] == "report.txt")
+    code, out, _ = episode(run_dir, config, "--titolo", "Campi UI 2")
+    check("episode_config: 'run'", code == 0 and out["run"] == Path(run_dir).name, str(out.get("run")))
+    code, out, _ = tool("script_show.py", "--run-dir", run_dir, config=config)
+    check("script_show senza copione: 'run'", out["run"] == Path(run_dir).name)
+
+    from src.run_lock import work_lock
+
+    with work_lock(Path(run_dir), "produzione"):
+        info = json.loads((Path(run_dir) / "_lavoro.json").read_text(encoding="utf-8"))
+        code, out, _ = tool("script_show.py", "--run-dir", run_dir, config=config)
+        check("in_corso senza pid", out["in_corso"]["operazione"] == "produzione" and "pid" not in out["in_corso"], str(out["in_corso"]))
+        proc = run_python(
+            f"""
+            from src.run_lock import RunBusy, work_lock
+            try:
+                with work_lock({run_dir!r}, "altro"):
+                    print("PRESO")
+            except RunBusy as exc:
+                print(sorted(exc.details["in_corso"]))
+            """
+        )
+        check("RunBusy.details.in_corso senza pid", proc.stdout.strip() == "['dal', 'operazione']", proc.stdout + proc.stderr)
+    check("il pid resta nel file _lavoro.json", "pid" in info)
+
+    proc = run_python(
+        f"""
+        from src.fileio import file_lock, LockTimeout
+        from pathlib import Path
+        target = Path({str(root / "condiviso2.json")!r})
+        with file_lock(target):
+            import subprocess, sys
+            code = "from src.fileio import file_lock, LockTimeout\\ntry:\\n    with file_lock({str(root / "condiviso2.json")!r}, timeout=0.2): pass\\nexcept LockTimeout as e:\\n    print(e.details['file'])"
+            print(subprocess.run([sys.executable, "-c", code], capture_output=True, text=True).stdout.strip())
+        """
+    )
+    check("LockTimeout.details.file: solo il nome", proc.stdout.strip() == "condiviso2.json", proc.stdout + proc.stderr)
+
+    (root / "doc_fuori.txt").write_text("x", encoding="utf-8")
+    code, out, _ = tool("doc_extract.py", str(root / "manca.txt"), "--trusted-paths", config=config)
+    check("documento non trovato (percorso libero): il messaggio ha solo il nome", code == 1 and str(root) not in out["error"] and "manca.txt" in out["error"], out.get("error", ""))
+    code, out, _ = tool("doc_extract.py", "manca.txt", config=config)
+    check("documento non trovato nella libreria: solo il nome", code == 1 and str(root) not in json.dumps(out), str(out))
+
+    broken = Path(tool("run_init.py", "--title", "Sessione rotta", config=config)[1]["run_dir"])
+    (broken / "_script_session.json").write_text("{non json", encoding="utf-8")
+    code, out, _ = tool("script_show.py", "--run-dir", str(broken), config=config)
+    check("sessione illeggibile: errore senza percorso assoluto", code == 1 and str(root) not in out["error"], out.get("error", ""))
+
+    proc = run_python(
+        f"""
+        import sys
+        from pathlib import Path
+        sys.path.insert(0, "tools")
+        import _common
+        root = str(_common.PROJECT_ROOT)
+        home = str(Path.home())
+        print(_common._redact(root + "/output/run-x/conversazione.json"))
+        print(_common._redact({{"file": root + "/documenti/a.pdf", "lista": [home + "/altrove/b.txt"]}}))
+        """
+    )
+    lines = proc.stdout.strip().splitlines()
+    check("errori: il percorso del progetto diventa relativo", lines[:1] == ["output/run-x/conversazione.json"], proc.stdout + proc.stderr)
+    check("errori: dentro details e fuori dal progetto (home -> ~)", len(lines) > 1 and "'documenti/a.pdf'" in lines[1] and "'~/altrove/b.txt'" in lines[1], proc.stdout)
+
+
+def test_run_dir_race(root: Path) -> None:
+    print("\n[sicurezza] BASSA-3: creazione atomica della cartella della run")
+    target = root / "corsa"
+    target.mkdir()
+    start_at = time.time() + 1.5
+    procs = [
+        subprocess.Popen(
+            [PYTHON, "-c", textwrap.dedent(
+                f"""
+                import time
+                from pathlib import Path
+                from src.run_layout import make_run_dir
+                time.sleep(max(0.0, {start_at} - time.time()))
+                print(make_run_dir(Path({str(target)!r}), "Stesso titolo").name)
+                """
+            )],
+            stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, cwd=str(PROJECT_ROOT), env=clean_env(),
+        )
+        for _ in range(8)
+    ]
+    results = [p.communicate(timeout=60) + (p.returncode,) for p in procs]
+    names = [out.strip() for out, _, _ in results]
+    check("8 processi con lo stesso titolo: tutti exit 0", all(code == 0 for _, _, code in results), str([e[-300:] for _, e, _ in results if e]))
+    check("8 cartelle diverse", len(set(names)) == 8 and len(list(target.iterdir())) == 8, str(names))
+
+    from src.run_layout import make_run_dir
+
+    taken = root / "corsa2"
+    first = make_run_dir(taken, "Doppio")
+    second = make_run_dir(taken, "Doppio")
+    third = make_run_dir(taken, "Doppio")
+    check("suffissi -2, -3 sulla cartella occupata", second.name.endswith("-2") and third.name.endswith("-3") and first.name.endswith("Doppio".lower()), str([first.name, second.name, third.name]))
+
+
+# ----------------------------------------------------------------------
+# Modalita' web (PODCAST_AGENT_WEB=1)
+# ----------------------------------------------------------------------
+
+
+def run_tool_env(name: str, args: list[str], *, web: bool) -> tuple[int, dict, str]:
+    """Come tool(), ma con gli argomenti esatti (niente --config aggiunto)."""
+    env = clean_env()
+    env.pop("PODCAST_AGENT_WEB", None)
+    if web:
+        env["PODCAST_AGENT_WEB"] = "1"
+    proc = subprocess.run(
+        [PYTHON, str(PROJECT_ROOT / "tools" / name), *args],
+        capture_output=True, text=True, cwd=str(PROJECT_ROOT), env=env,
+    )
+    try:
+        payload = json.loads(proc.stdout)
+    except json.JSONDecodeError:
+        payload = {"_raw_stdout": proc.stdout}
+    return proc.returncode, payload, proc.stderr
+
+
+#: Argomenti obbligatori minimi di ogni tool: servono perche' argparse
+#: arrivi fino al controllo della modalita' web.
+REQUIRED_ARGS = {
+    "doc_extract.py": ["report.txt"],
+    "episode_config.py": ["--run-dir", "R"],
+    "estimate.py": [],
+    "lessons.py": ["--list"],
+    "mix.py": ["--run-dir", "R"],
+    "music_list.py": [],
+    "music_set.py": ["--run-dir", "R"],
+    "retake.py": ["--run-dir", "R", "--list", "1"],
+    "run_finalize.py": ["--run-dir", "R", "--document", "report.txt", "--voices", "V"],
+    "run_init.py": ["--title", "Modalita web"],
+    "script_approve.py": ["--run-dir", "R", "--version", "1"],
+    "script_edit.py": ["--run-dir", "R", "--turn", "1", "--text", "x"],
+    "script_revise.py": ["--run-dir", "R", "--instructions", "x"],
+    "script_save.py": ["--run-dir", "R", "--script-json", "S"],
+    "script_show.py": ["--run-dir", "R"],
+    "script_versions.py": ["--run-dir", "R", "--list"],
+    "script_write.py": ["--run-dir", "R"],
+    "signals.py": ["--run-dir", "R"],
+    "synthesize.py": ["--voices", "V", "--run-dir", "R"],
+    "turn_at.py": ["--run-dir", "R", "--at", "0:01"],
+    "voices_list.py": [],
+    "voices_prepare.py": ["--speakers", "Mario Rossi"],
+}
+
+
+def test_web_mode(root: Path, config: Path, run_dir: str) -> None:
+    print("\n[modalita' web] argomenti riservati all'uso locale")
+    tools_dir = PROJECT_ROOT / "tools"
+    all_tools = sorted(p.name for p in tools_dir.glob("*.py") if not p.name.startswith("_") and p.name != "doctor.py")
+    check("ogni tool ha i suoi argomenti minimi in questo test", sorted(REQUIRED_ARGS) == all_tools, str(set(all_tools) ^ set(REQUIRED_ARGS)))
+    check(
+        "nessun tool chiama ancora parser.parse_args() direttamente",
+        all("parser.parse_args()" not in (tools_dir / name).read_text(encoding="utf-8") for name in all_tools),
+    )
+
+    R = str(Path(run_dir))
+    V = str(root / "output" / "voci.json")
+    S = str(Path(run_dir) / "conversazione.json")
+
+    def required(name: str) -> list[str]:
+        return [R if a == "R" else V if a == "V" else S if a == "S" else a for a in REQUIRED_ARGS[name]]
+
+    def with_script(name: str) -> list[str]:
+        # estimate.py e synthesize.py hanno --script obbligatorio.
+        return ["--script", S] if name in ("estimate.py", "synthesize.py") else []
+
+    # 1) --config: ogni tool lo rifiuta in modalita' web, prima di fare qualunque cosa.
+    before = sorted(str(p) for p in (root / "output").iterdir())
+    for name in all_tools:
+        args = required(name) + with_script(name) + ["--config", str(config)]
+        code, out, _ = run_tool_env(name, args, web=True)
+        expected = ["--config"] + [a for a in args if a in ("--script", "--script-json")]
+        check(
+            f"web: {name} --config -> exit 1 NotAllowedInWebMode",
+            code == 1 and out.get("error_type") == "NotAllowedInWebMode" and sorted(out["details"]["argomenti"]) == sorted(expected),
+            str(out)[:300],
+        )
+    check("web: nessuna cartella creata dai comandi rifiutati", sorted(str(p) for p in (root / "output").iterdir()) == before)
+
+    # 2) Gli altri argomenti vietati, tool per tool (con --config fuori: in
+    #    modalita' web si usa sempre config.yaml del progetto).
+    cases = [
+        ("doc_extract.py", ["--trusted-paths"]),
+        ("doc_extract.py", ["--save-to", str(root / "output")]),
+        ("run_init.py", ["--trusted-paths"]),
+        ("episode_config.py", ["--trusted-paths"]),
+        ("script_write.py", ["--trusted-paths"]),
+        ("script_write.py", ["--text-file", str(root / "testo.txt")]),
+        ("script_write.py", ["--document", "report.txt"]),
+        ("script_approve.py", ["--session", str(Path(run_dir) / "_script_session.json")]),
+        ("script_revise.py", ["--session", str(Path(run_dir) / "_script_session.json")]),
+        ("synthesize.py", ["--no-approval-gate"]),
+        ("synthesize.py", ["--trusted-paths"]),
+        ("estimate.py", ["--trusted-paths"]),
+        ("voices_prepare.py", ["--no-approval-gate"]),
+        ("voices_prepare.py", ["--trusted-paths"]),
+        ("mix.py", ["--no-approval-gate"]),
+        ("retake.py", ["--no-approval-gate"]),
+        ("run_finalize.py", ["--trusted-paths"]),
+    ]
+    for name, extra in cases:
+        base = required(name)
+        if "--session" in extra:
+            base = [a for a in base if a not in ("--run-dir", R)]
+        args = base + extra + with_script(name)
+        code, out, _ = run_tool_env(name, args, web=True)
+        check(
+            f"web: {name} {extra[0]} -> NotAllowedInWebMode",
+            code == 1 and out.get("error_type") == "NotAllowedInWebMode" and extra[0] in out["details"]["argomenti"],
+            str(out)[:300],
+        )
+        code, out, _ = run_tool_env(name, args + ["--config", str(config)], web=False)
+        check(
+            f"fuori dal web: {name} {extra[0]} non e' rifiutato dal controllo",
+            out.get("error_type") != "NotAllowedInWebMode" and "ok" in out,
+            str(out)[:300],
+        )
+
+    # 3) Abbreviazioni e forma --opzione=valore: il controllo guarda i valori
+    #    interpretati da argparse, non il testo.
+    for args, label in (
+        (["report.txt", "--trusted"], "--trusted (abbreviato)"),
+        (["report.txt", f"--conf={config}"], "--conf=... (abbreviato con =)"),
+        (["report.txt", f"--save-to={root / 'output'}"], "--save-to=..."),
+    ):
+        code, out, _ = run_tool_env("doc_extract.py", args, web=True)
+        check(f"web: {label} -> NotAllowedInWebMode", code == 1 and out.get("error_type") == "NotAllowedInWebMode", str(out)[:300])
+
+    # 4) Accettati fuori dal web, con esito vero.
+    code, out, _ = run_tool_env("doc_extract.py", [str(root / "segreto.txt"), "--trusted-paths", "--config", str(config)], web=False)
+    check("fuori dal web: --trusted-paths funziona", code == 0 and "SEGRETO" in out["preview"], str(out)[:300])
+    code, out, _ = run_tool_env("doc_extract.py", ["report.txt", "--save-to", str(root / "output" / "estratti"), "--config", str(config)], web=False)
+    check("fuori dal web: --save-to dentro output/ funziona", code == 0 and out["text_file"], str(out)[:300])
+    code, out, _ = run_tool_env("script_approve.py", ["--session", str(Path(run_dir) / "_script_session.json"), "--revoke", "--config", str(config)], web=False)
+    check("fuori dal web: --session funziona", code == 0, str(out)[:300])
+
+    # 5) In modalita' web un comando senza argomenti vietati parte normalmente.
+    code, out, _ = run_tool_env("doc_extract.py", ["non-esiste-di-sicuro.pdf"], web=True)
+    check("web: senza argomenti vietati il controllo lascia passare", out.get("error_type") not in ("NotAllowedInWebMode", None) and code == 1, str(out)[:300])
+
+    # 6) Valori della variabile e controllo di riserva in bootstrap().
+    proc = run_python(
+        """
+        import argparse, os, sys
+        sys.path.insert(0, "tools")
+        import _common
+        for value in ("", "0", "false", "no", "1", "true", "si", "web"):
+            os.environ["PODCAST_AGENT_WEB"] = value
+            print(repr(value), _common.web_mode())
+        os.environ["PODCAST_AGENT_WEB"] = "1"
+        try:
+            _common.bootstrap(argparse.Namespace(config=None))
+            print("BOOTSTRAP PARTITO")
+        except _common.NotAllowedInWebMode as exc:
+            print("BOOTSTRAP RIFIUTATO", exc.kind)
+        """
+    )
+    lines = proc.stdout.strip().splitlines()
+    check(
+        "web_mode(): spenta con '', 0, false, no; accesa con qualunque altro valore",
+        lines[:8] == ["'' False", "'0' False", "'false' False", "'no' False", "'1' True", "'true' True", "'si' True", "'web' True"],
+        proc.stdout + proc.stderr,
+    )
+    check("bootstrap() senza parse_args() in modalita' web: rifiutato", lines[-1:] == ["BOOTSTRAP RIFIUTATO NotAllowedInWebMode"], proc.stdout + proc.stderr)
+
+
+# ----------------------------------------------------------------------
 
 
 def main() -> None:
@@ -828,6 +1303,12 @@ def main() -> None:
     test_docx(root, config)
     test_path_confinement(root, config, run_dir)
     test_legacy_paths(root, config)
+
+    test_document_limits(root)
+    test_approve_requires_version(root, config)
+    test_ui_fields(root, config)
+    test_run_dir_race(root)
+    test_web_mode(root, config, run_dir)
 
     from tests.test_tools_cli import PASSED
 

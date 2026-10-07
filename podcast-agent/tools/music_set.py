@@ -21,7 +21,7 @@ from __future__ import annotations
 
 import argparse
 
-from _common import add_config_arg, bootstrap, emit, note, run_dir_arg, run_tool  # noqa: E402
+from _common import add_config_arg, bootstrap, emit, note, parse_args, run_dir_arg, run_tool  # noqa: E402
 from src.errors import AmbiguousName  # noqa: E402
 from src.music_library import CATEGORIES, MusicLibrary, load_music_choice, write_music_choice  # noqa: E402
 
@@ -37,7 +37,7 @@ def main() -> None:
         help="Categorie da azzerare esplicitamente (intro, outro, sottofondo)",
     )
     add_config_arg(parser)
-    args = parser.parse_args()
+    args = parse_args(parser)
 
     requested = {"intro": args.intro, "outro": args.outro, "sottofondo": args.sottofondo}
     for category in args.none:
@@ -56,7 +56,7 @@ def main() -> None:
     run_dir = run_dir_arg(args.run_dir, config)
     if not run_dir.is_dir():
         raise FileNotFoundError(
-            f"Cartella della run inesistente: {run_dir}. Chiama prima run_init.py."
+            f"Cartella della run inesistente: {run_dir.name}. Chiama prima run_init.py."
         )
 
     library = MusicLibrary(config.music_dir, config.accepted_extensions)
@@ -107,6 +107,7 @@ def main() -> None:
 
     emit(
         {
+            "run": run_dir.name,
             "run_dir": str(run_dir),
             "musiche_file": str(target),
             "intro": updated.get("intro"),

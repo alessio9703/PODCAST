@@ -481,7 +481,7 @@ def main() -> None:
     check("dry-run non ha bisogno di approvazione", code == 0
           and out["approval_gate"] == "not_needed")
 
-    code, out, _ = tool("script_approve.py", "--run-dir", str(save_dir), config=config)
+    code, out, _ = tool("script_approve.py", "--run-dir", str(save_dir), "--current", config=config)
     check("approvazione registrata", code == 0 and out["approved"] is True)
     check("legata alla versione e allo sha256",
           out["version"] == 4 and out["sha256"].startswith("sha256:"))
@@ -623,7 +623,7 @@ def main() -> None:
                     "--speakers", "Mario Rossi", "Giulia Bianchi", *extra, config=cfg)
 
     def approve15():
-        return tool("script_approve.py", "--run-dir", str(rd), config=cfg)
+        return tool("script_approve.py", "--run-dir", str(rd), "--current", config=cfg)
 
     def synth15(*extra, config_file=None):
         return tool("synthesize.py", "--script", str(script_file15), "--voices",
@@ -725,7 +725,7 @@ def main() -> None:
     bozza2.write_text(json.dumps(script15, ensure_ascii=False), encoding="utf-8")
     tool("script_save.py", "--run-dir", str(rd2), "--script-json", str(bozza2),
          "--speakers", "Mario Rossi", "Giulia Bianchi", config=cfg)
-    tool("script_approve.py", "--run-dir", str(rd2), config=cfg)
+    tool("script_approve.py", "--run-dir", str(rd2), "--current", config=cfg)
     voices2 = rd2 / "voci.json"
     tool("voices_prepare.py", "--speakers", "Mario Rossi", "Giulia Bianchi",
          "--out", str(voices2), "--run-dir", str(rd2), config=cfg)

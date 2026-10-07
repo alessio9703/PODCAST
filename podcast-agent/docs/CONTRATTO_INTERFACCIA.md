@@ -1,7 +1,8 @@
 # Contratto d'interfaccia · podcast-agent per l'adattatore web
 
 > Documento in costruzione: si completa fase per fase (vedi `docs/avanzamento/`).
-> Coperti finora: contratto generale (C0) e passi 1–4 + Confronto (C1).
+> Coperti finora: contratto generale (C0), passi 1–4 + Confronto (C1), correzioni
+> della revisione di sicurezza C0+C1 e modalità web.
 > Le azioni dei passi 5–7, Archivio e Librerie arrivano con le fasi C2–C4; la
 > versione completa con la sezione "a carico dell'adattatore" chiude la C5.
 
@@ -10,7 +11,7 @@
 Ogni azione è un comando `tools/<nome>.py` lanciato come sottoprocesso:
 
 ```
-<progetto>/.venv/bin/python tools/<nome>.py [argomenti] [--config PERCORSO]
+PODCAST_AGENT_WEB=1 <progetto>/.venv/bin/python tools/<nome>.py [argomenti]
 ```
 
 - **stdout**: sempre **un solo oggetto JSON**, sia in caso di successo sia di
@@ -19,8 +20,63 @@ Ogni azione è un comando `tools/<nome>.py` lanciato come sottoprocesso:
   si può mostrare in un pannello "dettagli" o registrare nei log.
 - **exit code**: uno di quattro valori, sempre coerente con il JSON.
 - Nessun comando chiede input da tastiera: tutto passa dagli argomenti.
-- `--config` è accettato da tutti i comandi (default: `config.yaml` del
-  progetto).
+- L'adattatore imposta **sempre** `PODCAST_AGENT_WEB=1` (vedi "Modalità web"):
+  i comandi usano allora sempre `config.yaml` del progetto.
+
+### Modalità web
+
+Con la variabile d'ambiente `PODCAST_AGENT_WEB` impostata (qualunque valore
+diverso da vuoto, `0`, `false`, `no`, `off`) i comandi **rifiutano** gli
+argomenti riservati all'uso locale, invece di affidarsi solo alla disciplina
+dell'adattatore:
+
+| Argomento | Perché è riservato |
+|---|---|
+| `--config` | `script.client_factory` in un config scelto da fuori importa ed esegue un modulo qualsiasi |
+| `--trusted-paths` | è l'unico modo di uscire da `documenti/` e `output/` |
+| `--no-approval-gate` | salta il gate sullo sha256 del copione approvato |
+| `--no-consent-gate` | (C2) salta il consenso prima della clonazione |
+| `--save-to`, `--text-file`, `--session`, `--script-json`, `--script` | file passati per percorso: l'adattatore lavora sempre per `--run-dir` |
+| `--document` di `script_write.py` | il documento si registra con `episode_config.py --documento` |
+
+Il controllo guarda i valori già interpretati, quindi valgono anche le
+abbreviazioni (`--trusted`) e la forma `--opzione=valore`. Esito:
+
+```json
+{
+  "ok": false,
+  "error_type": "NotAllowedInWebMode",
+  "error": "Argomenti riservati all'uso locale, non ammessi dall'interfaccia web: --trusted-paths.",
+  "exit_code": 1,
+  "details": {"argomenti": ["--trusted-paths"]}
+}
+```
+
+Il comando non fa niente prima del rifiuto. `NotAllowedInWebMode` indica un
+errore dell'adattatore, non dell'utente: va registrato nei log, non mostrato
+come campo da correggere. Conseguenza: `synthesize.py` ed `estimate.py`
+(entrambi con `--script` obbligatorio) e `script_save.py` (`--script-json`)
+non sono utilizzabili in modalità web; produzione e stima per `--run-dir`
+arrivano in C2.
+
+### Campi da mostrare e campi da non mostrare
+
+Le risposte di successo contengono ancora percorsi **assoluti** del server,
+che servono al subagent: `run_dir`, `session_file`, `script_file`,
+`episodio_file`, `musiche_file`, `musiche_usate_file`, `output`, `path`,
+`documento.percorso`, `voices_dir`, `music_dir`, `timings_file`,
+`segnali_file`, `voci_usate`, `text_file`, `audio_file`. **L'adattatore non
+li mostra mai all'utente.** Per la UI ci sono i nomi relativi:
+
+- `run`: il nome della cartella dell'episodio (è anche un `--run-dir` valido);
+- `documento.nome`, `name`: il nome del documento nella libreria.
+
+Altre garanzie:
+- i messaggi d'errore (`error`, `details` e stderr) riportano solo nomi o
+  percorsi relativi al progetto (`output/<run>/...`). Un percorso fuori dal
+  progetto perde la cartella home (`~/...`);
+- `in_corso` (in `script_show.py` e in `RunBusy.details`) non contiene più il
+  `pid` del processo, che resta solo nel file `_lavoro.json`.
 
 ### Percorsi: cosa si può passare
 
@@ -41,7 +97,8 @@ percorsi che ricevono, quindi la difesa non dipende dall'adattatore:
   `--audio-paths`, `--script-json`, `--text-file`, `--save-to`) devono stare
   dentro `output/`.
 - `--trusted-paths` toglie gli ultimi due vincoli ed esiste **solo per l'uso
-  locale** (subagent, CLI). **L'adattatore non deve mai passarlo.**
+  locale** (subagent, CLI). **L'adattatore non deve mai passarlo**, e in
+  modalità web è comunque rifiutato (`NotAllowedInWebMode`).
 
 ## 2. I quattro esiti
 
@@ -144,8 +201,22 @@ senza `details`, con l'elenco dei disponibili nel testo.
 | `VersionConflict` | 1 | Il copione è cambiato rispetto alla versione che l'utente guardava | `expected_version`, `current_version` |
 | `NothingToChange` | 1 | La modifica lascerebbe tutto com'è: nessuna versione creata | `turn` o `version` |
 | `TurnNotFound` | 1 | Numero di battuta inesistente | `turn`, `turn_count` |
-| `RunBusy` | 1 | Sulla run è già in corso un'operazione lunga | `in_corso: {operazione, dal, pid}` |
+| `RunBusy` | 1 | Sulla run è già in corso un'operazione lunga | `in_corso: {operazione, dal, …}` (senza `pid`) |
 | `PathNotAllowed` | 1 | Un percorso esce dalla cartella prevista (vedi "Percorsi") | `campo` (`run_dir`, `save_to`, `script`, ...) |
+
+### Introdotti con le correzioni di sicurezza C0+C1
+
+| error_type | exit | Quando | `details` |
+|---|---|---|---|
+| `DocumentTooLarge` | 1 | Il documento supera un limite di `documents:` in `config.yaml` | `limite` (`byte`, `pagine`, `caratteri`, `byte_scompattati`), `massimo`, `valore`, `file` |
+| `VersionRequired` | 1 | `script_approve.py` senza `--version` (né `--current`) | `current_version` |
+| `NotAllowedInWebMode` | 1 | Argomento riservato all'uso locale in modalità web | `argomenti` |
+
+I limiti dei documenti (default: 20 MB, 500 pagine, 2.000.000 di caratteri,
+100 MB scompattati per un DOCX) si controllano **prima** di leggere il
+contenuto, tranne i caratteri, che si contano durante l'estrazione (un PDF si
+ferma alla prima pagina che supera il limite). La UI mostra "Documento troppo
+grande" con il limite superato.
 
 `VersionConflict` è il caso "due persone sullo stesso copione": la UI ricarica il
 copione e mostra la versione nuova, non riprova da sola.
@@ -174,8 +245,8 @@ copione e mostra la versione nuova, non riprova da sola.
 ### `LockTimeout` · exit 1
 
 Un file condiviso (per esempio il registro delle voci) è rimasto in uso da
-un'altra operazione per più di 30 secondi. In `details`: `file` e
-`timeout_seconds`. Di norma non succede: le operazioni protette durano
+un'altra operazione per più di 30 secondi. In `details`: `file` (solo il nome)
+e `timeout_seconds`. Di norma non succede: le operazioni protette durano
 millisecondi. Se compare, la UI può proporre di riprovare.
 
 ### Errori già esistenti, invariati
@@ -227,8 +298,15 @@ e le liste lunghe sono accorciate con `"…"`.
 "Questo PDF non contiene testo" di `Stati.dc.html`.
 
 **`run_init.py --document`** controlla il documento **prima** di creare la
-cartella: una scansione non lascia bozze vuote in Archivio. Restituisce
-`run_dir` e `episodio` (la stessa vista di `episode_config.py`, sotto).
+cartella: una scansione o un documento troppo grande non lasciano bozze vuote in
+Archivio. Restituisce `run` (nome della cartella), `run_dir` ed `episodio` (la
+stessa vista di `episode_config.py`, sotto). Due bozze con lo stesso titolo
+create nello stesso minuto ottengono due cartelle diverse (suffisso `-2`,
+`-3`, ...).
+
+L'estrazione del documento avviene **fuori** dal lock di `episodio.json`:
+mentre un PDF lungo viene letto, gli altri utenti della stessa bozza non
+aspettano.
 
 ## Passo 2 · Cast e formato
 
@@ -250,6 +328,7 @@ Esempio reale (cast completo, con un'intro scelta al passo 3):
 ```json
 {
   "ok": true,
+  "run": "2026-10-06_17-26_il-trimestre",
   "run_dir": "output/<run>",
   "episodio_file": "output/<run>/episodio.json",
   "titolo": "Il trimestre",
@@ -297,7 +376,7 @@ Esempio reale (cast completo, con un'intro scelta al passo 3):
 | exit | Quando |
 |---|---|
 | 0 | letto o salvato |
-| 1 | `EpisodeConfigError` (`details.campo`), voce inesistente (`VoiceLibraryError`), `DocumentNotExtractable` |
+| 1 | `EpisodeConfigError` (`details.campo`), voce inesistente (`VoiceLibraryError`), `DocumentNotExtractable`, `DocumentTooLarge` |
 | 3 | `AmbiguousName` (voce scritta in modo incerto), `SpokenNameIncomplete` |
 
 ## Passo 3 · Musiche (parte già disponibile)
@@ -327,7 +406,7 @@ Musiche (C4).
 
 **Scrittura e revisione** tengono il lock di lavoro della run per tutta la
 chiamata. Mentre girano, `script_show.py` restituisce
-`in_corso: {"operazione": "scrittura_copione" | "revisione_copione", "dal", "pid"}`,
+`in_corso: {"operazione": "scrittura_copione" | "revisione_copione", "dal"}`,
 e una seconda operazione lunga sulla stessa run esce con `RunBusy`. Con
 `has_script: false` e `in_corso` valorizzato la UI mostra lo stato
 "Sto scrivendo il copione…".
@@ -344,6 +423,7 @@ comunque, perché la chiamata è già pagata, ma con `errors` non vuoto e
 ```json
 {
   "ok": true,
+  "run": "2026-10-06_17-26_il-trimestre",
   "run_dir": "output/<run>",
   "has_script": true,
   "in_corso": null,
@@ -416,11 +496,16 @@ quello. L'istruzione registrata è "modifica manuale battuta N". Chiavi in più:
 }
 ```
 
-**`script_approve.py --version V --by U`**:
+**`script_approve.py --version V --by U`**: `--version` è **obbligatorio** per
+approvare. Senza, il comando non approva ed esce con exit 1 `VersionRequired`
+(`details.current_version`). Esiste anche `--current` (approva la versione
+corrente, qualunque sia), riservato al subagent: l'adattatore passa sempre la
+versione che l'utente ha letto.
 
 ```json
 {"ok": true, "approved": true, "version": 7, "sha256": "sha256:3512…cc35",
- "at": "2026-10-06T17:31:27", "by": "Utente A", "session_file": "output/<run>/_script_session.json"}
+ "at": "2026-10-06T17:31:27", "by": "Utente A", "run": "2026-10-06_17-26_il-trimestre",
+ "session_file": "output/<run>/_script_session.json"}
 ```
 
 **`--revoke --by U`** restituisce l'approvazione ritirata (`null` se non ce
@@ -429,13 +514,14 @@ n'era una):
 ```json
 {"ok": true, "approved": false,
  "revoked": {"version": 7, "sha256": "sha256:3512…cc35", "at": "2026-10-06T17:31:27", "by": "Utente A"},
- "revoked_by": "Utente A", "current_version": 7, "session_file": "output/<run>/_script_session.json"}
+ "revoked_by": "Utente A", "current_version": 7, "run": "2026-10-06_17-26_il-trimestre",
+ "session_file": "output/<run>/_script_session.json"}
 ```
 
 | exit | Comandi del passo 4 |
 |---|---|
 | 0 | fatto (per `script_write`/`script_revise` anche con `errors` non vuoto: la versione è salvata) |
-| 1 | `ScriptInvalid`, `ScriptHasErrors`, `VersionConflict`, `NothingToChange`, `TurnNotFound`, `RunBusy`, `ScriptWriterError` (API: rifiuto, risposta non valida, rete), cast incompleto (prima di qualunque chiamata a pagamento) |
+| 1 | `ScriptInvalid`, `ScriptHasErrors`, `VersionConflict`, `VersionRequired`, `NothingToChange`, `TurnNotFound`, `RunBusy`, `ScriptWriterError` (API: rifiuto, risposta non valida, rete), cast incompleto (prima di qualunque chiamata a pagamento) |
 | 3 | — |
 
 ## Pannello Confronto versioni
