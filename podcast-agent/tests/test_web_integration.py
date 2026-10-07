@@ -727,6 +727,59 @@ def test_docx(root: Path, config: Path) -> None:
     check("DOCX corrotto -> DocumentNotExtractable illeggibile", code == 1 and out["details"]["motivo"] == "illeggibile", str(out))
 
 
+def test_path_confinement(root: Path, config: Path, run_dir: str) -> None:
+    """Revisione di sicurezza C0+C1: ALTA-1 (documenti) e ALTA-2 (cartelle delle run)."""
+    print("\n[sicurezza] documenti solo dalla libreria documenti/")
+    docs = root / "documenti"
+    (docs / ".env").write_text("FISH_AUDIO_API_KEY=fa-finta-123\n", encoding="utf-8")
+    (root / "segreto.txt").write_text("SEGRETO nel server\n", encoding="utf-8")
+    (docs / "collegamento.txt").symlink_to(root / "segreto.txt")
+    (docs / "senza_estensione").write_text("testo\n", encoding="utf-8")
+
+    for name in (".env", "senza_estensione"):
+        code, out, _ = tool("doc_extract.py", name, config=config)
+        check(f"'{name}' rifiutato (exit 1, nessun contenuto)", code == 1 and "preview" not in out and "fa-finta" not in json.dumps(out), str(out))
+    for value in ("../segreto.txt", str(root / "segreto.txt"), "collegamento.txt"):
+        code, out, _ = tool("doc_extract.py", value, config=config)
+        check(f"fuori dalla libreria ({value}) -> exit 1", code == 1 and "SEGRETO" not in json.dumps(out), str(out))
+    code, out, _ = tool("doc_extract.py", "config.yaml", config=config)
+    check("un file della cartella corrente non si raggiunge per nome", code == 1 and "preview" not in out, str(out))
+    code, out, _ = tool("doc_extract.py", str(root / "segreto.txt"), "--trusted-paths", config=config)
+    check("con --trusted-paths (uso locale) il percorso libero funziona", code == 0 and "SEGRETO" in out["preview"], str(out))
+    code, out, _ = tool("doc_extract.py", "report.txt", "--save-to", str(root / "altrove"), config=config)
+    check("--save-to fuori da output/ -> exit 1 PathNotAllowed", code == 1 and out.get("error_type") == "PathNotAllowed" and not (root / "altrove").exists(), str(out))
+    code, out, _ = episode(run_dir, config, "--documento", ".env")
+    check("episode_config --documento .env -> exit 1", code == 1, str(out))
+    code, out, _ = tool("run_init.py", "--title", "Furbo", "--document", "../segreto.txt", config=config)
+    check("run_init --document fuori libreria -> exit 1", code == 1, str(out))
+
+    print("\n[sicurezza] --run-dir e --session solo dentro output/")
+    outside = root / "fuori"
+    outside.mkdir()
+    (root / "output" / "link-fuori").symlink_to(outside)
+    for value in (str(outside), str(root / "output" / ".." / "fuori"), str(root / "output" / "link-fuori"), str(root / "output")):
+        code, out, _ = episode(value, config, "--titolo", "x")
+        check(f"episode_config --run-dir {Path(value).name or value} -> PathNotAllowed", code == 1 and out.get("error_type") == "PathNotAllowed", str(out))
+    check("niente scritto fuori da output/", list(outside.iterdir()) == [], str(list(outside.iterdir())))
+    missing = root / "output" / "non-esiste" / "ancora-sotto"
+    code, out, _ = tool("script_approve.py", "--session", str(missing / "_script_session.json"), config=config)
+    check("script_approve --session fuori: exit 1 e nessuna cartella creata", code == 1 and not (root / "output" / "non-esiste").exists(), str(out))
+    code, out, _ = tool("script_approve.py", "--run-dir", str(root / "output" / "non-esiste"), config=config)
+    check("run inesistente in output/: exit 1, nessuna cartella creata", code == 1 and not (root / "output" / "non-esiste").exists(), str(out))
+    for name, extra in (
+        ("script_show.py", []),
+        ("script_edit.py", ["--turn", "1", "--text", "x"]),
+        ("script_versions.py", ["--list"]),
+        ("turn_at.py", ["--at", "0:01"]),
+        ("music_set.py", ["--none", "intro"]),
+        ("signals.py", []),
+    ):
+        code, out, _ = tool(name, "--run-dir", str(outside), *extra, config=config)
+        check(f"{name} --run-dir fuori -> PathNotAllowed", code == 1 and out.get("error_type") == "PathNotAllowed", str(out))
+    code, out, _ = tool("script_show.py", "--run-dir", Path(run_dir).name, config=config)
+    check("il solo nome della cartella dell'Archivio funziona", code == 0 and out["has_script"], str(out))
+
+
 def test_legacy_paths(root: Path, config: Path) -> None:
     print("\n[C1] percorsi di prima invariati")
     responses = root / "anthropic_risposte.json"
@@ -736,7 +789,7 @@ def test_legacy_paths(root: Path, config: Path) -> None:
     queue_responses(responses, {"json": SCRIPT})
     code, out, err = tool(
         "script_write.py", "--text-file", str(root / "testo.txt"),
-        "--speakers", "Mario Rossi", "Giulia Bianchi", "--run-dir", run_dir, config=config,
+        "--speakers", "Mario Rossi", "Giulia Bianchi", "--run-dir", run_dir, "--trusted-paths", config=config,
     )
     check("script_write senza formato: exit 0", code == 0 and not out["problems"], err + str(out))
     prompt = read_log(log)[-1]["messages"][0]["content"]
@@ -773,6 +826,7 @@ def main() -> None:
     test_api_errors(root, config, run_dir)
     test_cast_change_revokes(root, config, run_dir)
     test_docx(root, config)
+    test_path_confinement(root, config, run_dir)
     test_legacy_paths(root, config)
 
     from tests.test_tools_cli import PASSED

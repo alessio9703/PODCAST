@@ -27,8 +27,9 @@ from __future__ import annotations
 
 import argparse
 import json
+from pathlib import Path
 
-from _common import add_config_arg, bootstrap, emit, note, resolve_path, run_tool  # noqa: E402
+from _common import add_config_arg, bootstrap, emit, note, run_dir_arg, run_tool  # noqa: E402
 from src.run_lock import session_lock  # noqa: E402
 from src.script_editing import check_expected_version  # noqa: E402
 from src.script_session import FILENAME as SESSION_FILENAME  # noqa: E402
@@ -48,12 +49,10 @@ def main() -> None:
     add_config_arg(parser)
     args = parser.parse_args()
 
-    bootstrap(args)
-    session_path = (
-        resolve_path(args.session)
-        if args.session
-        else resolve_path(args.run_dir) / SESSION_FILENAME
-    )
+    config = bootstrap(args)
+    # --session vale come la sua cartella: stessa regola di --run-dir.
+    run_dir = run_dir_arg(args.run_dir or str(Path(args.session).expanduser().parent), config)
+    session_path = run_dir / SESSION_FILENAME
     with session_lock(session_path.parent):
         _approve_or_revoke(args, session_path)
 

@@ -14,7 +14,7 @@ from __future__ import annotations
 import argparse
 import json
 
-from _common import add_config_arg, bootstrap, emit, note, resolve_path, run_tool  # noqa: E402
+from _common import add_config_arg, bootstrap, emit, note, run_dir_arg, run_tool  # noqa: E402
 from src.episode_signals import collect_and_write  # noqa: E402
 
 
@@ -25,7 +25,7 @@ def main() -> None:
     args = parser.parse_args()
 
     config = bootstrap(args)
-    run_dir = resolve_path(args.run_dir)
+    run_dir = run_dir_arg(args.run_dir, config)
     if not run_dir.is_dir():
         raise FileNotFoundError(f"Cartella della run inesistente: {run_dir}.")
 

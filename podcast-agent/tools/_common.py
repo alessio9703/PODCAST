@@ -57,6 +57,7 @@ from src.ffmpeg_tool import FfmpegNotFoundError  # noqa: E402
 from src.lessons import LessonsError  # noqa: E402
 from src.music_library import MusicLibraryError  # noqa: E402
 from src.music_mixer import MusicChangedError, MusicMixerError  # noqa: E402
+from src.paths import confine_run_dir, confine_to  # noqa: E402
 from src.pdf_reader import DocumentError  # noqa: E402
 from src.script_session import ScriptSessionError  # noqa: E402
 from src.script_writer import ModelAccessError, ScriptWriterError  # noqa: E402
@@ -194,6 +195,43 @@ def resolve_path(value: str) -> Path:
     return Path(value).expanduser().resolve()
 
 
+# ----------------------------------------------------------------------
+# Percorsi da input (vedi src/paths.py)
+# ----------------------------------------------------------------------
+
+
+def add_trusted_paths_arg(parser: argparse.ArgumentParser) -> None:
+    """--trusted-paths: percorsi liberi, SOLO per uso locale (subagent, CLI).
+
+    Senza, documenti e file passati per percorso devono stare nelle cartelle
+    del progetto (documenti/, output/). L'adattatore web non deve MAI
+    passarlo: e' l'unico modo per uscire da quelle cartelle.
+    """
+    parser.add_argument(
+        "--trusted-paths",
+        action="store_true",
+        help="Uso locale: consente documenti e file fuori da documenti/ e output/. "
+        "Mai dall'interfaccia web.",
+    )
+
+
+def run_dir_arg(value: str, config: Config, *, must_exist: bool = True) -> Path:
+    """--run-dir: sempre una cartella dell'Archivio (sottocartella di output/)."""
+    return confine_run_dir(value, config.output_dir, must_exist=must_exist)
+
+
+def file_arg(value: str, config: Config, args: argparse.Namespace, field: str) -> Path:
+    """Un file passato per percorso (copione, voci, bozza...): dentro output/,
+    salvo --trusted-paths."""
+    if getattr(args, "trusted_paths", False):
+        return resolve_path(value)
+    return confine_to(value, config.output_dir, field=field)
+
+
+def documents_confined(args: argparse.Namespace) -> bool:
+    return not getattr(args, "trusted_paths", False)
+
+
 __all__ = [
     "PROJECT_ROOT",
     "EXIT_OK",
@@ -208,4 +246,8 @@ __all__ = [
     "note",
     "run_tool",
     "resolve_path",
+    "add_trusted_paths_arg",
+    "run_dir_arg",
+    "file_arg",
+    "documents_confined",
 ]

@@ -20,7 +20,7 @@ from __future__ import annotations
 import argparse
 from pathlib import Path
 
-from _common import add_config_arg, bootstrap, resolve_path, note, run_tool  # noqa: E402
+from _common import add_config_arg, bootstrap, note, run_dir_arg, run_tool  # noqa: E402
 from script_write import report  # noqa: E402
 from src.script_authoring import revise_draft  # noqa: E402
 
@@ -36,7 +36,8 @@ def main() -> None:
     args = parser.parse_args()
 
     config = bootstrap(args)
-    run_dir = resolve_path(args.run_dir) if args.run_dir else Path(resolve_path(args.session)).parent
+    # --session vale come la sua cartella: stessa regola di --run-dir.
+    run_dir = run_dir_arg(args.run_dir or str(Path(args.session).expanduser().parent), config)
 
     result = revise_draft(run_dir, config, instructions=args.instructions, by=args.by, note=note)
     note(f"Copione aggiornato in {result.script_path} (versione {result.session.version_count})")

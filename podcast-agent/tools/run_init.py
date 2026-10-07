@@ -18,7 +18,7 @@ from __future__ import annotations
 
 import argparse
 
-from _common import add_config_arg, bootstrap, emit, note, run_tool  # noqa: E402
+from _common import add_config_arg, add_trusted_paths_arg, bootstrap, documents_confined, emit, note, run_tool  # noqa: E402
 from src.audio_assembler import slugify  # noqa: E402
 from src.episode_setup import apply_changes, episode_view  # noqa: E402
 from src.pdf_reader import extract_text  # noqa: E402
@@ -30,6 +30,7 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--title", required=True, help="Titolo provvisorio dell'episodio")
     parser.add_argument("--document", default=None, help="Documento di partenza (nome in documenti/ o percorso)")
+    add_trusted_paths_arg(parser)
     add_config_arg(parser)
     args = parser.parse_args()
 
@@ -37,10 +38,12 @@ def main() -> None:
     if args.document:
         # Prima di creare la cartella: un PDF scansionato non deve lasciare
         # in Archivio una bozza vuota.
-        extract_text(args.document, search_dir=config.documents_dir)
+        extract_text(args.document, search_dir=config.documents_dir, confined=documents_confined(args))
     run_dir = make_run_dir(config.output_dir, args.title)
     note(f"Cartella episodio creata: {run_dir}")
-    episode, _, _ = apply_changes(run_dir, config, title=args.title, document=args.document)
+    episode, _, _ = apply_changes(
+        run_dir, config, title=args.title, document=args.document, trusted_paths=args.trusted_paths
+    )
 
     emit(
         {

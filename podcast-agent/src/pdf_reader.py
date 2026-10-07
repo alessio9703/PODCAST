@@ -58,15 +58,34 @@ class Document:
         return self.text, False
 
 
-def locate_document(path: str | Path, search_dir: str | Path | None = None) -> Path:
+SUPPORTED_EXTENSIONS = [".pdf", ".docx", *sorted(TEXT_EXTENSIONS)]
+
+
+def locate_document(
+    path: str | Path,
+    search_dir: str | Path | None = None,
+    *,
+    confined: bool = False,
+) -> Path:
     """Risolve il documento.
 
     Se `path` e' **solo un nome di file** (nessuna cartella davanti) viene
     cercato prima dentro `search_dir` — la cartella `documenti/` del progetto —
     e solo dopo come percorso relativo alla directory corrente.
+
+    Con `confined=True` (i tool, per default: e' quello che usa l'interfaccia
+    web) il documento DEVE stare dentro `search_dir`, una volta risolti i link
+    simbolici; un nome nudo si cerca solo li', mai nella cartella corrente;
+    file nascosti e file senza un'estensione gestita sono rifiutati. Senza,
+    un nome come `.env` veniva cercato nella cartella corrente e letto come
+    testo. run.py e il subagent, che lavorano con percorsi scelti in locale,
+    usano la modalita' libera (--trusted-paths nei tool).
     """
     raw = Path(str(path).strip().strip('"').strip("'")).expanduser()
     bare_name = raw.parent == Path(".")
+
+    if confined:
+        return _locate_confined(raw, bare_name, search_dir)
 
     if bare_name and search_dir is not None:
         candidate = Path(search_dir).expanduser() / raw.name
@@ -85,8 +104,34 @@ def locate_document(path: str | Path, search_dir: str | Path | None = None) -> P
     raise DocumentError(f"Documento non trovato: {resolved}")
 
 
-def extract_text(path: str | Path, search_dir: str | Path | None = None) -> Document:
-    doc_path = locate_document(path, search_dir)
+def _locate_confined(raw: Path, bare_name: bool, search_dir: str | Path | None) -> Path:
+    if search_dir is None:
+        raise DocumentError("Cartella dei documenti non configurata (paths.documents_dir).")
+    root = Path(search_dir).expanduser().resolve()
+    candidate = (root / raw.name) if bare_name else raw
+    resolved = candidate.resolve()
+    try:
+        resolved.relative_to(root)
+    except ValueError:
+        raise DocumentError(
+            f"Il documento deve stare nella libreria Documenti ({root.name}/)."
+        ) from None
+    if resolved.name.startswith(".") or resolved.suffix.lower() not in SUPPORTED_EXTENSIONS:
+        raise UnsupportedDocument(
+            f"'{raw.name}' non e' un documento utilizzabile. Formati gestiti: PDF, DOCX, "
+            f"{', '.join(sorted(TEXT_EXTENSIONS))}.",
+            extension=resolved.suffix.lower(),
+            supported=SUPPORTED_EXTENSIONS,
+        )
+    if not resolved.is_file():
+        raise DocumentError(f"Documento non trovato nella libreria Documenti: '{raw.name}'.")
+    return resolved
+
+
+def extract_text(
+    path: str | Path, search_dir: str | Path | None = None, *, confined: bool = False
+) -> Document:
+    doc_path = locate_document(path, search_dir, confined=confined)
     suffix = doc_path.suffix.lower()
     if suffix == ".pdf":
         return _read_pdf(doc_path)
@@ -98,7 +143,7 @@ def extract_text(path: str | Path, search_dir: str | Path | None = None) -> Docu
         f"Estensione '{suffix}' non supportata. Formati gestiti: PDF, DOCX, "
         f"{', '.join(sorted(TEXT_EXTENSIONS))}.",
         extension=suffix,
-        supported=[".pdf", ".docx", *sorted(TEXT_EXTENSIONS)],
+        supported=SUPPORTED_EXTENSIONS,
     )
 
 
@@ -197,6 +242,7 @@ __all__ = [
     "Document",
     "DocumentError",
     "DocumentNotExtractable",
+    "SUPPORTED_EXTENSIONS",
     "UnsupportedDocument",
     "extract_text",
     "locate_document",

@@ -21,10 +21,12 @@ import argparse
 
 from _common import (  # noqa: E402
     add_config_arg,
+    add_trusted_paths_arg,
     bootstrap,
+    documents_confined,
     emit,
+    file_arg,
     note,
-    resolve_path,
     run_tool,
 )
 from src.pdf_reader import extract_text  # noqa: E402
@@ -38,15 +40,18 @@ def main() -> None:
     parser.add_argument(
         "--preview-chars", type=int, default=600, help="Lunghezza dell'anteprima"
     )
+    add_trusted_paths_arg(parser)
     add_config_arg(parser)
     args = parser.parse_args()
 
     config = bootstrap(args)
-    document = extract_text(args.document, search_dir=config.documents_dir)
+    document = extract_text(
+        args.document, search_dir=config.documents_dir, confined=documents_confined(args)
+    )
 
     text_file = None
     if args.save_to:
-        target_dir = resolve_path(args.save_to)
+        target_dir = file_arg(args.save_to, config, args, "save_to")
         target_dir.mkdir(parents=True, exist_ok=True)
         target = target_dir / "documento_estratto.txt"
         target.write_text(document.text, encoding="utf-8")

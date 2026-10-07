@@ -32,7 +32,7 @@ from __future__ import annotations
 import argparse
 from pathlib import Path
 
-from _common import add_config_arg, bootstrap, emit, note, resolve_path, run_tool  # noqa: E402
+from _common import add_config_arg, add_trusted_paths_arg, bootstrap, documents_confined, emit, file_arg, note, run_dir_arg, run_tool  # noqa: E402
 from src.episode_config import EXTRACTED_TEXT_FILENAME, EpisodeConfig  # noqa: E402
 from src.pdf_reader import Document, extract_text  # noqa: E402
 from src.script_authoring import Cast, write_draft, writer_from_config  # noqa: E402
@@ -62,11 +62,11 @@ def report(result, config, extra=None) -> None:  # type: ignore[no-untyped-def]
 
 def _document(args, run_dir: Path, episode: EpisodeConfig | None, config) -> Document:  # type: ignore[no-untyped-def]
     if args.text_file:
-        text_path = resolve_path(args.text_file)
+        text_path = file_arg(args.text_file, config, args, "text_file")
         return Document(path=text_path, text=text_path.read_text(encoding="utf-8"), kind="text")
     if args.document:
         # Stessa ricerca di doc_extract.py: un nome nudo si cerca in documenti/.
-        return extract_text(args.document, search_dir=config.documents_dir)
+        return extract_text(args.document, search_dir=config.documents_dir, confined=documents_confined(args))
     extracted = run_dir / EXTRACTED_TEXT_FILENAME
     if episode and episode.documento and extracted.is_file():
         return Document(
@@ -125,15 +125,12 @@ def main() -> None:
     parser.add_argument("--presenter", default=None)
     parser.add_argument("--participant", action="append", default=[], metavar='"SPEAKER|NOME COGNOME|RUOLO"')
     parser.add_argument("--by", default=None, help="Chi ha chiesto la stesura (per l'elenco versioni)")
+    add_trusted_paths_arg(parser)
     add_config_arg(parser)
     args = parser.parse_args()
 
     config = bootstrap(args)
-    run_dir = resolve_path(args.run_dir)
-    if not run_dir.is_dir():
-        raise FileNotFoundError(
-            f"Cartella della run inesistente: {run_dir}. Chiama prima run_init.py."
-        )
+    run_dir = run_dir_arg(args.run_dir, config)
 
     episode = EpisodeConfig.load(run_dir)
     cast, target_minutes = _cast(args, episode)

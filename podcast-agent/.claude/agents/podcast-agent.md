@@ -83,7 +83,7 @@ stderr. Leggi il JSON, non il testo.
 
 | Comando | Cosa fa | Ti restituisce |
 |---|---|---|
-| `tools/doc_extract.py DOC --save-to DIR` | estrae il testo | `chars`, `words`, `pages`, `preview`, `text_file` |
+| `tools/doc_extract.py DOC --save-to DIR --trusted-paths` | estrae il testo | `chars`, `words`, `pages`, `preview`, `text_file` |
 | `tools/voices_list.py [--resolve NOME]` | elenca le voci, risolve i nomi | `voices[]` con `cached`, `spoken_name` (nome ricavato dal file, es. "Voce Alessio Menegatto" -> "Alessio Menegatto"), `name_complete` (`false` = manca nome o cognome), `resolved[]` con `match`/`candidates` |
 | `tools/music_list.py [--resolve CATEGORIA NOME]` | elenca le musiche disponibili, risolve un nome | senza `--resolve`: `intro[]`/`outro[]`/`sottofondo[]` con `duration_seconds`, `has_licenza`, `parlato`, `usable`. Con `--resolve`: exit `0`/`1`/`3` (vedi sotto, **diverso** da `voices_list.py`) |
 | `tools/music_set.py --run-dir D [--intro N] [--outro N] [--sottofondo N] [--none CATEGORIA...]` | sceglie le musiche della run — **gratis, senza approvazione** | `intro`, `outro`, `sottofondo`, `warnings[]` (brani senza licenza) |
@@ -102,7 +102,7 @@ stderr. Leggi il JSON, non il testo.
 | `tools/retake.py --run-dir D --turn N --takes K [--dry-run] [--with-music]` | rifa' una battuta a parita' di testo | `new_takes[]`, `previews[]`, `previews_with_music[]` (se `--with-music` e c'e' un sottofondo), `tts_calls`, `cost_usd`, `warnings[]` |
 | `tools/retake.py --run-dir D --list N` | i take esistenti di un turno | `takes[]`, `chosen_take` |
 | `tools/retake.py --run-dir D --choose N=K` | registra quale take montare | `chosen_take`, `tts_calls` (sempre 0) |
-| `tools/run_finalize.py --run-dir D --document DOC --voices V --audio-paths A` | chiude la run | `voci_usate`, `documento`, `files[]` |
+| `tools/run_finalize.py --run-dir D --document DOC --voices V --audio-paths A --trusted-paths` | chiude la run | `voci_usate`, `documento`, `files[]` |
 
 `script_write.py` e `script_revise.py` esistono ancora ma **non sono per te**: chiamano
 l'API Anthropic e servono all'interfaccia web. Lo stesso vale per `episode_config.py`
@@ -141,8 +141,15 @@ niente, vai avanti e conferma i nomi contro la cartella.
 ### 2. Leggi il documento
 
 ```bash
-.venv/bin/python tools/doc_extract.py "documento.pdf" --save-to /tmp
+.venv/bin/python tools/doc_extract.py "documento.pdf" --save-to /tmp --trusted-paths
 ```
+
+**`--trusted-paths`** serve perché lavori in locale, con file scelti dall'utente che hai
+davanti: senza, i tool accettano solo documenti dentro `documenti/` e file dentro `output/`
+(è la regola per l'interfaccia web, che non lo passa mai). Mettilo su `doc_extract.py` e
+`run_finalize.py`, e sugli altri tool solo se un file che ti serve sta fuori da `output/`.
+`--run-dir` invece deve **sempre** essere una cartella di `output/` creata da `run_init.py`:
+lì non ci sono eccezioni.
 
 Se l'utente ti dà **solo un nome di file** (`report-q3.pdf`), non chiedergli dov'è:
 passalo così com'è. `doc_extract.py` lo cerca prima dentro `documenti/` — la cartella
@@ -438,7 +445,7 @@ uno speaker manca la voce.
 
 ```bash
 .venv/bin/python tools/run_finalize.py --run-dir output/<run> --document "documento.pdf" \
-  --voices output/<run>/voci.json --audio-paths output/<run>/_audio_paths.json
+  --voices output/<run>/voci.json --audio-paths output/<run>/_audio_paths.json --trusted-paths
 ```
 
 ## Correggere una battuta

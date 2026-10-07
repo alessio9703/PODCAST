@@ -17,7 +17,7 @@ from __future__ import annotations
 import argparse
 import json
 
-from _common import add_config_arg, bootstrap, emit, note, resolve_path, run_tool  # noqa: E402
+from _common import add_config_arg, add_trusted_paths_arg, bootstrap, emit, file_arg, note, run_dir_arg, run_tool  # noqa: E402
 from src.audio_assembler import load_choices, script_segment_keys, segment_path  # noqa: E402
 from src.cost_estimate import estimate as compute  # noqa: E402
 from src.music_context import music_durations  # noqa: E402
@@ -33,12 +33,13 @@ def main() -> None:
         default=None,
         help="Cartella dell'episodio: conta solo i turni non ancora in cache",
     )
+    add_trusted_paths_arg(parser)
     add_config_arg(parser)
     args = parser.parse_args()
 
     config = bootstrap(args)
     script = PodcastScript.from_dict(
-        json.loads(resolve_path(args.script).read_text(encoding="utf-8"))
+        json.loads(file_arg(args.script, config, args, "script").read_text(encoding="utf-8"))
     )
     provider = config.build_provider()
     audio = config.audio
@@ -59,13 +60,15 @@ def main() -> None:
 
     incremental: dict[str, object] = {}
     if args.run_dir:
-        incremental = _incremental(resolve_path(args.run_dir), script, provider)
+        incremental = _incremental(run_dir_arg(args.run_dir, config), script, provider)
 
     # Le musiche non passano dal provider: il costo non cambia. Ma la durata
     # si stima dove si trova musiche.json — nella run, se c'e' un --run-dir,
     # altrimenti nella stessa cartella dello script (conversazione.json e
     # musiche.json vivono sempre insieme).
-    music_dir_for_choice = resolve_path(args.run_dir) if args.run_dir else resolve_path(args.script).parent
+    music_dir_for_choice = (
+        run_dir_arg(args.run_dir, config) if args.run_dir else file_arg(args.script, config, args, "script").parent
+    )
     music = music_durations(music_dir_for_choice, config)
     if music:
         note(

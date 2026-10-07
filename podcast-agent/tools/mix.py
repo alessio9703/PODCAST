@@ -23,7 +23,7 @@ from __future__ import annotations
 import argparse
 
 from _approval import add_gate_args, enforce  # noqa: E402
-from _common import add_config_arg, bootstrap, emit, note, resolve_path, run_tool  # noqa: E402
+from _common import add_config_arg, bootstrap, emit, note, run_dir_arg, run_tool  # noqa: E402
 from src.audio_assembler import AudioAssembler  # noqa: E402
 from src.music_mixer import mix_episode, preflight  # noqa: E402
 from src.segment_cache import RunCache  # noqa: E402
@@ -43,7 +43,7 @@ def main() -> None:
     args = parser.parse_args()
 
     config = bootstrap(args)
-    run_dir = resolve_path(args.run_dir)
+    run_dir = run_dir_arg(args.run_dir, config)
 
     # Non spende, ma produce l'output finale: passa comunque dal gate.
     gate = enforce(args)

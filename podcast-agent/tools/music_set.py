@@ -21,7 +21,7 @@ from __future__ import annotations
 
 import argparse
 
-from _common import add_config_arg, bootstrap, emit, note, resolve_path, run_tool  # noqa: E402
+from _common import add_config_arg, bootstrap, emit, note, run_dir_arg, run_tool  # noqa: E402
 from src.errors import AmbiguousName  # noqa: E402
 from src.music_library import CATEGORIES, MusicLibrary, load_music_choice, write_music_choice  # noqa: E402
 
@@ -53,7 +53,7 @@ def main() -> None:
         )
 
     config = bootstrap(args)
-    run_dir = resolve_path(args.run_dir)
+    run_dir = run_dir_arg(args.run_dir, config)
     if not run_dir.is_dir():
         raise FileNotFoundError(
             f"Cartella della run inesistente: {run_dir}. Chiama prima run_init.py."

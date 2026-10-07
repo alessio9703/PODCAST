@@ -17,7 +17,7 @@ import shutil
 from pathlib import Path
 
 from _approval import add_gate_args, enforce  # noqa: E402
-from _common import add_config_arg, bootstrap, emit, note, resolve_path, run_tool  # noqa: E402
+from _common import add_config_arg, add_trusted_paths_arg, bootstrap, emit, file_arg, note, run_dir_arg, run_tool  # noqa: E402
 from src.audio_assembler import AudioAssembler, slugify  # noqa: E402
 from src.episode_signals import collect_and_write, record_synthesis_event  # noqa: E402
 from src.fileio import write_json_atomic  # noqa: E402
@@ -48,15 +48,16 @@ def main() -> None:
         "risulta sostituito (sha256 diverso).",
     )
     add_gate_args(parser, run_dir_required=True)
+    add_trusted_paths_arg(parser)
     add_config_arg(parser)
     args = parser.parse_args()
 
     config = bootstrap(args)
-    run_dir = resolve_path(args.run_dir)
+    run_dir = run_dir_arg(args.run_dir, config)
     script = PodcastScript.from_dict(
-        json.loads(resolve_path(args.script).read_text(encoding="utf-8"))
+        json.loads(file_arg(args.script, config, args, "script").read_text(encoding="utf-8"))
     )
-    voice_map = json.loads(resolve_path(args.voices).read_text(encoding="utf-8"))
+    voice_map = json.loads(file_arg(args.voices, config, args, "voices").read_text(encoding="utf-8"))
 
     # Checkpoint: l'utente deve aver approvato ESATTAMENTE questo copione.
     gate = enforce(args, script.to_dict())

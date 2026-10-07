@@ -51,9 +51,15 @@ def resolve_voice(library: VoiceLibrary, query: str, role: str) -> str:
     )
 
 
-def set_document(episode: EpisodeConfig, run_dir: Path, document_arg: str, config: Any) -> dict[str, Any]:
-    """Estrae il documento, lo registra e ne salva il testo nella run."""
-    document = extract_text(document_arg, search_dir=config.documents_dir)
+def set_document(
+    episode: EpisodeConfig, run_dir: Path, document_arg: str, config: Any, *, trusted_paths: bool = False
+) -> dict[str, Any]:
+    """Estrae il documento, lo registra e ne salva il testo nella run.
+
+    Il documento deve stare nella libreria documenti/ (src/pdf_reader,
+    modalita' confinata), salvo `trusted_paths` per l'uso locale.
+    """
+    document = extract_text(document_arg, search_dir=config.documents_dir, confined=not trusted_paths)
     episode.documento = document_record(document)
     write_text_atomic(Path(run_dir) / EXTRACTED_TEXT_FILENAME, document.text)
     return episode.documento
@@ -103,6 +109,7 @@ def apply_changes(
     descriptions: dict[str, str] | None = None,
     remove: list[str] | None = None,
     accept_incomplete_names: bool = False,
+    trusted_paths: bool = False,
 ) -> tuple[EpisodeConfig, list[str], dict[str, Any] | None]:
     """Applica le modifiche sotto lock, tutte o nessuna.
 
@@ -129,7 +136,7 @@ def apply_changes(
         if title is not None:
             episode.set_title(title)
         if document is not None:
-            set_document(episode, run_dir, document, config)
+            set_document(episode, run_dir, document, config, trusted_paths=trusted_paths)
         if script_format is not None:
             warnings.extend(episode.set_format(script_format))
         if minutes is not None:

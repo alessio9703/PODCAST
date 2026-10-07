@@ -29,7 +29,7 @@ from __future__ import annotations
 import argparse
 import json
 
-from _common import PROJECT_ROOT, add_config_arg, bootstrap, emit, note, resolve_path, run_tool  # noqa: E402
+from _common import PROJECT_ROOT, add_config_arg, add_trusted_paths_arg, bootstrap, emit, file_arg, note, run_dir_arg, run_tool  # noqa: E402
 from src.episode_config import EpisodeConfig  # noqa: E402
 from src.lessons import active_lessons_summary  # noqa: E402
 from src.music_context import capture_music_context  # noqa: E402
@@ -84,17 +84,18 @@ def main() -> None:
         "nome come va pronunciato e chi e' / di cosa si occupa",
     )
     parser.add_argument("--by", default=None, help="Chi ha fatto questa versione (per l'elenco versioni)")
+    add_trusted_paths_arg(parser)
     add_config_arg(parser)
     args = parser.parse_args()
 
     config = bootstrap(args)
-    run_dir = resolve_path(args.run_dir)
+    run_dir = run_dir_arg(args.run_dir, config)
     if not run_dir.is_dir():
         raise FileNotFoundError(
             f"Cartella della run inesistente: {run_dir}. Chiama prima run_init.py."
         )
 
-    source = resolve_path(args.script_json)
+    source = file_arg(args.script_json, config, args, "script_json")
     try:
         payload = json.loads(source.read_text(encoding="utf-8"))
     except json.JSONDecodeError as exc:

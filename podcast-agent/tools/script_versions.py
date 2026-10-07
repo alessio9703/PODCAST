@@ -21,7 +21,7 @@ from __future__ import annotations
 
 import argparse
 
-from _common import add_config_arg, bootstrap, emit, note, resolve_path, run_tool  # noqa: E402
+from _common import add_config_arg, bootstrap, emit, note, run_dir_arg, run_tool  # noqa: E402
 from src.script_diff import diff_scripts, only_changes  # noqa: E402
 from src.script_editing import restore_version, versions_list  # noqa: E402
 from src.script_session import FILENAME as SESSION_FILENAME  # noqa: E402
@@ -55,7 +55,7 @@ def main() -> None:
     args = parser.parse_args()
 
     config = bootstrap(args)
-    run_dir = resolve_path(args.run_dir)
+    run_dir = run_dir_arg(args.run_dir, config)
 
     if args.restore is not None:
         session, script, script_path, warnings = restore_version(

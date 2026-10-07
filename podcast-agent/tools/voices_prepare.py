@@ -17,7 +17,7 @@ from __future__ import annotations
 import argparse
 
 from _approval import add_gate_args, enforce  # noqa: E402
-from _common import add_config_arg, bootstrap, emit, note, resolve_path, run_tool  # noqa: E402
+from _common import add_config_arg, add_trusted_paths_arg, bootstrap, emit, file_arg, note, run_dir_arg, run_tool  # noqa: E402
 from src.fileio import write_json_atomic  # noqa: E402
 from src.registry import VoiceRegistry  # noqa: E402
 from src.voice_library import VoiceLibrary, VoiceLibraryError  # noqa: E402
@@ -33,13 +33,16 @@ def main() -> None:
         help="Dice cosa farebbe senza clonare nulla (nessun costo)",
     )
     add_gate_args(parser, run_dir_required=False)
+    add_trusted_paths_arg(parser)
     add_config_arg(parser)
     args = parser.parse_args()
 
+    config = bootstrap(args)
+    if args.run_dir:
+        args.run_dir = str(run_dir_arg(args.run_dir, config))
+
     # Il dry-run non spende: non ha bisogno dell'approvazione.
     gate = {"approval_gate": "not_needed"} if args.dry_run else enforce(args)
-
-    config = bootstrap(args)
     library = VoiceLibrary(config.voices_dir, config.accepted_extensions)
     library.scan()
     registry = VoiceRegistry(config.registry_file, project_root=config.registry_file.parent)
@@ -97,7 +100,7 @@ def main() -> None:
         # Atomico: voci.json decide le chiavi dei segmenti in cache. Un file
         # scritto a meta' farebbe sembrare "da rigenerare" (a pagamento)
         # battute gia' pronte.
-        target = write_json_atomic(resolve_path(args.out), voice_map)
+        target = write_json_atomic(file_arg(args.out, config, args, "out"), voice_map)
         out_file = str(target)
         # accanto alla voice_map salva anche i file audio di riferimento:
         # servono a run_finalize.py e l'agente non deve costruirli a mano

@@ -33,7 +33,7 @@ from __future__ import annotations
 
 import argparse
 
-from _common import add_config_arg, bootstrap, emit, note, resolve_path, run_tool  # noqa: E402
+from _common import add_config_arg, add_trusted_paths_arg, bootstrap, emit, note, run_dir_arg, run_tool  # noqa: E402
 from src.episode_config import ALL_ROLES, parse_duration  # noqa: E402
 from src.episode_setup import apply_changes, episode_view  # noqa: E402
 
@@ -69,11 +69,12 @@ def main() -> None:
         action="store_true",
         help="Conferma esplicita: il nome va pronunciato cosi', senza cognome",
     )
+    add_trusted_paths_arg(parser)
     add_config_arg(parser)
     args = parser.parse_args()
 
     config = bootstrap(args)
-    run_dir = resolve_path(args.run_dir)
+    run_dir = run_dir_arg(args.run_dir, config)
     if not run_dir.is_dir():
         raise FileNotFoundError(f"Cartella della run inesistente: {run_dir}. Chiama prima run_init.py.")
 
@@ -88,6 +89,7 @@ def main() -> None:
         descriptions=_pairs(args.descrizione, "--descrizione"),
         remove=[r for r in args.togli],
         accept_incomplete_names=args.accetta_nome_incompleto,
+        trusted_paths=args.trusted_paths,
     )
     for role in changes["remove"]:
         if role not in ALL_ROLES:
@@ -96,7 +98,7 @@ def main() -> None:
     warnings: list[str] = []
     episode = None
     revoked = None
-    if any(v not in (None, {}, [], False) for k, v in changes.items() if k != "accept_incomplete_names"):
+    if any(v not in (None, {}, [], False) for k, v in changes.items() if k not in ("accept_incomplete_names", "trusted_paths")):
         episode, warnings, revoked = apply_changes(run_dir, config, **changes)
         note("Episodio aggiornato.")
     for warning in warnings:

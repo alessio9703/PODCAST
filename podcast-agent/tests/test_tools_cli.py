@@ -143,7 +143,10 @@ def main() -> None:
     config = write_config(root)
 
     print("\n[1] doc_extract.py")
-    code, out, _ = tool("doc_extract.py", str(doc), "--save-to", str(root), config=config)
+    # Documento e --save-to fuori da documenti/ e output/: e' il flusso locale
+    # del subagent, che dalla revisione di sicurezza C0+C1 richiede
+    # --trusted-paths (senza, i tool restano dentro le cartelle del progetto).
+    code, out, _ = tool("doc_extract.py", str(doc), "--save-to", str(root), "--trusted-paths", config=config)
     check("exit 0", code == 0, str(out))
     check("chiavi", {"ok", "path", "kind", "chars", "words", "preview", "text_file"} <= set(out))
     check("testo salvato su file", Path(out["text_file"]).is_file())
@@ -268,6 +271,7 @@ def main() -> None:
     code, out, _ = tool(
         "run_finalize.py", "--run-dir", str(run_dir), "--document", str(doc),
         "--voices", str(voices_json), "--audio-paths", str(audio_paths_file),
+        "--trusted-paths",
         config=config,
     )
     check("exit 0", code == 0)

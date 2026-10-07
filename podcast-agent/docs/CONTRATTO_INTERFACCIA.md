@@ -22,6 +22,27 @@ Ogni azione è un comando `tools/<nome>.py` lanciato come sottoprocesso:
 - `--config` è accettato da tutti i comandi (default: `config.yaml` del
   progetto).
 
+### Percorsi: cosa si può passare
+
+Dalla revisione di sicurezza C0+C1 i tool controllano da soli dove stanno i
+percorsi che ricevono, quindi la difesa non dipende dall'adattatore:
+
+- `--run-dir` (e `--session`, che vale come la sua cartella) deve essere una
+  **sottocartella diretta di `output/`**, cioè una run dell'Archivio. Si può
+  passare il percorso assoluto o il **solo nome della cartella**. `..`, percorsi
+  fuori da `output/` e link simbolici che portano fuori danno exit 1
+  `PathNotAllowed`. Una run inesistente dà exit 1 e non crea cartelle.
+- i **documenti** (`--document`, `--documento`, argomento di `doc_extract.py`)
+  si indicano **per nome** e devono stare nella libreria `documenti/`. File
+  nascosti, file senza estensione gestita e percorsi che escono dalla libreria
+  (anche tramite link simbolici) sono rifiutati. Un nome non viene mai cercato
+  nella cartella corrente.
+- i file passati per percorso (`--script`, `--voices`, `--out`,
+  `--audio-paths`, `--script-json`, `--text-file`, `--save-to`) devono stare
+  dentro `output/`.
+- `--trusted-paths` toglie gli ultimi due vincoli ed esiste **solo per l'uso
+  locale** (subagent, CLI). **L'adattatore non deve mai passarlo.**
+
 ## 2. I quattro esiti
 
 | exit | `ok` | Significato | Cosa fa la UI (vedi `Stati.dc.html`) |
@@ -124,6 +145,7 @@ senza `details`, con l'elenco dei disponibili nel testo.
 | `NothingToChange` | 1 | La modifica lascerebbe tutto com'è: nessuna versione creata | `turn` o `version` |
 | `TurnNotFound` | 1 | Numero di battuta inesistente | `turn`, `turn_count` |
 | `RunBusy` | 1 | Sulla run è già in corso un'operazione lunga | `in_corso: {operazione, dal, pid}` |
+| `PathNotAllowed` | 1 | Un percorso esce dalla cartella prevista (vedi "Percorsi") | `campo` (`run_dir`, `save_to`, `script`, ...) |
 
 `VersionConflict` è il caso "due persone sullo stesso copione": la UI ricarica il
 copione e mostra la versione nuova, non riprova da sola.

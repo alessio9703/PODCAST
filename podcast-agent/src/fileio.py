@@ -88,7 +88,11 @@ def file_lock(target: Path | str, timeout: float = DEFAULT_LOCK_TIMEOUT) -> Iter
     appeso per sempre.
     """
     lock_file = lock_path_for(target)
-    lock_file.parent.mkdir(parents=True, exist_ok=True)
+    # La cartella NON si crea qui: prendere un lock non deve far nascere
+    # alberi di cartelle in un percorso arrivato da input (revisione di
+    # sicurezza C0+C1, ALTA-2). Se manca, e' un errore di chi chiama.
+    if not lock_file.parent.is_dir():
+        raise FileNotFoundError(f"Cartella inesistente per il lock: {lock_file.parent.name}")
     fd = os.open(str(lock_file), os.O_RDWR | os.O_CREAT, 0o644)
     try:
         if os.name == "nt":  # pragma: no cover
