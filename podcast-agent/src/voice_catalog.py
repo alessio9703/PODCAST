@@ -17,7 +17,7 @@ from .ffmpeg_tool import find_ffmpeg, media_duration_seconds
 from .hash_cache import HashCache
 from .registry import VoiceRegistry
 from .voice_library import VoiceLibrary, spoken_name_guess
-from .voice_meta import CONSENT_GRANTED, consent_view, load_meta
+from .voice_meta import CONSENT_GRANTED, consent_view, load_meta, with_registry
 
 FILTERS = ("clonate", "da_clonare", "consenso_da_confermare")
 
@@ -96,7 +96,7 @@ def _voice_row(voice: Any, config: Any, registry: VoiceRegistry, usage: dict, ca
     meta = load_meta(voice.path)
     proposed, complete = spoken_name_guess(voice.name)
     confirmed = meta.get("nome_pronunciato")
-    consent = consent_view(voice.path, meta, audio_sha256=digest)
+    consent = with_registry(consent_view(voice.path, meta, audio_sha256=digest), registry, voice_id=voice_id)
     entry = registry.get(voice.name) or {}
     runs = usage.get(voice.name, [])
     duration = cache.value(voice.path, "durata", _duration)

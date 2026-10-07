@@ -166,6 +166,29 @@ def consent_view(
     }
 
 
+def with_registry(view: dict[str, Any], registry: Any, *, voice_id: str | None) -> dict[str, Any]:
+    """La vista del consenso completata con cio' che sa il registro delle voci.
+
+    - Una revoca registrata nel registro (`__revoche__`) per questo voice_id o
+      per questa registrazione vale anche se il .json dei metadati e' stato
+      cancellato o non dice niente: lo stato diventa "revocato"
+      (`revoca_nel_registro: true`).
+    - `da_confermare`: la voce e' gia' clonata (si riuserebbe) ma il consenso
+      non e' registrato. Sono le voci clonate prima del consenso, o fuori dal
+      gate: niente migrazione automatica, si confermano una volta
+      dall'interfaccia con voice_meta.py --consent (revisione finale, N1).
+    """
+    view = dict(view)
+    item = registry.revocation_for(voice_id=voice_id, audio_hash=view.get("audio_sha256"))
+    view["revoca_nel_registro"] = item is not None
+    if item is not None:
+        view["stato"] = CONSENT_REVOKED
+        view["revocato_da"] = view.get("revocato_da") or item.get("da")
+        view["revocato_il"] = view.get("revocato_il") or item.get("il")
+    view["da_confermare"] = voice_id is not None and view["stato"] in (CONSENT_MISSING, CONSENT_OUTDATED)
+    return view
+
+
 def _now() -> str:
     return datetime.now().replace(microsecond=0).isoformat()
 
@@ -293,4 +316,5 @@ __all__ = [
     "record_consent",
     "record_spoken_name",
     "revoke_consent",
+    "with_registry",
 ]

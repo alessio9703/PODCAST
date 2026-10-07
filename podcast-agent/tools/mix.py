@@ -60,7 +60,7 @@ def main() -> None:
         # lock (revisione di sicurezza C3, MEDIA-1).
         gate = enforce(args, cache.script.to_dict())
         # Una voce con il consenso revocato non si rimonta (C3, MEDIA-2).
-        check_not_revoked(config, list(cache.script.speakers))
+        check_not_revoked(config, list(cache.script.speakers), voice_map=cache.voice_map)
         choice, drift_warnings = preflight(
             run_dir, config, accept_changed_music=args.accept_changed_music
         )

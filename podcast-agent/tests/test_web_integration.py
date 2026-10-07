@@ -20,6 +20,7 @@ import tempfile
 import textwrap
 import time
 from pathlib import Path
+from typing import Callable
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
@@ -1591,7 +1592,7 @@ def test_c2_estimate_and_produce(root: Path, config: Path) -> str:
     print("\n[C2] consenso revocato blocca anche il riuso")
     tool("voice_meta.py", "--name", "Mario Rossi", "--revoke-consent", "--by", "Utente B", config=config)
     code, out, _ = tool("produce.py", "--run-dir", run_dir, config=config)
-    check("voce gia' clonata ma consenso revocato -> ConsentRequired 'revocato'", code == 3 and out["details"]["voci"] == [{"speaker": "Mario Rossi", "azione": "reuse", "stato": "revocato", "file": "Mario Rossi.wav"}], str(out))
+    check("voce gia' clonata ma consenso revocato -> ConsentRequired 'revocato'", code == 3 and out["details"]["voci"] == [{"speaker": "Mario Rossi", "azione": "reuse", "stato": "revocato", "da_confermare": False, "file": "Mario Rossi.wav"}], str(out))
     tool("voice_meta.py", "--name", "Mario Rossi", "--consent", "--by", "Utente A", config=config)
 
     print("\n[C2] produzione: controlli prima di spendere")
@@ -2828,6 +2829,187 @@ def test_c6() -> None:
     check("doc_extract: size_bytes degli stessi byte di sha256 e testo", code == 0 and out["size_bytes"] == len((root / "documenti" / "report.txt").read_bytes()), str(out)[:200])
 
 
+# ----------------------------------------------------------------------
+# C7 · correzioni della revisione finale
+# ----------------------------------------------------------------------
+
+
+def c7_project(**options: object) -> tuple[Path, Callable[..., tuple[int, dict, str]]]:
+    """Una copia del progetto (come web_project_copy) e un lanciatore di tool.
+
+    `run(name, *args, web=True)`: in modalita' web (PODCAST_AGENT_WEB=1, senza
+    --config) o locale (stessa copia, stesso config.yaml di default).
+    """
+    root, _ = web_project_copy()
+    write_c2_config(root, "config.yaml", tts_log_file=str(root / "tts.log"), **options)
+
+    def run(name: str, *args: str, web: bool = True) -> tuple[int, dict, str]:
+        env = clean_env()
+        env.pop("PODCAST_AGENT_WEB", None)
+        if web:
+            env["PODCAST_AGENT_WEB"] = "1"
+        proc = subprocess.run(
+            [PYTHON, str(root / "tools" / name), *args], capture_output=True, text=True, cwd=str(root), env=env
+        )
+        try:
+            payload = json.loads(proc.stdout)
+        except json.JSONDecodeError:
+            payload = {"_raw_stdout": proc.stdout}
+        return proc.returncode, payload, proc.stderr
+
+    return root, run
+
+
+def c7_approved_run(root: Path, run: Callable[..., tuple[int, dict, str]], title: str, script: dict) -> str:
+    """Come approved_run(), sulla copia del progetto (in locale: --script-json)."""
+    code, out, err = run("run_init.py", "--title", title, "--document", "report.txt", web=False)
+    check(f"run '{title}' creata", code == 0, err)
+    name = out["run"]
+    draft = root / "output" / name / "bozza.json"
+    draft.write_text(json.dumps(script, ensure_ascii=False), encoding="utf-8")
+    speakers = sorted({t["speaker"] for t in script["turni"]})
+    code, out, err = run("script_save.py", "--run-dir", name, "--script-json", str(draft), "--speakers", *speakers, web=False)
+    check(f"copione '{title}' salvato", code == 0, err[-300:] + str(out)[:300])
+    code, out, _ = run("script_approve.py", "--run-dir", name, "--version", "1", "--by", "Utente A")
+    check(f"copione '{title}' approvato", code == 0, str(out)[:300])
+    return name
+
+
+def test_c7_consent() -> None:
+    """N1: il consenso e' una proprieta' della voce; le revoche restano nel registro."""
+    print("\n[C7] N1 · consenso anche per il riuso (web), revoche nel registro")
+    root, run = c7_project()
+    registry_file = root / "voices_registry.json"
+
+    # Voci clonate fuori dal gate (come prima di C2, o con --no-consent-gate):
+    # nel registro, senza consenso registrato.
+    code, out, err = run("voices_prepare.py", "--speakers", "Mario Rossi", "Giulia Bianchi", "--no-consent-gate", "--no-approval-gate", web=False)
+    check("voci clonate fuori dal gate, senza consenso", code == 0 and sorted(out["newly_cloned"]) == ["Giulia Bianchi", "Mario Rossi"], err[-300:] + str(out)[:300])
+    clones = len(clone_attempts(root))
+    code, out, _ = run("voices_list.py")
+    rows = {r["name"]: r for r in out["voices"]}
+    check(
+        "libreria Voci: gia' clonata, consenso 'da confermare'",
+        rows["Mario Rossi"]["cached"] and rows["Mario Rossi"]["consenso"]["stato"] == "mancante" and rows["Mario Rossi"]["consenso"]["da_confermare"] is True,
+        str(rows["Mario Rossi"]["consenso"]),
+    )
+    check("una voce non clonata non e' 'da confermare'", rows["Anna Neri"]["consenso"]["da_confermare"] is False, str(rows["Anna Neri"]["consenso"]))
+    code, out, _ = run("voices_list.py", "--filter", "consenso_da_confermare")
+    check("filtro 'consenso da confermare' le comprende", {"Mario Rossi", "Giulia Bianchi"} <= {r["name"] for r in out["voices"]}, str([r["name"] for r in out["voices"]]))
+
+    name = c7_approved_run(root, run, "Riuso", SCRIPT_C2)
+    code, out, _ = run("estimate.py", "--run-dir", name)
+    check(
+        "stima web: voci riusate ma consenso da confermare",
+        code == 0 and {v["azione"] for v in out["voices"]} == {"reuse"} and sorted(out["consent_missing"]) == ["Giulia Bianchi", "Mario Rossi"]
+        and all(v["consenso"]["da_confermare"] for v in out["voices"]),
+        str(out.get("voices"))[:400],
+    )
+    code, out, _ = run("estimate.py", "--run-dir", name, web=False)
+    check("stima locale: il riuso non chiede il consenso (solo la revoca blocca)", code == 0 and out["consent_missing"] == [], str(out.get("consent_missing")))
+    code, out, _ = run("produce.py", "--run-dir", name)
+    check(
+        "produce dal web: riuso senza consenso -> exit 3 ConsentRequired, voci 'da confermare'",
+        code == 3 and out["error_type"] == "ConsentRequired"
+        and sorted(v["speaker"] for v in out["details"]["voci"]) == ["Giulia Bianchi", "Mario Rossi"]
+        and all(v["azione"] == "reuse" and v["da_confermare"] for v in out["details"]["voci"]),
+        str(out)[:400],
+    )
+    check("...senza sintesi ne' clonazioni", tts_texts(root) == [] and len(clone_attempts(root)) == clones)
+
+    # Conferma una volta dall'interfaccia, sulla registrazione vista.
+    for speaker in ("Mario Rossi", "Giulia Bianchi"):
+        digest = run("voice_meta.py", "--name", speaker)[1]["consenso"]["audio_sha256"]
+        code, out, _ = run("voice_meta.py", "--name", speaker, "--consent", f"--expect-sha256={digest}", "--by=Utente A")
+        check(f"consenso di {speaker} confermato: non piu' da confermare", code == 0 and out["consenso"]["stato"] == "registrato" and out["consenso"]["da_confermare"] is False, str(out["consenso"]))
+    code, out, err = run("produce.py", "--run-dir", name)
+    check("produce dal web dopo la conferma: exit 0, voci riusate", code == 0 and len(clone_attempts(root)) == clones, err[-300:] + str(out)[:300])
+    voice_map = json.loads((root / "output" / name / "voci.json").read_text(encoding="utf-8"))
+
+    # Revoca: resta nel registro anche cancellando registrazione e metadati.
+    code, out, _ = run("voice_meta.py", "--name", "Mario Rossi", "--revoke-consent", "--by=Utente B")
+    check("revoca registrata", code == 0 and out["consenso"]["stato"] == "revocato", str(out["consenso"]))
+    registry = json.loads(registry_file.read_text(encoding="utf-8"))
+    revocations = registry.get("__revoche__") or []
+    check(
+        "il registro tiene la revoca: voce, voice_id clonato, sha256, chi e quando",
+        len(revocations) == 1 and revocations[0]["voce"] == "Mario Rossi" and voice_map["Mario Rossi"] in revocations[0]["voice_id"]
+        and revocations[0]["audio_sha256"] and revocations[0]["da"] == "Utente B" and revocations[0]["il"],
+        str(revocations),
+    )
+    audio = root / "voci" / "Mario Rossi.wav"
+    original = audio.read_bytes()
+    audio.unlink()
+    (root / "voci" / "Mario Rossi.json").unlink()
+    code, out, _ = run("mix.py", "--run-dir", name)
+    check("registrazione cancellata: il rimontaggio si ferma comunque (exit != 0)", code != 0, str(out)[:300])
+    audio.write_bytes(original)  # la stessa registrazione ricaricata, senza .json
+    code, out, _ = run("voices_list.py")
+    mario = {r["name"]: r for r in out["voices"]}["Mario Rossi"]
+    check(
+        "stessa registrazione ricaricata senza metadati: risulta ancora revocata",
+        mario["consenso"]["stato"] == "revocato" and mario["consenso"]["revoca_nel_registro"] is True and mario["consenso"]["revocato_da"] == "Utente B",
+        str(mario["consenso"]),
+    )
+    code, out, _ = run("produce.py", "--run-dir", name)
+    check("produce: exit 3, revocato", code == 3 and out["details"]["voci"][0]["stato"] == "revocato", str(out)[:300])
+    code, out, _ = run("mix.py", "--run-dir", name)
+    check("mix di una run vecchia: exit 3 ConsentRequired", code == 3 and out["error_type"] == "ConsentRequired", str(out)[:300])
+    code, out, _ = run("retake.py", "--run-dir", name, "--list", "1")
+    check("anteprime dei take: exit 3", code == 3 and out["error_type"] == "ConsentRequired", str(out)[:300])
+    tts_before = len(tts_texts(root))
+    code, out, _ = run("retake.py", "--run-dir", name, "--turn", "1", "--by=Utente A")
+    check("retake con la voce revocata: exit 3, nessuna sintesi", code == 3 and len(tts_texts(root)) == tts_before, str(out)[:300])
+
+    # Di nuovo il consenso, per QUESTA registrazione: la revoca si toglie.
+    digest = run("voice_meta.py", "--name", "Mario Rossi")[1]["consenso"]["audio_sha256"]
+    code, out, _ = run("voice_meta.py", "--name", "Mario Rossi", "--consent", f"--expect-sha256={digest}", "--by=Utente A")
+    registry = json.loads(registry_file.read_text(encoding="utf-8"))
+    check("nuovo consenso sulla stessa registrazione: revoca tolta dal registro", code == 0 and "__revoche__" not in registry and out["consenso"]["stato"] == "registrato", str(registry.get("__revoche__")))
+    code, out, err = run("mix.py", "--run-dir", name)
+    check("mix di nuovo possibile", code == 0, err[-300:] + str(out)[:300])
+
+    # Revoca, poi un'ALTRA registrazione con lo stesso nome: il voice_id vecchio resta revocato.
+    run("voice_meta.py", "--name", "Mario Rossi", "--revoke-consent", "--by=Utente B")
+    make_wav(audio, 1.0, 520)
+    digest = run("voice_meta.py", "--name", "Mario Rossi")[1]["consenso"]["audio_sha256"]
+    code, out, _ = run("voice_meta.py", "--name", "Mario Rossi", "--consent", f"--expect-sha256={digest}", "--by=Utente A")
+    check("registrazione nuova con consenso: utilizzabile", code == 0 and out["consenso"]["stato"] == "registrato" and out["consenso"]["revoca_nel_registro"] is False, str(out["consenso"]))
+    registry = json.loads(registry_file.read_text(encoding="utf-8"))
+    check("...ma la revoca del voice_id vecchio resta", any(voice_map["Mario Rossi"] in r["voice_id"] for r in registry.get("__revoche__", [])), str(registry.get("__revoche__")))
+    code, out, _ = run("mix.py", "--run-dir", name)
+    check(
+        "mix della run vecchia (voice_id revocato): exit 3, revoca dal registro",
+        code == 3 and out["details"]["voci"] == [{"speaker": "Mario Rossi", "azione": "reuse", "stato": "revocato", "revoca_nel_registro": True}],
+        str(out)[:400],
+    )
+
+    # Retake dal web: e' un riuso della voce, serve il consenso registrato.
+    (root / "voci" / "Giulia Bianchi.json").unlink()
+    tts_before = len(tts_texts(root))
+    code, out, _ = run("retake.py", "--run-dir", name, "--turn", "2", "--by=Utente A")
+    check("retake dal web senza consenso: exit 3 da confermare, nessuna sintesi", code == 3 and out["details"]["voci"][0]["da_confermare"] is True and len(tts_texts(root)) == tts_before, str(out)[:300])
+
+    proc = run_python(
+        f"""
+        from pathlib import Path
+        from src.registry import VoiceRegistry
+        reg = VoiceRegistry(Path({str(registry_file)!r}))
+        print(len(reg), reg.get("__revoche__") is None, "__revoche__" in reg)
+        try:
+            reg.record("__revoche__", Path({str(audio)!r}), "fake", "x")
+            print("accettato")
+        except ValueError:
+            print("rifiutato")
+        """
+    )
+    check("la chiave delle revoche non e' una voce: non si conta, non si legge, non si registra", proc.stdout.split() == ["2", "True", "False", "rifiutato"], proc.stdout + proc.stderr)
+
+
+def test_c7() -> None:
+    test_c7_consent()
+
+
 def test_ffmpeg_input_confined() -> None:
     """ffmpeg/ffprobe aprono file solo via src/ffmpeg_tool.py (input_args, probe_args).
 
@@ -2897,6 +3079,7 @@ def main() -> None:
     test_full_flow(web=True)
     test_c6()
     test_ffmpeg_input_confined()
+    test_c7()
 
     from tests.test_tools_cli import PASSED
 

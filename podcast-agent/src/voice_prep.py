@@ -13,10 +13,15 @@ Regole, le stesse di sempre piu' il consenso:
   - **consenso prima della clonazione** (piano C2, decisione D5): una voce da
     clonare deve avere il consenso registrato per la registrazione attuale
     (src/voice_meta.py). Se ne manca anche uno solo, NON si clona niente e si
-    esce con exit 3 `ConsentRequired`, l'elenco delle voci in `details`. Una
-    voce gia' clonata si riusa senza chiedere di nuovo il consenso, a meno che
-    sia stato revocato esplicitamente. L'unico modo di saltare il controllo e'
-    `consent_gate=False` (flag --no-consent-gate, rifiutato in modalita' web);
+    esce con exit 3 `ConsentRequired`, l'elenco delle voci in `details`;
+  - **il consenso e' una proprieta' della voce** (D11, revisione finale N1):
+    in modalita' web anche il RIUSO di una voce gia' clonata richiede il
+    consenso registrato per la registrazione del registro. Fuori dal web
+    (subagent, CLI) il riuso blocca solo con il consenso revocato. Una revoca
+    vale sempre, anche se registrata solo nel registro (`__revoche__`, che
+    resta quando si cancellano i file). L'unico modo di saltare il controllo
+    e' `consent_gate=False` (flag --no-consent-gate, rifiutato in modalita'
+    web);
   - **una clonazione per voce alla volta**: due produzioni che partono insieme
     con la stessa voce nuova non la clonano due volte. La clonazione avviene
     sotto un lock per voce, e dentro il lock il registro si rilegge: chi arriva
@@ -39,9 +44,18 @@ from typing import Any, Callable, Iterator
 
 from .errors import AmbiguousName, NeedsUserDecision
 from .fileio import file_lock, write_json_atomic
-from .registry import VoiceRegistry
+from .registry import VoiceRegistry, file_hash
 from .voice_library import AvailableVoice, VoiceLibrary, VoiceLibraryError
-from .voice_meta import CONSENT_GRANTED, CONSENT_REVOKED, consent_state, consent_view
+from .voice_meta import (
+    CONSENT_GRANTED,
+    CONSENT_REVOKED,
+    consent_state,
+    consent_view,
+    record_consent,
+    revoke_consent,
+    with_registry,
+)
+from .web_mode import web_mode
 
 #: Quanto aspettare che un'altra operazione finisca di clonare la stessa voce.
 CLONE_LOCK_TIMEOUT_SECONDS = 600
@@ -79,6 +93,8 @@ class VoicePlan:
     #: Marcatore di una clonazione precedente dall'esito incerto (vedi
     #: CloneOutcomeUnknown), o None.
     pending: dict[str, Any] | None = None
+    #: Anche il riuso richiede il consenso registrato (modalita' web, N1).
+    reuse_requires_consent: bool = False
 
     @property
     def blocked_by_consent(self) -> bool:
@@ -86,7 +102,9 @@ class VoicePlan:
         state = self.consent["stato"]
         if state == CONSENT_REVOKED:
             return True
-        return self.action == ACTION_CLONE and state != CONSENT_GRANTED
+        if self.action == ACTION_CLONE or self.reuse_requires_consent:
+            return state != CONSENT_GRANTED
+        return False
 
     def view(self) -> dict[str, Any]:
         return {
@@ -150,8 +168,19 @@ def _registry(config: Any) -> VoiceRegistry:
     return VoiceRegistry(config.registry_file, project_root=config.registry_file.parent)
 
 
-def plan_voices(config: Any, speakers: list[str], *, registry: VoiceRegistry | None = None) -> list[VoicePlan]:
-    """Per ogni speaker: riuso o clonazione, e lo stato del consenso. Gratis."""
+def plan_voices(
+    config: Any,
+    speakers: list[str],
+    *,
+    registry: VoiceRegistry | None = None,
+    reuse_requires_consent: bool | None = None,
+) -> list[VoicePlan]:
+    """Per ogni speaker: riuso o clonazione, e lo stato del consenso. Gratis.
+
+    `reuse_requires_consent`: None = in modalita' web si', altrimenti no.
+    """
+    if reuse_requires_consent is None:
+        reuse_requires_consent = web_mode()
     library = _library(config)
     by_name = {v.name: v for v in library.voices}
     doubled = {s: library.duplicate_files(s) for s in speakers if library.duplicate_files(s)}
@@ -184,9 +213,10 @@ def plan_voices(config: Any, speakers: list[str], *, registry: VoiceRegistry | N
                 action=ACTION_REUSE if voice_id else ACTION_CLONE,
                 voice_id=voice_id,
                 reason=reason,
-                consent=consent_view(voice.path),
+                consent=with_registry(consent_view(voice.path), registry, voice_id=voice_id),
                 cloned_at=entry.get("cloned_at") if voice_id else None,
                 pending=None if voice_id else pending_clone(config, name),
+                reuse_requires_consent=reuse_requires_consent,
             )
         )
     return plans
@@ -202,6 +232,8 @@ def check_consent(plans: list[VoicePlan]) -> None:
         state = plan.consent["stato"]
         if state == CONSENT_REVOKED:
             lines.append(f"{plan.speaker}: consenso revocato")
+        elif plan.action == ACTION_REUSE:
+            lines.append(f"{plan.speaker}: gia' clonata, ma il consenso non e' registrato (da confermare)")
         elif state == "superato":
             lines.append(f"{plan.speaker}: la registrazione e' cambiata dopo il consenso")
         else:
@@ -213,7 +245,13 @@ def check_consent(plans: list[VoicePlan]) -> None:
         "tools/voice_meta.py --name NOME --consent --by CHI, poi riprova.",
         details={
             "voci": [
-                {"speaker": p.speaker, "azione": p.action, "stato": p.consent["stato"], "file": p.voice.path.name}
+                {
+                    "speaker": p.speaker,
+                    "azione": p.action,
+                    "stato": p.consent["stato"],
+                    "da_confermare": bool(p.consent.get("da_confermare")),
+                    "file": p.voice.path.name,
+                }
                 for p in blocked
             ]
         },
@@ -241,16 +279,86 @@ def _snapshot(audio_path: Path, data: bytes) -> Iterator[Path]:
             pass
 
 
-def check_not_revoked(config: Any, speakers: list[str]) -> None:
-    """ConsentRequired (exit 3) se una delle voci ha il consenso revocato.
+def check_not_revoked(
+    config: Any,
+    speakers: list[str],
+    *,
+    voice_map: dict[str, str] | None = None,
+    require_consent: bool = False,
+) -> None:
+    """ConsentRequired (exit 3) se una delle voci non si puo' usare.
 
     Per i passi che riusano voci gia' clonate o audio gia' sintetizzato
-    (rimontaggio, retake, anteprime): non spendono, ma un consenso revocato
+    (rimontaggio, retake, anteprime): non clonano, ma un consenso revocato
     vale anche li' (revisione di sicurezza C3, MEDIA-2).
+
+    `voice_map`: i voice_id della run (voci.json). Una revoca registrata nel
+    registro per uno di quei voice_id blocca anche se la registrazione nella
+    libreria e' stata cancellata e ricaricata, o la riga del registro tolta
+    (revisione finale, N1).
+    `require_consent`: blocca anche un consenso non registrato (il retake dal
+    web, che sintetizza con la voce: e' un riuso).
     """
-    revoked = [plan for plan in plan_voices(config, list(speakers)) if plan.consent["stato"] == CONSENT_REVOKED]
-    if revoked:
-        check_consent(revoked)
+    plans = plan_voices(config, list(speakers), reuse_requires_consent=require_consent)
+    blocked = [p for p in plans if p.consent["stato"] == CONSENT_REVOKED or (require_consent and p.blocked_by_consent)]
+    if blocked:
+        check_consent(blocked)
+    if voice_map:
+        registry = _registry(config)
+        revoked = [
+            (speaker, voice_id)
+            for speaker, voice_id in sorted(voice_map.items())
+            if speaker in speakers and registry.revocation_for(voice_id=voice_id)
+        ]
+        if revoked:
+            raise ConsentRequired(
+                "Il consenso di queste voci e' stato revocato: "
+                + ", ".join(speaker for speaker, _ in revoked)
+                + ". La voce clonata usata da questo episodio non si riusa e non si rimonta.",
+                details={
+                    "voci": [
+                        {"speaker": speaker, "azione": ACTION_REUSE, "stato": CONSENT_REVOKED, "revoca_nel_registro": True}
+                        for speaker, _ in revoked
+                    ]
+                },
+            )
+
+
+def grant_consent(config: Any, voice: AvailableVoice, *, by: str | None, expect_sha256: str | None = None) -> dict[str, Any]:
+    """Registra il consenso (metadati accanto all'audio) e toglie dal registro
+    le revoche di QUESTA registrazione: la persona ha dato di nuovo il consenso.
+    """
+    meta = record_consent(voice.path, voice=voice.name, by=by, expect_sha256=expect_sha256)
+    _registry(config).lift_revocations(voice.name, meta["consenso"]["audio_sha256"])
+    return meta
+
+
+def revoke_voice_consent(config: Any, voice: AvailableVoice, *, by: str | None) -> tuple[dict[str, Any], dict[str, Any] | None]:
+    """Revoca il consenso nei metadati E nel registro delle voci.
+
+    Nel registro restano lo sha256 della registrazione (attuale, del consenso
+    revocato e della voce clonata) e il voice_id clonato: cosi' la revoca
+    vale anche dopo aver cancellato il file audio e il suo .json, come chiede
+    la procedura del README, e un retake o un mix di una run vecchia non usa
+    piu' quel voice_id (revisione finale, N1).
+    """
+    meta, previous = revoke_consent(voice.path, voice=voice.name, by=by)
+    registry = _registry(config)
+    entry = registry.get(voice.name) or {}
+    revocation = meta["consenso_revocato"]
+    registry.record_revocation(
+        voice.name,
+        audio_hashes=[
+            file_hash(voice.path),
+            (previous or {}).get("audio_sha256"),
+            entry.get("audio_hash"),
+        ],
+        voice_ids=[entry.get("voice_id")],
+        provider=entry.get("provider"),
+        by=revocation["da"],
+        when=revocation["il"],
+    )
+    return meta, previous
 
 
 def _clone_lock_target(config: Any, name: str) -> Path:
@@ -436,6 +544,8 @@ __all__ = [
     "VoicePrepResult",
     "check_consent",
     "check_not_revoked",
+    "grant_consent",
+    "revoke_voice_consent",
     "plan_voices",
     "prepare_voices",
     "resolve_library_voice",

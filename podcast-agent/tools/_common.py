@@ -62,6 +62,7 @@ from src.music_mixer import MusicChangedError, MusicMixerError  # noqa: E402
 from src.paths import confine_run_dir, confine_to  # noqa: E402
 from src.redaction import redact as _redact  # noqa: E402
 from src.redaction import register_roots as _register_roots  # noqa: E402
+from src.web_mode import WEB_MODE_ENV, web_mode  # noqa: E402,F401 - riesportati per i tool
 from src.pdf_reader import DocumentError  # noqa: E402
 from src.script_session import ScriptSessionError  # noqa: E402
 from src.script_writer import ModelAccessError, ScriptWriterError  # noqa: E402
@@ -98,9 +99,6 @@ def add_config_arg(parser: argparse.ArgumentParser) -> None:
 # ----------------------------------------------------------------------
 # Modalita' web
 # ----------------------------------------------------------------------
-
-#: Variabile d'ambiente che l'adattatore web imposta SEMPRE (a 1).
-WEB_MODE_ENV = "PODCAST_AGENT_WEB"
 
 #: Argomenti che in modalita' web vengono rifiutati, qualunque tool li
 #: riceva. Sono quelli che la revisione di sicurezza C0+C1 ha elencato come
@@ -143,16 +141,6 @@ class InvalidArguments(DomainError):
     comincia con un trattino (`--text "- Si', certo"`), che argparse prende
     per un'opzione; la forma `--text=- Si', certo` lo evita.
     """
-
-
-def web_mode() -> bool:
-    """True se PODCAST_AGENT_WEB e' impostata (qualunque valore che non sia 0/false/no).
-
-    Nel dubbio vale come accesa: un valore scritto male dall'adattatore deve
-    togliere poteri, non darli.
-    """
-    value = os.environ.get(WEB_MODE_ENV, "").strip().lower()
-    return value not in ("", "0", "false", "no", "off")
 
 
 def parse_args(

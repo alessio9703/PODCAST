@@ -796,7 +796,13 @@ def _produce_locked(
     def stop_or_revoked() -> bool:
         if should_stop():
             return True
-        revoked.extend(speaker for speaker, path in prepared.audio_paths.items() if consent_revoked(path))
+        # Anche le revoche tenute nel registro delle voci (revisione finale, N1).
+        registry_now = VoiceRegistry(config.registry_file, project_root=config.registry_file.parent)
+        revoked.extend(
+            speaker
+            for speaker, path in prepared.audio_paths.items()
+            if consent_revoked(path) or registry_now.revocation_for(voice_id=prepared.voice_map.get(speaker))
+        )
         return bool(revoked)
 
     try:

@@ -50,6 +50,7 @@ from src.run_lock import work_lock  # noqa: E402
 from src.segment_cache import RunCache  # noqa: E402
 from src.redaction import redact  # noqa: E402
 from src.voice_prep import check_not_revoked  # noqa: E402
+from src.web_mode import web_mode  # noqa: E402
 
 
 def main() -> None:
@@ -114,7 +115,7 @@ def _do_list(cache: RunCache, config, args: argparse.Namespace) -> None:
     # Le anteprime montano la battuta e le due vicine: nessuna voce revocata
     # (revisione di sicurezza C3, MEDIA-2).
     neighbours = range(max(1, numero - 1), min(len(cache.script.turni), numero + 1) + 1)
-    check_not_revoked(config, sorted({cache.turn(n)["speaker"] for n in neighbours}))
+    check_not_revoked(config, sorted({cache.turn(n)["speaker"] for n in neighbours}), voice_map=cache.voice_map)
     assembler = AudioAssembler.from_config(cache.provider, config.audio)
     takes = list_takes(cache, assembler, numero)
     warnings: list[str] = []
@@ -192,9 +193,11 @@ def _do_generate(cache: RunCache, config, args: argparse.Namespace) -> None:
         # sicurezza C3, MEDIA-1). Un retake non cambia il copione, ma spende.
         cache = RunCache.load(cache.run_dir, cache.provider)
         gate = enforce(args, cache.script.to_dict())
-        # Una voce con il consenso revocato non si usa, nemmeno per un take.
+        # Una voce con il consenso revocato non si usa, nemmeno per un take; dal
+        # web serve il consenso registrato, perche' il take e' un riuso della
+        # voce (revisione finale, N1).
         speaker = cache.turn(numero)["speaker"]
-        check_not_revoked(config, [speaker])
+        check_not_revoked(config, [speaker], voice_map=cache.voice_map, require_consent=web_mode())
 
         assembler = AudioAssembler.from_config(cache.provider, config.audio)
         note(f"Turno {numero} ({speaker}): genero {count} take...")

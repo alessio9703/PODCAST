@@ -20,9 +20,13 @@ Prima di aggiungere un file in quella cartella, assicurati che:
 - la persona sappia che la sua voce verrà clonata e usata per generare parlato
   che non ha mai pronunciato;
 - sappia in che contesto verrà pubblicato il risultato;
-- possa revocare il consenso — in quel caso vanno cancellati sia il file audio,
-  sia la voce clonata sul provider, sia la riga corrispondente in
-  `voices_registry.json`.
+- possa revocare il consenso — in quel caso **prima** si registra la revoca
+  (`tools/voice_meta.py --name NOME --revoke-consent --by CHI`, o dall'interfaccia),
+  **poi** si cancellano il file audio e la voce clonata sul provider. La revoca
+  resta scritta in `voices_registry.json` (sotto `__revoche__`, con il `voice_id`
+  e lo sha256 della registrazione) anche dopo aver cancellato i file: la stessa
+  registrazione ricaricata risulta ancora revocata, e i retake e i rimontaggi
+  degli episodi vecchi non usano più quella voce.
 
 Le voci clonate vengono create come **private** sul provider (`visibility:
 private` in `config.yaml`). Verifica comunque i termini di servizio del
@@ -171,12 +175,20 @@ Una voce **si clona solo se il consenso della persona è registrato**, in
 
 - Il consenso vale per **quella** registrazione (se ne salva lo sha256): se il file viene
   sostituito, va riconfermato.
-- Una voce già clonata si riusa senza chiederlo di nuovo, **a meno che sia stato
-  revocato**: una voce revocata non si clona, non si riusa, non si rimonta.
+- Il consenso è una proprietà della **voce**, non dell'episodio. Dall'interfaccia web
+  anche il **riuso** di una voce già clonata richiede il consenso registrato: le voci
+  clonate prima del consenso (o fuori dal controllo) risultano "consenso da
+  confermare" (`consenso.da_confermare: true`) e si confermano una volta. In locale
+  (subagent, `voices_prepare.py`) una voce già clonata si riusa senza chiederlo di
+  nuovo.
+- Una voce **revocata** non si clona, non si riusa, non si rimonta, in ogni modalità
+  (anche in `run.py`). Un nuovo consenso sulla **stessa** registrazione toglie la
+  revoca; una registrazione diversa con lo stesso nome non rende di nuovo usabile la
+  voce clonata revocata.
 - Senza consenso `voices_prepare.py` e `produce.py` escono con codice `3`
   (`ConsentRequired`) **senza clonare niente**. L'unico modo di saltare il controllo è
   `--no-consent-gate` di `voices_prepare.py`, per l'uso manuale: mai in una sessione con
-  l'utente, rifiutato dall'interfaccia web. `run.py` non ha questo controllo.
+  l'utente, rifiutato dall'interfaccia web.
 - Nello stesso file si può confermare il nome come va pronunciato:
   `voice_meta.py --name "Voce Mario" --spoken-name "Mario Rossi" --by "…"`.
 
