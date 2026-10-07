@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import time
 import zipfile
 from dataclasses import dataclass
 from pathlib import Path
@@ -62,20 +63,46 @@ class DocumentLimits:
     - `max_pages`: pagine di un PDF;
     - `max_chars`: caratteri del testo estratto;
     - `max_unpacked_bytes`: somma delle dimensioni scompattate delle parti di
-      un DOCX (che e' uno zip: un file piccolo puo' contenere un XML enorme).
+      un DOCX (che e' uno zip: un file piccolo puo' contenere un XML enorme);
+    - `max_xml_bytes`: la stessa somma, sulle sole parti XML di un DOCX (sono
+      quelle che python-docx analizza: un oggetto per ogni paragrafo);
+    - `max_zip_entries`: numero di parti dello zip di un DOCX;
+    - `max_content_bytes`: byte dei content stream decodificati di un PDF,
+      sommati pagina per pagina (uno stream condiviso conta a ogni pagina):
+      e' il lavoro che l'estrazione deve fare, indipendente dal testo che ne
+      esce;
+    - `max_seconds`: tempo massimo dell'estrazione, controllato fra una pagina
+      e l'altra (una pagina sola non si interrompe da dentro: per quello
+      serve il timeout del sottoprocesso, a carico dell'adattatore).
+
+    Revisioni di sicurezza C0+C1 (MEDIA-1) e del diff delle correzioni
+    (MEDIA-1, MEDIA-2).
     """
 
     max_bytes: int = 20 * 1024 * 1024
     max_pages: int = 500
     max_chars: int = 2_000_000
     max_unpacked_bytes: int = 100 * 1024 * 1024
+    max_xml_bytes: int = 15 * 1024 * 1024
+    max_zip_entries: int = 2000
+    max_content_bytes: int = 50 * 1024 * 1024
+    max_seconds: int = 60
 
     @classmethod
     def from_settings(cls, settings: dict[str, Any] | None) -> "DocumentLimits":
         settings = settings or {}
         defaults = cls()
         values = {}
-        for key in ("max_bytes", "max_pages", "max_chars", "max_unpacked_bytes"):
+        for key in (
+            "max_bytes",
+            "max_pages",
+            "max_chars",
+            "max_unpacked_bytes",
+            "max_xml_bytes",
+            "max_zip_entries",
+            "max_content_bytes",
+            "max_seconds",
+        ):
             raw = settings.get(key)
             value = getattr(defaults, key) if raw is None else int(raw)
             if value <= 0:
@@ -263,7 +290,20 @@ def _read_pdf(path: Path, limits: DocumentLimits) -> Document:
 
     chunks: list[str] = []
     chars = 0
+    content_bytes = 0
+    started = time.monotonic()
     for number, page in enumerate(reader.pages, start=1):
+        elapsed = time.monotonic() - started
+        if elapsed > limits.max_seconds:
+            raise _too_large(path, "secondi", limits.max_seconds, int(elapsed), "tempo di estrazione in secondi")
+        # Il lavoro dell'estrazione dipende dai content stream, non dal testo
+        # che ne esce: uno stream di 75 MB di soli spazi, condiviso da tutte
+        # le pagine, non produce caratteri ma costa minuti per pagina.
+        content_bytes += _page_content_bytes(page)
+        if content_bytes > limits.max_content_bytes:
+            raise _too_large(
+                path, "contenuto_pagine", limits.max_content_bytes, content_bytes, "contenuto delle pagine in byte"
+            )
         try:
             content = page.extract_text() or ""
         except Exception:
@@ -287,6 +327,15 @@ def _read_pdf(path: Path, limits: DocumentLimits) -> Document:
     return Document(path=path, text=text, kind="pdf", pages=page_count)
 
 
+def _page_content_bytes(page: Any) -> int:
+    """Byte del content stream decodificato di una pagina (0 se illeggibile)."""
+    try:
+        contents = page.get_contents()
+        return len(contents.get_data()) if contents is not None else 0
+    except Exception:  # noqa: BLE001 - pagina rotta: extract_text la salta comunque
+        return 0
+
+
 def _check_docx_unpacked(path: Path, limits: DocumentLimits) -> None:
     """Somma le dimensioni scompattate dichiarate nello zip, PRIMA di aprirlo.
 
@@ -298,17 +347,25 @@ def _check_docx_unpacked(path: Path, limits: DocumentLimits) -> None:
     """
     try:
         with zipfile.ZipFile(path) as archive:
-            unpacked = sum(info.file_size for info in archive.infolist())
+            entries = archive.infolist()
+            unpacked = sum(info.file_size for info in entries)
+            xml = sum(
+                info.file_size for info in entries if info.filename.lower().endswith((".xml", ".rels"))
+            )
     except (zipfile.BadZipFile, OSError) as exc:
         raise DocumentNotExtractable(
             f"Impossibile aprire il DOCX {path.name}: non e' un file DOCX valido.",
             motivo="illeggibile",
             file=path,
         ) from exc
+    if len(entries) > limits.max_zip_entries:
+        raise _too_large(path, "parti_zip", limits.max_zip_entries, len(entries), "numero di parti del DOCX")
     if unpacked > limits.max_unpacked_bytes:
         raise _too_large(
             path, "byte_scompattati", limits.max_unpacked_bytes, unpacked, "dimensione scompattata"
         )
+    if xml > limits.max_xml_bytes:
+        raise _too_large(path, "byte_xml", limits.max_xml_bytes, xml, "dimensione delle parti XML")
 
 
 def _read_docx(path: Path, limits: DocumentLimits) -> Document:

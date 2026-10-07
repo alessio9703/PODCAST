@@ -20,6 +20,16 @@ PODCAST_AGENT_WEB=1 <progetto>/.venv/bin/python tools/<nome>.py [argomenti]
   si può mostrare in un pannello "dettagli" o registrare nei log.
 - **exit code**: uno di quattro valori, sempre coerente con il JSON.
 - Nessun comando chiede input da tastiera: tutto passa dagli argomenti.
+- I **valori liberi** scritti dall'utente (testo di una battuta, titolo,
+  istruzioni, nomi) si passano sempre nella forma `--opzione=valore`: un valore
+  che comincia con `-` (`-Davvero?`) altrimenti viene preso per un'opzione.
+- Argomenti non validi (mancanti, sconosciuti, malformati) danno exit 1
+  `InvalidArguments`, con il JSON come ogni altro errore (`details.messaggio`).
+- **Timeout**: l'adattatore mette un limite di tempo ai sottoprocessi brevi
+  (estrazione dei documenti: `doc_extract.py`, `run_init.py --document`,
+  `episode_config.py --documento`). Le estrazioni hanno già un limite interno
+  di tempo e di lavoro, ma una singola pagina di un PDF non si interrompe da
+  dentro.
 - L'adattatore imposta **sempre** `PODCAST_AGENT_WEB=1` (vedi "Modalità web"):
   i comandi usano allora sempre `config.yaml` del progetto.
 
@@ -36,8 +46,9 @@ dell'adattatore:
 | `--trusted-paths` | è l'unico modo di uscire da `documenti/` e `output/` |
 | `--no-approval-gate` | salta il gate sullo sha256 del copione approvato |
 | `--no-consent-gate` | (C2) salta il consenso prima della clonazione |
-| `--save-to`, `--text-file`, `--session`, `--script-json`, `--script` | file passati per percorso: l'adattatore lavora sempre per `--run-dir` |
+| `--save-to`, `--text-file`, `--session`, `--script-json`, `--script`, `--out`, `--voices`, `--audio-paths` | file passati per percorso: l'adattatore lavora sempre per `--run-dir`, e i nomi dei file li fissa il tool |
 | `--document` di `script_write.py` | il documento si registra con `episode_config.py --documento` |
+| `--current` di `script_approve.py` | dall'interfaccia si approva solo la versione che l'utente ha letto (`--version V`) |
 
 Il controllo guarda i valori già interpretati, quindi valgono anche le
 abbreviazioni (`--trusted`) e la forma `--opzione=valore`. Esito:
@@ -52,7 +63,10 @@ abbreviazioni (`--trusted`) e la forma `--opzione=valore`. Esito:
 }
 ```
 
-Il comando non fa niente prima del rifiuto. `NotAllowedInWebMode` indica un
+Il comando non fa niente prima del rifiuto. Per lo stesso motivo in modalità
+web non si usano `voices_prepare.py --out` né `run_finalize.py` (`--voices`
+obbligatorio): preparazione delle voci e chiusura della run fanno parte di
+`produce.py` (C2). `NotAllowedInWebMode` indica un
 errore dell'adattatore, non dell'utente: va registrato nei log, non mostrato
 come campo da correggere. Conseguenza: `synthesize.py` ed `estimate.py`
 (entrambi con `--script` obbligatorio) e `script_save.py` (`--script-json`)
@@ -72,9 +86,10 @@ li mostra mai all'utente.** Per la UI ci sono i nomi relativi:
 - `documento.nome`, `name`: il nome del documento nella libreria.
 
 Altre garanzie:
-- i messaggi d'errore (`error`, `details` e stderr) riportano solo nomi o
-  percorsi relativi al progetto (`output/<run>/...`). Un percorso fuori dal
-  progetto perde la cartella home (`~/...`);
+- i messaggi d'errore (`error`, `details`) e **tutto** stderr riportano solo
+  nomi o percorsi relativi al progetto (`output/<run>/...`). Una cartella
+  configurata fuori dal progetto diventa il suo nome; un altro percorso sotto
+  la home diventa `~/...`;
 - `in_corso` (in `script_show.py` e in `RunBusy.details`) non contiene più il
   `pid` del processo, che resta solo nel file `_lavoro.json`.
 
@@ -208,14 +223,17 @@ senza `details`, con l'elenco dei disponibili nel testo.
 
 | error_type | exit | Quando | `details` |
 |---|---|---|---|
-| `DocumentTooLarge` | 1 | Il documento supera un limite di `documents:` in `config.yaml` | `limite` (`byte`, `pagine`, `caratteri`, `byte_scompattati`), `massimo`, `valore`, `file` |
+| `DocumentTooLarge` | 1 | Il documento supera un limite di `documents:` in `config.yaml` | `limite` (`byte`, `pagine`, `caratteri`, `byte_scompattati`, `byte_xml`, `parti_zip`, `contenuto_pagine`, `secondi`), `massimo`, `valore`, `file` |
 | `VersionRequired` | 1 | `script_approve.py` senza `--version` (né `--current`) | `current_version` |
 | `NotAllowedInWebMode` | 1 | Argomento riservato all'uso locale in modalità web | `argomenti` |
+| `InvalidArguments` | 1 | Argomenti non validi per il comando | `messaggio` |
 
-I limiti dei documenti (default: 20 MB, 500 pagine, 2.000.000 di caratteri,
-100 MB scompattati per un DOCX) si controllano **prima** di leggere il
-contenuto, tranne i caratteri, che si contano durante l'estrazione (un PDF si
-ferma alla prima pagina che supera il limite). La UI mostra "Documento troppo
+I limiti dei documenti (default: 20 MB, 500 pagine, 2.000.000 di caratteri;
+per un DOCX 100 MB scompattati, 15 MB di parti XML, 2000 parti; per un PDF
+50 MB di contenuto delle pagine decodificato e 60 secondi) si controllano
+**prima** di leggere il contenuto, tranne caratteri, contenuto delle pagine e
+tempo, che si contano durante l'estrazione: un PDF si ferma alla prima pagina
+oltre il limite. La UI mostra "Documento troppo
 grande" con il limite superato.
 
 `VersionConflict` è il caso "due persone sullo stesso copione": la UI ricarica il

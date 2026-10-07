@@ -114,8 +114,9 @@ Test esistenti modificati (comportamento cambiato apposta): 4 chiamate a
 
 ## 3. Revisione di sicurezza del diff
 
-Rapporto: `C0+C1-correzioni-sicurezza.md`. **0 alte**, 2 medie, 4 basse, tutte da decidere
-con l'utente:
+Rapporto: `C0+C1-correzioni-sicurezza.md`. **0 alte**, 2 medie, 4 basse. L'utente ha deciso di
+correggerle tutte prima di C2: fatto, dettagli in fondo al rapporto ("Esito delle correzioni"),
+web_integration a 303 controlli. I punti erano:
 - **MEDIA-1**: i limiti non limitano il *costo* dell'estrazione di un PDF (stream di
   contenuto condivisi fra le pagine, ore di CPU per un file piccolo). Proposta: budget sui
   byte decodificati, scadenza in secondi, timeout lato adattatore.

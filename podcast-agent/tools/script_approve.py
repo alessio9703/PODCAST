@@ -58,7 +58,9 @@ def main() -> None:
     )
     parser.add_argument("--by", default=None, help="Chi approva (o ritira l'approvazione)")
     add_config_arg(parser)
-    args = parse_args(parser)
+    # --current approva "quello che c'e' adesso": dall'interfaccia vale solo la
+    # versione che l'utente ha letto.
+    args = parse_args(parser, web_forbidden=("--current",))
 
     config = bootstrap(args)
     # --session vale come la sua cartella: stessa regola di --run-dir.

@@ -808,20 +808,23 @@ def test_legacy_paths(root: Path, config: Path) -> None:
 # ----------------------------------------------------------------------
 
 
-def write_limits_config(root: Path) -> Path:
+def write_limits_config(root: Path, name: str = "config-limiti.yaml", **overrides: int) -> Path:
     """Come config-web.yaml, con limiti sui documenti piccoli da superare nei test."""
+    limits = {
+        "max_bytes": 100000,
+        "max_pages": 2,
+        "max_chars": 200,
+        "max_unpacked_bytes": 5000000,
+        "max_xml_bytes": 1000000,
+        "max_zip_entries": 50,
+        "max_content_bytes": 50000000,
+        "max_seconds": 60,
+        **overrides,
+    }
     text = (root / "config-web.yaml").read_text(encoding="utf-8")
-    text += textwrap.dedent(
-        """
-        documents:
-          max_bytes: 100000
-          max_pages: 2
-          max_chars: 200
-          max_unpacked_bytes: 1000000
-        """
-    )
+    text += "documents:\n" + "".join(f"  {key}: {value}\n" for key, value in limits.items())
     text = text.replace("  target_minutes: 3\n", "  target_minutes: 3\n  max_document_chars: 20\n")
-    config = root / "config-limiti.yaml"
+    config = root / name
     config.write_text(text, encoding="utf-8")
     return config
 
@@ -885,7 +888,7 @@ def test_document_limits(root: Path) -> None:
         for info in source.infolist():
             data = source.read(info.filename)
             if info.filename == "word/document.xml":
-                data = data.replace(b"Un DOCX normale.", b"x" + b" " * 3_000_000)
+                data = data.replace(b"Un DOCX normale.", b"x" + b" " * 6_000_000)
             target.writestr(info.filename, data)
     check("la bomba e' piccola su disco", bomb.stat().st_size < 100000, str(bomb.stat().st_size))
     code, out, _ = tool("doc_extract.py", "bomba.docx", config=config)
@@ -895,9 +898,86 @@ def test_document_limits(root: Path) -> None:
         str(out),
     )
 
+    def docx_variant(target: Path, extra_xml: int = 0, extra_entries: int = 0) -> None:
+        with zipfile.ZipFile(docs / "normale.docx") as source, zipfile.ZipFile(target, "w", zipfile.ZIP_DEFLATED) as out:
+            for info in source.infolist():
+                data = source.read(info.filename)
+                if info.filename == "word/document.xml" and extra_xml:
+                    data = data.replace(b"Un DOCX normale.", b"x" + b" " * extra_xml)
+                out.writestr(info.filename, data)
+            for n in range(extra_entries):
+                out.writestr(f"word/extra{n}.bin", b"")
+
+    docx_variant(docs / "xml_grande.docx", extra_xml=500000)
+    code, out, _ = tool("doc_extract.py", "xml_grande.docx", config=config)
+    check(
+        "DOCX con parti XML oltre max_xml_bytes (entro i byte scompattati) -> byte_xml",
+        code == 1 and out.get("error_type") == "DocumentTooLarge" and out["details"]["limite"] == "byte_xml",
+        str(out),
+    )
+    docx_variant(docs / "tante_parti.docx", extra_entries=60)
+    code, out, _ = tool("doc_extract.py", "tante_parti.docx", config=config)
+    check(
+        "DOCX con troppe parti nello zip -> parti_zip",
+        code == 1 and out.get("error_type") == "DocumentTooLarge" and out["details"]["limite"] == "parti_zip",
+        str(out),
+    )
+
+    # PDF piccolo le cui pagine condividono un content stream grande di soli
+    # spazi: nessun carattere estratto, ma molto lavoro (revisione del diff, MEDIA-1).
+    def shared_stream_pdf(target: Path, pages: int, repeats: int) -> None:
+        from pypdf import PdfWriter
+        from pypdf.generic import NameObject, StreamObject
+
+        writer = PdfWriter()
+        for _ in range(pages):
+            writer.add_blank_page(width=200, height=200)
+        stream = StreamObject()
+        stream.set_data(b"BT /F1 1 Tf ( ) Tj ET\n" * repeats)
+        ref = writer._add_object(stream.flate_encode())  # noqa: SLF001
+        for page in writer.pages:
+            page[NameObject("/Contents")] = ref
+        with target.open("wb") as handle:
+            writer.write(handle)
+
+    shared_stream_pdf(docs / "spazi.pdf", 2, 100000)  # ~2,2 MB decodificati per pagina
+    check("il PDF con lo stream condiviso e' piccolo su disco", (docs / "spazi.pdf").stat().st_size < 100000, str((docs / "spazi.pdf").stat().st_size))
+    config_content = write_limits_config(root, "config-contenuto.yaml", max_content_bytes=3000000)
+    started = time.monotonic()
+    code, out, _ = tool("doc_extract.py", "spazi.pdf", config=config_content)
+    check(
+        "PDF con content stream condiviso oltre max_content_bytes -> contenuto_pagine, alla seconda pagina",
+        code == 1 and out.get("error_type") == "DocumentTooLarge" and out["details"]["limite"] == "contenuto_pagine"
+        and out["details"]["valore"] > 3000000,
+        f"{out} in {time.monotonic() - started:.1f}s",
+    )
+    # La scadenza si controlla fra una pagina e l'altra: qui l'orologio
+    # avanza di 10 secondi a ogni lettura, cosi' il test non dipende dalla
+    # velocita' della macchina.
+    proc = run_python(
+        f"""
+        import itertools
+        import src.pdf_reader as reader
+        ticks = itertools.count(0, 10)
+        reader.time.monotonic = lambda: next(ticks)
+        try:
+            reader.extract_text({str(docs / "spazi.pdf")!r}, limits=reader.DocumentLimits(max_seconds=5))
+            print("NESSUN LIMITE")
+        except reader.DocumentTooLarge as exc:
+            print(exc.details["limite"], exc.details["massimo"])
+        """
+    )
+    check("estrazione oltre max_seconds -> DocumentTooLarge secondi", proc.stdout.strip() == "secondi 5", proc.stdout + proc.stderr)
+
     from src.config import ConfigError, load_config
 
     check("config.yaml del progetto: limiti dichiarati", load_config().document_limits.max_pages == 500)
+    project_limits = load_config().document_limits
+    check(
+        "config.yaml del progetto: limiti nuovi dichiarati",
+        (project_limits.max_xml_bytes, project_limits.max_zip_entries, project_limits.max_content_bytes, project_limits.max_seconds)
+        == (15728640, 2000, 52428800, 60),
+    )
     bad = root / "config-limiti-rotti.yaml"
     bad.write_text((root / "config-web.yaml").read_text(encoding="utf-8") + "documents:\n  max_pages: 0\n", encoding="utf-8")
     try:
@@ -1183,7 +1263,7 @@ def test_web_mode(root: Path, config: Path, run_dir: str) -> None:
     for name in all_tools:
         args = required(name) + with_script(name) + ["--config", str(config)]
         code, out, _ = run_tool_env(name, args, web=True)
-        expected = ["--config"] + [a for a in args if a in ("--script", "--script-json")]
+        expected = ["--config"] + [a for a in args if a in ("--script", "--script-json", "--voices", "--out", "--audio-paths")]
         check(
             f"web: {name} --config -> exit 1 NotAllowedInWebMode",
             code == 1 and out.get("error_type") == "NotAllowedInWebMode" and sorted(out["details"]["argomenti"]) == sorted(expected),
@@ -1211,11 +1291,16 @@ def test_web_mode(root: Path, config: Path, run_dir: str) -> None:
         ("mix.py", ["--no-approval-gate"]),
         ("retake.py", ["--no-approval-gate"]),
         ("run_finalize.py", ["--trusted-paths"]),
+        ("run_finalize.py", ["--audio-paths", str(root / "output" / "audio.json")]),
+        ("voices_prepare.py", ["--out", str(root / "output" / "voci.json")]),
+        ("script_approve.py", ["--current"]),
     ]
     for name, extra in cases:
         base = required(name)
         if "--session" in extra:
             base = [a for a in base if a not in ("--run-dir", R)]
+        if "--current" in extra:
+            base = ["--run-dir", R]
         args = base + extra + with_script(name)
         code, out, _ = run_tool_env(name, args, web=True)
         check(
@@ -1276,6 +1361,38 @@ def test_web_mode(root: Path, config: Path, run_dir: str) -> None:
         proc.stdout + proc.stderr,
     )
     check("bootstrap() senza parse_args() in modalita' web: rifiutato", lines[-1:] == ["BOOTSTRAP RIFIUTATO NotAllowedInWebMode"], proc.stdout + proc.stderr)
+
+    print("\n[sicurezza] argomenti non validi: exit 1 con JSON")
+    code, out, _ = run_tool_env("script_show.py", ["--run-dir", R, "--sconosciuto", "--config", str(config)], web=False)
+    check("opzione sconosciuta -> exit 1 InvalidArguments (non exit 2 senza JSON)", code == 1 and out.get("error_type") == "InvalidArguments" and out["details"]["messaggio"], str(out))
+    code, out, _ = run_tool_env("script_show.py", ["--config", str(config)], web=False)
+    check("argomento obbligatorio mancante -> InvalidArguments", code == 1 and out.get("error_type") == "InvalidArguments", str(out))
+    code, out, _ = run_tool_env("script_edit.py", ["--run-dir", R, "--turn", "2", "--text", "-Davvero?", "--config", str(config)], web=False)
+    check("--text \"-Davvero?\" (valore che sembra un'opzione) -> InvalidArguments", code == 1 and out.get("error_type") == "InvalidArguments" and "--opzione=valore" in out["error"], str(out)[:300])
+    code, out, err = run_tool_env("script_edit.py", ["--run-dir", R, "--turn", "2", "--text=-Davvero? E di quanto?", "--config", str(config)], web=False)
+    check("--text=-Davvero? funziona", code == 0 and out["turni"][1]["testo"] == "-Davvero? E di quanto?", err[-300:] + str(out)[:300])
+
+    print("\n[sicurezza] percorsi assoluti nei messaggi (stderr compreso)")
+    code, out, err = run_tool_env("doc_extract.py", ["report.txt", "--save-to", str(root / "output" / "estratti2"), "--config", str(config)], web=False)
+    check("stderr di successo: niente percorso assoluto della cartella output", code == 0 and str(root) not in err and "output/estratti2" in err, err)
+    proc = run_python(
+        """
+        import sys
+        from pathlib import Path, PureWindowsPath
+        sys.path.insert(0, "tools")
+        import _common
+        _common._KNOWN_ROOTS["/srv/podcast/output"] = "output"
+        print(_common._redact("Manca /srv/podcast/output/run-a/voci.json."))
+        home = str(Path.home())
+        print(_common._redact(home + "2/altro"))
+        _common.PROJECT_ROOT = Path(r"C:\\Users\\me\\podcast-agent")
+        print(_common._redact(r"[Errno 2] No such file: 'C:\\\\Users\\\\me\\\\podcast-agent\\\\output\\\\r\\\\x.json'"))
+        """
+    )
+    lines = proc.stdout.strip().splitlines()
+    check("cartella configurata fuori dal progetto -> il suo nome", lines[:1] == ["Manca output/run-a/voci.json."], proc.stdout + proc.stderr)
+    check("una cartella accanto alla home non diventa ~", len(lines) > 1 and "~" not in lines[1], proc.stdout)
+    check("percorso Windows in forma repr (barre raddoppiate) tolto", len(lines) > 2 and "Users" not in lines[2] and "output" in lines[2], proc.stdout)
 
 
 # ----------------------------------------------------------------------

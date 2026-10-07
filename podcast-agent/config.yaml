@@ -112,6 +112,19 @@ documents:
   # Dimensione scompattata di un DOCX (100 MB): un DOCX e' uno zip, e un file
   # piccolo puo' contenere un XML enorme.
   max_unpacked_bytes: 104857600
+  # Delle quali, parti XML (15 MB): python-docx crea un oggetto per ogni
+  # paragrafo, e 30 MB di paragrafi vuoti costano un minuto e 600 MB di memoria.
+  max_xml_bytes: 15728640
+  # Parti dello zip di un DOCX: uno vero ne ha qualche decina.
+  max_zip_entries: 2000
+  # Byte dei content stream di un PDF, decodificati e sommati pagina per pagina
+  # (50 MB). Misura il lavoro dell'estrazione: un PDF piccolo puo' far
+  # decodificare a ogni pagina lo stesso stream enorme fatto di soli spazi.
+  max_content_bytes: 52428800
+  # Tempo massimo dell'estrazione in secondi, controllato fra una pagina e
+  # l'altra. Una pagina sola non si interrompe da dentro: l'adattatore mette
+  # comunque un timeout al sottoprocesso.
+  max_seconds: 60
 
 audio:
   # Ritaglia il silenzio che il TTS mette in testa e in coda a ogni segmento

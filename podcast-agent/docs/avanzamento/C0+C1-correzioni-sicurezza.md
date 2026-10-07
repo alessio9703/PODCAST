@@ -210,3 +210,31 @@ il progetto.
   `--opzione=valore` per i testi liberi (BASSA-3) e il divieto di `--current` (BASSA-1).
 - `tools/lessons.py --accept --text` scrive testo libero in `prompts/lezioni.md`, che entra in
   ogni prompt futuro: se l'adattatore lo esporrà, va trattato come argomento riservato.
+
+
+---
+
+## Esito delle correzioni (aggiunto da chi ha implementato, non dal revisore)
+
+Data: 2026-10-07. L'utente ha scelto di correggere tutto prima di C2.
+
+- **MEDIA-1 · corretta.** `_read_pdf` controlla fra una pagina e l'altra un budget sui byte
+  dei content stream decodificati (`documents.max_content_bytes`, 50 MB; uno stream condiviso
+  conta a ogni pagina) e una scadenza (`documents.max_seconds`, 60). Limiti `contenuto_pagine`
+  e `secondi`. Il timeout del sottoprocesso è nel contratto, a carico dell'adattatore.
+- **MEDIA-2 · corretta.** `_check_docx_unpacked` controlla anche le parti XML
+  (`max_xml_bytes`, 15 MB, limite `byte_xml`) e il numero di parti (`max_zip_entries`, 2000,
+  limite `parti_zip`). Nota: il DOCX vuoto di python-docx ha già ~800 KB di XML (stili).
+- **BASSA-1 · corretta.** `script_approve.py` vieta `--current` in modalità web.
+- **BASSA-2 · corretta.** `--out`, `--voices`, `--audio-paths` aggiunti a
+  `WEB_FORBIDDEN_ARGS`: in modalità web `voices_prepare.py --out` e `run_finalize.py` non si
+  usano; il loro lavoro passa a `produce.py` (C2), che fissa da sé i nomi dei file.
+- **BASSA-3 · corretta.** `parse_args` sostituisce `parser.error`: exit 1
+  `InvalidArguments` con JSON. Nota: con Python 3.14 un valore con spazi come `"- Sì, certo"`
+  è già accettato; il caso che fallisce è un valore senza spazi come `"-Davvero?"`. Nel
+  contratto: valori liberi sempre come `--opzione=valore`.
+- **BASSA-4 · corretta.** `_redact` riconosce la forma `repr` con barre raddoppiate, accorcia
+  al loro nome le cartelle configurate (registrate da `bootstrap()`), usa un confine dopo il
+  percorso (`/Users/mario2` non diventa `~2`) e si applica a tutto stderr, perché passa da
+  `note()`.
+- **Test**: `test_web_integration.py` da 283 a 303 controlli; le altre suite invariate e verdi.

@@ -30,6 +30,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
 import signal
 import sys
 from pathlib import Path
@@ -106,8 +107,12 @@ WEB_MODE_ENV = "PODCAST_AGENT_WEB"
 #:   --trusted-paths     unico modo di uscire da documenti/ e output/;
 #:   --no-approval-gate  salta il gate sullo sha256 del copione approvato;
 #:   --no-consent-gate   salta il consenso prima della clonazione (C2);
-#:   --save-to, --text-file, --session, --script-json, --script
-#:                       file passati per percorso: l'adattatore lavora per --run-dir.
+#:   --save-to, --text-file, --session, --script-json, --script, --out,
+#:   --voices, --audio-paths
+#:                       file passati per percorso: l'adattatore lavora per
+#:                       --run-dir, e i nomi dei file li fissa il tool. Sono
+#:                       confinati a output/, non alla run: da fuori si
+#:                       potrebbe scrivere nei file di un'altra run.
 WEB_FORBIDDEN_ARGS = (
     "--config",
     "--trusted-paths",
@@ -118,11 +123,24 @@ WEB_FORBIDDEN_ARGS = (
     "--session",
     "--script-json",
     "--script",
+    "--out",
+    "--voices",
+    "--audio-paths",
 )
 
 
 class NotAllowedInWebMode(DomainError):
     """Un argomento riservato all'uso locale, ricevuto in modalita' web (exit 1)."""
+
+
+class InvalidArguments(DomainError):
+    """Argomenti non validi per argparse (mancanti, sconosciuti, malformati).
+
+    Senza, argparse esce con 2 e stdout vuoto: per il contratto 2 e' "errore
+    del provider, nessun Riprova", e manca il JSON. Caso tipico: un valore che
+    comincia con un trattino (`--text "- Si', certo"`), che argparse prende
+    per un'opzione; la forma `--text=- Si', certo` lo evita.
+    """
 
 
 def web_mode() -> bool:
@@ -146,6 +164,14 @@ def parse_args(parser: argparse.ArgumentParser, *, web_forbidden: tuple[str, ...
     `--conf=x`) e la forma `--opzione=valore`. Un argomento conta come usato
     se il suo valore e' diverso dal default.
     """
+    def _error(message: str) -> None:
+        raise InvalidArguments(
+            f"Argomenti non validi: {message}. Un valore che comincia con '-' si passa "
+            "nella forma --opzione=valore.",
+            details={"messaggio": message},
+        )
+
+    parser.error = _error  # type: ignore[method-assign]
     args = parser.parse_args()
     if web_mode():
         forbidden = set(WEB_FORBIDDEN_ARGS) | set(web_forbidden)
@@ -179,7 +205,9 @@ def bootstrap(args: argparse.Namespace) -> Config:
             details={"argomenti": []},
         )
     load_dotenv()
-    return load_config(getattr(args, "config", None))
+    config = load_config(getattr(args, "config", None))
+    _register_roots(config)
+    return config
 
 
 def emit(payload: dict[str, Any]) -> None:
@@ -190,8 +218,12 @@ def emit(payload: dict[str, Any]) -> None:
 
 
 def note(message: str) -> None:
-    """Messaggio per l'umano: va su stderr, non inquina il JSON."""
-    print(message, file=sys.stderr, flush=True)
+    """Messaggio per l'umano: va su stderr, non inquina il JSON.
+
+    Passa da _redact(): stderr si puo' mostrare in un pannello "dettagli"
+    della UI, quindi niente percorsi assoluti del server.
+    """
+    print(_redact(message), file=sys.stderr, flush=True)
 
 
 def _classify(exc: Exception) -> tuple[int, str]:
@@ -237,23 +269,58 @@ def _kind(exc: Exception) -> str:
     return getattr(exc, "kind", None) or type(exc).__name__
 
 
-def _redact(value: Any) -> Any:
-    """Toglie dai messaggi d'errore la parte del percorso che sta sopra il progetto.
+#: Cartelle configurate (output/, documenti/, ...) da accorciare al loro nome
+#: nei messaggi: possono stare fuori dal progetto (es. /srv/podcast/output).
+#: Le registra bootstrap() appena letto config.yaml.
+_KNOWN_ROOTS: dict[str, str] = {}
 
-    Gli errori arrivano fino al browser: `/Users/<nome>/.../podcast-agent/
-    output/run/x.json` diventa `output/run/x.json`, e un percorso fuori dal
-    progetto perde la cartella home (`~/...`). I moduli in src/ usano gia'
-    solo i nomi nei messaggi destinati alla UI: questo e' il controllo di
-    riserva per quelli che non lo fanno (revisione di sicurezza C0+C1,
-    BASSA-2). Vale solo per gli errori; le risposte di successo tengono le
-    chiavi assolute che il subagent usa (vedi il contratto).
+#: Cosa puo' seguire un percorso: un separatore, una virgoletta, uno spazio,
+#: la punteggiatura di una frase o la fine. Serve a non toccare
+#: /Users/mario2 quando la home e' /Users/mario.
+_PATH_END = r"(?=$|[\\/'\"\s,;:)\]])"
+
+
+def _register_roots(config: Config) -> None:
+    for attr in ("output_dir", "documents_dir", "voices_dir", "music_dir"):
+        try:
+            path = getattr(config, attr)
+        except Exception:  # noqa: BLE001 - una cartella non configurata non va accorciata
+            continue
+        _KNOWN_ROOTS[str(path)] = path.name
+
+
+def _replacements() -> list[tuple[str, str]]:
+    """(percorso assoluto, forma corta), dal piu' lungo al piu' corto."""
+    pairs = dict(_KNOWN_ROOTS)
+    pairs[str(PROJECT_ROOT)] = "."
+    home = str(Path.home())
+    if home and home not in (os.sep, "/"):
+        pairs.setdefault(home, "~")
+    return sorted(pairs.items(), key=lambda item: len(item[0]), reverse=True)
+
+
+def _redact(value: Any) -> Any:
+    """Toglie dai messaggi la parte del percorso che rivela il server.
+
+    I messaggi arrivano fino al browser: `/Users/<nome>/.../podcast-agent/
+    output/run/x.json` diventa `output/run/x.json`; una cartella configurata
+    fuori dal progetto diventa il suo nome; il resto sotto la home diventa
+    `~/...`. Vale anche per la forma `repr` dei percorsi Windows nei messaggi
+    degli OSError (`'C:\\\\Users\\\\...'`, barre raddoppiate).
+
+    I moduli in src/ usano gia' solo i nomi nei messaggi destinati alla UI:
+    questo e' il controllo di riserva per quelli che non lo fanno (revisioni
+    di sicurezza C0+C1, BASSA-2, e del diff delle correzioni, BASSA-4). Vale
+    per gli errori e per tutti i messaggi su stderr (note()); le risposte di
+    successo tengono le chiavi assolute che il subagent usa (vedi il
+    contratto).
     """
     if isinstance(value, str):
-        root = str(PROJECT_ROOT)
-        value = value.replace(root + os.sep, "").replace(root, ".")
-        home = str(Path.home())
-        if home and home != os.sep:
-            value = value.replace(home, "~")
+        for absolute, short in _replacements():
+            for variant in {absolute, absolute.replace("\\", "\\\\")}:
+                prefix = "" if short == "." else short + "/"
+                value = re.sub(re.escape(variant) + r"[\\/]+", lambda _m, p=prefix: p, value)
+                value = re.sub(re.escape(variant) + _PATH_END, lambda _m, s=short: s, value)
         return value
     if isinstance(value, dict):
         return {key: _redact(item) for key, item in value.items()}
@@ -297,7 +364,7 @@ def run_tool(main: Callable[[], None]) -> None:
     except Exception as exc:  # noqa: BLE001 - tradotte deliberatamente
         code, kind = _classify(exc)
         _emit_error(kind, str(exc), code, error_details(exc))
-        note(f"ERRORE [{kind}] {_redact(str(exc))}")
+        note(f"ERRORE [{kind}] {exc}")
         raise SystemExit(code)
 
 

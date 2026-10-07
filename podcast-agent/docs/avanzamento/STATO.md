@@ -20,10 +20,11 @@ resoconti accanto a questo file:
 | `649be02` | toglie due `.DS_Store` entrati per errore |
 | `b2f89ce` | sicurezza C0+C1: correzioni ALTA-1 e ALTA-2, subagent `security-reviewer` |
 | `d29ae0c` | `CLAUDE.md` e questo `STATO.md` |
-| (questo) | sicurezza C0+C1: medie e basse chiuse, modalità web, python-docx installato |
+| `a6361f1` | sicurezza C0+C1: medie e basse chiuse, modalità web, python-docx installato |
+| (questo) | correzioni della revisione del diff: limiti di lavoro e tempo, `InvalidArguments`, `_redact`, divieti web |
 
 Test all'ultimo commit, sempre con `.venv/bin/python`: smoke 68, tools_cli 183 (+2
-saltati, servono `ANTHROPIC_API_KEY`), music 73, lessons 80, web_integration 283.
+saltati, servono `ANTHROPIC_API_KEY`), music 73, lessons 80, web_integration 303.
 
 ## 2. Fasi
 
@@ -32,7 +33,7 @@ saltati, servono `ANTHROPIC_API_KEY`), music 73, lessons 80, web_integration 283
 | C0 | Trasversale: esiti strutturati, lock e scritture atomiche, client Anthropic finto | **fatta** |
 | C1 | Copione: passi 1–4 e pannello Confronto | **fatta** (+ decisioni sui dubbi) |
 | Sicurezza C0+C1 | Revisione, rapporto, correzione delle alte | **fatta**: alte, medie e basse corrette |
-| Correzioni + modalità web | MEDIA-1, BASSA-1/2/3, `PODCAST_AGENT_WEB=1` | **fatta**; revisione del diff: 0 alte, 2 medie e 4 basse **in attesa di decisione** |
+| Correzioni + modalità web | MEDIA-1, BASSA-1/2/3, `PODCAST_AGENT_WEB=1` | **fatta**; revisione del diff: 0 alte, 2 medie e 4 basse, **tutte corrette** |
 | C2 | Produzione: passi 5 (stima e consenso) e 6 (generazione) | da fare (in attesa dell'OK dell'utente) |
 | C3 | Episodio e correzioni: passo 7 | da fare |
 | C4 | Archivio e librerie (Documenti, Voci, Musiche), Impostazioni, verifica di Lezioni e Diagnostica | da fare |
@@ -252,17 +253,7 @@ musiche → copione → modifica → approva → stima → consenso → produce 
 
 ## 4. Richieste ricevute e non ancora completate
 
-1. **Decidere medie e basse della revisione del diff delle correzioni**
-   (`C0+C1-correzioni-sicurezza.md`):
-   - MEDIA-1: costo dell'estrazione PDF non limitato (budget sui byte decodificati,
-     scadenza in secondi, timeout lato adattatore);
-   - MEDIA-2: DOCX con XML enorme o zip con moltissime entrate;
-   - BASSA-1: `--current` da vietare in modalità web;
-   - BASSA-2: `--out`, `--voices`, `--audio-paths` confinati a `output/` e non alla run;
-   - BASSA-3: errore di argparse = exit 2 senza JSON;
-   - BASSA-4: `_redact` (Windows, fuori dalla home) e percorsi assoluti nei messaggi di
-     successo su stderr.
-2. **C2**: autorizzata dall'utente ("procedi con C2") il 2026-10-07.
+1. **C2**: autorizzata dall'utente ("procedi con C2") il 2026-10-07, dopo le correzioni.
 
 ## 5. Annotazioni per le fasi successive e per la fase finale
 
