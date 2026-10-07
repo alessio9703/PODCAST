@@ -19,3 +19,6 @@ __pycache__/
 # lock fra processi e temporanei delle scritture atomiche (src/fileio.py)
 *.lock
 .*.tmp
+
+# file di sistema di macOS
+.DS_Store
