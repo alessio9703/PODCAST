@@ -1701,6 +1701,64 @@ def test_c2_music(root: Path, config: Path) -> None:
     )
 
 
+def test_c2_consent_during_clone(root: Path, config: Path) -> None:
+    """Revisione di sicurezza C2, ALTA-1: il consenso si ricontrolla prima di OGNI clonazione."""
+    print("\n[sicurezza C2] consenso ricontrollato prima di ogni clonazione")
+    from src.registry import file_hash
+
+    for name, freq in (("Bruno Verdi", 410), ("Carla Neri", 420), ("Dario Gialli", 430), ("Elena Rosa", 440)):
+        make_wav(root / "voci" / f"{name}.wav", 1.0, freq)
+        tool("voice_meta.py", "--name", name, "--consent", "--by", "Utente A", config=config)
+    slow_clone = write_c2_config(root, "config-c2-clone-lento2.yaml", clone_delay_seconds=1.5)
+
+    def start(*speakers: str) -> subprocess.Popen:
+        return subprocess.Popen(
+            [PYTHON, str(PROJECT_ROOT / "tools" / "voices_prepare.py"), "--speakers", *speakers, "--no-approval-gate", "--config", str(slow_clone)],
+            stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, cwd=str(PROJECT_ROOT), env=clean_env(),
+        )
+
+    def wait_for_clone(name: str) -> None:
+        deadline = time.monotonic() + 30
+        while name not in clone_attempts(root) and time.monotonic() < deadline:
+            time.sleep(0.05)
+
+    before = len(clone_attempts(root))
+    proc = start("Bruno Verdi", "Carla Neri")
+    wait_for_clone("Bruno Verdi")
+    tool("voice_meta.py", "--name", "Carla Neri", "--revoke-consent", "--by", "Utente B", config=config)
+    out = json.loads(proc.communicate(timeout=60)[0])
+    check("revoca durante la clonazione di un'altra voce -> exit 3, stato revocato", proc.returncode == 3 and out["details"]["voci"][0]["speaker"] == "Carla Neri" and out["details"]["voci"][0]["stato"] == "revocato", str(out))
+    check("la voce revocata non viene clonata", clone_attempts(root)[before:] == ["Bruno Verdi"], str(clone_attempts(root)[before:]))
+
+    before = len(clone_attempts(root))
+    proc = start("Dario Gialli", "Elena Rosa")
+    wait_for_clone("Dario Gialli")
+    make_wav(root / "voci" / "Elena Rosa.wav", 1.3, 999)
+    out = json.loads(proc.communicate(timeout=60)[0])
+    check("registrazione sostituita durante un'altra clonazione -> exit 3, stato superato", proc.returncode == 3 and out["details"]["voci"][0]["stato"] == "superato", str(out))
+    check("la voce sostituita non viene clonata", clone_attempts(root)[before:] == ["Dario Gialli"], str(clone_attempts(root)[before:]))
+
+    tool("voice_meta.py", "--name", "Elena Rosa", "--consent", "--by", "Utente A", config=config)
+    consented = file_hash(root / "voci" / "Elena Rosa.wav")
+    proc = start("Elena Rosa")
+    wait_for_clone("Elena Rosa")
+    make_wav(root / "voci" / "Elena Rosa.wav", 1.1, 777)
+    out = json.loads(proc.communicate(timeout=60)[0])
+    registry = json.loads((root / "voices_registry.json").read_text(encoding="utf-8"))
+    check("file sostituito DURANTE la clonazione: il registro tiene lo sha256 dei byte clonati", proc.returncode == 0 and registry["Elena Rosa"]["audio_hash"] == consented, str(out)[:300])
+    plan = run_python(
+        f"""
+        from src.config import load_config
+        from src.voice_prep import plan_voices
+        p = plan_voices(load_config({str(config)!r}), ["Elena Rosa"])[0]
+        print(p.action, p.consent["stato"])
+        """
+    )
+    check("...quindi la registrazione nuova non riusa il voice_id clonato dalla vecchia", plan.stdout.strip() == "clone superato", plan.stdout + plan.stderr)
+    leftovers = [p.name for p in (root / "voci").iterdir() if ".clonazione." in p.name]
+    check("nessuna copia temporanea lasciata nella libreria", leftovers == [], str(leftovers))
+
+
 def test_c2() -> None:
     root = Path(tempfile.mkdtemp(prefix="podcast-web-c2-"))
     setup(root)
@@ -1710,6 +1768,7 @@ def test_c2() -> None:
     test_c2_music(root, config)
     test_c2_interrupt(root)
     test_c2_clone_errors(root, config)
+    test_c2_consent_during_clone(root, config)
 
 
 # ----------------------------------------------------------------------

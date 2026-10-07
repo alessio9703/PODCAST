@@ -136,12 +136,25 @@ class VoiceRegistry:
     # -- mutazioni --------------------------------------------------------
 
     def record(
-        self, name: str, audio_path: str | Path, provider: str, voice_id: str
+        self,
+        name: str,
+        audio_path: str | Path,
+        provider: str,
+        voice_id: str,
+        *,
+        audio_hash: str | None = None,
     ) -> RegistryEntry:
+        """Registra una voce clonata.
+
+        `audio_hash`: lo sha256 dei byte effettivamente clonati, calcolato
+        PRIMA della clonazione. Senza, si calcola sul file ora: se il file e'
+        cambiato durante la clonazione, il voice_id verrebbe legato
+        all'audio sbagliato (revisione di sicurezza C2, ALTA-1).
+        """
         entry = RegistryEntry(
             name=name,
             audio_file=self._relative(audio_path),
-            audio_hash=file_hash(audio_path),
+            audio_hash=audio_hash or file_hash(audio_path),
             provider=provider,
             voice_id=voice_id,
             cloned_at=datetime.now().replace(microsecond=0).isoformat(),

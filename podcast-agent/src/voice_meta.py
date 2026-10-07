@@ -70,13 +70,20 @@ def load_meta(audio_path: Path | str) -> dict[str, Any]:
     return raw
 
 
-def consent_state(audio_path: Path | str, meta: dict[str, Any] | None = None) -> str:
-    """Lo stato del consenso per la registrazione ATTUALE (vedi il modulo)."""
+def consent_state(
+    audio_path: Path | str, meta: dict[str, Any] | None = None, *, audio_sha256: str | None = None
+) -> str:
+    """Lo stato del consenso per la registrazione ATTUALE (vedi il modulo).
+
+    `audio_sha256`: lo sha256 dei byte che si stanno per usare, gia' calcolato
+    da chi chiama (src/voice_prep.py lo calcola sui byte che manda al
+    provider). Senza, si calcola sul file ora.
+    """
     meta = load_meta(audio_path) if meta is None else meta
     consent = meta.get("consenso")
     if not consent:
         return CONSENT_REVOKED if meta.get("consenso_revocato") else CONSENT_MISSING
-    if consent.get("audio_sha256") != file_hash(audio_path):
+    if consent.get("audio_sha256") != (audio_sha256 or file_hash(audio_path)):
         return CONSENT_OUTDATED
     return CONSENT_GRANTED
 

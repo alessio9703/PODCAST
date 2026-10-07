@@ -26,15 +26,18 @@ Regole, le stesse di sempre piu' il consenso:
 from __future__ import annotations
 
 import hashlib
+import os
+import tempfile
+from contextlib import contextmanager
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any, Callable, Iterator
 
 from .errors import AmbiguousName, NeedsUserDecision
 from .fileio import file_lock
 from .registry import VoiceRegistry
 from .voice_library import AvailableVoice, VoiceLibrary, VoiceLibraryError
-from .voice_meta import CONSENT_GRANTED, CONSENT_REVOKED, consent_view
+from .voice_meta import CONSENT_GRANTED, CONSENT_REVOKED, consent_state, consent_view
 
 #: Quanto aspettare che un'altra operazione finisca di clonare la stessa voce.
 CLONE_LOCK_TIMEOUT_SECONDS = 600
@@ -190,6 +193,27 @@ def check_consent(plans: list[VoicePlan]) -> None:
     )
 
 
+@contextmanager
+def _snapshot(audio_path: Path, data: bytes) -> Iterator[Path]:
+    """Una copia privata dei byte da clonare, accanto alla registrazione.
+
+    Il provider legge da un percorso: se leggesse il file della libreria,
+    potrebbe ricevere un audio sostituito dopo il controllo del consenso.
+    Il nome comincia con '.' (la libreria lo ignora) e tiene l'estensione,
+    che il provider usa per riconoscere il formato.
+    """
+    fd, name = tempfile.mkstemp(prefix=f".{audio_path.stem}.clonazione.", suffix=audio_path.suffix, dir=str(audio_path.parent))
+    try:
+        with os.fdopen(fd, "wb") as handle:
+            handle.write(data)
+        yield Path(name)
+    finally:
+        try:
+            os.unlink(name)
+        except OSError:
+            pass
+
+
 def _clone_lock_target(config: Any, name: str) -> Path:
     digest = hashlib.sha256(name.encode("utf-8")).hexdigest()[:16]
     return config.registry_file.parent / f".clonazione-{digest}"
@@ -259,11 +283,24 @@ def prepare_voices(
                 continue
             if provider is None:
                 provider = config.build_provider()
+            # I byte da clonare si leggono UNA volta, e su quei byte si
+            # ricontrolla il consenso: fra il controllo iniziale e questo
+            # momento possono passare minuti (le clonazioni prima di questa),
+            # durante i quali il consenso puo' essere revocato o la
+            # registrazione sostituita (revisione di sicurezza C2, ALTA-1).
+            audio = plan.voice.path.read_bytes()
+            audio_hash = "sha256:" + hashlib.sha256(audio).hexdigest()
+            if consent_gate:
+                state = consent_state(plan.voice.path, audio_sha256=audio_hash)
+                if state != CONSENT_GRANTED:
+                    plan.consent = {**plan.consent, "stato": state}
+                    check_consent([plan])
             if note:
                 note(f"{name}: clono la voce su '{provider.name}' ({reason})...")
-            # Nessun retry: un fallimento qui esce con codice 2.
-            new_id = provider.clone_voice(name, str(plan.voice.path))
-            entry = registry.record(name, plan.voice.path, provider.name, new_id)
+            with _snapshot(plan.voice.path, audio) as snapshot:
+                # Nessun retry: un fallimento qui esce con codice 2.
+                new_id = provider.clone_voice(name, str(snapshot))
+            entry = registry.record(name, plan.voice.path, provider.name, new_id, audio_hash=audio_hash)
         result.results[name] = {"voice_id": entry.voice_id, "action": "cloned", "reason": reason}
         result.voice_map[name] = entry.voice_id
         if on_voice:
