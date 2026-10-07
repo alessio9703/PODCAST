@@ -146,8 +146,8 @@ class MusicLibrary:
                 for entry in sorted(category_dir.iterdir()):
                     if not entry.is_file() or entry.name.startswith("."):
                         continue
-                    if entry.suffix.lower() == ".json":
-                        continue  # sidecar dei metadati, non un brano
+                    if entry.suffix.lower() in (".json", ".lock", ".tmp"):
+                        continue  # metadati accanto al brano (e loro lock), non un brano
                     if entry.suffix.lower() not in self.accepted_extensions:
                         rejected.append(entry)
                         continue

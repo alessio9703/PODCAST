@@ -1238,6 +1238,11 @@ REQUIRED_ARGS = {
     "produce.py": ["--run-dir", "R"],
     "episode_info.py": ["--run-dir", "R"],
     "waveform.py": ["--run-dir", "R"],
+    "runs_list.py": [],
+    "run_status.py": ["--run-dir", "R"],
+    "documents_list.py": [],
+    "music_meta.py": ["--category", "intro", "--name", "Piano calmo"],
+    "settings_show.py": [],
 }
 
 
@@ -2136,6 +2141,231 @@ def test_c3() -> None:
 
 
 # ----------------------------------------------------------------------
+# C4 · Archivio e librerie
+# ----------------------------------------------------------------------
+
+
+def test_c4_archive(root: Path, config: Path) -> None:
+    print("\n[C4] Archivio: stato derivato per ogni run")
+
+    def status(run_dir: str) -> dict:
+        return tool("run_status.py", "--run-dir", run_dir, config=config)[1]
+
+    only_title = tool("run_init.py", "--title", "Solo titolo", config=config)[1]["run_dir"]
+    check("solo titolo -> bozza_documento (passo 1)", status(only_title)["stato"] == "bozza_documento" and status(only_title)["passo"] == 1, str(status(only_title)))
+    with_doc = tool("run_init.py", "--title", "Con documento", "--document", "report.txt", config=config)[1]["run_dir"]
+    row = status(with_doc)
+    check("con documento -> bozza_cast, gruppo bozze, azione Riprendi", row["stato"] == "bozza_cast" and row["gruppo"] == "bozze" and row["azione"] == "Riprendi" and row["documento"] == "report.txt", str(row))
+    code, out, _ = episode(with_doc, config, "--formato", "conversazione", "--minuti", "5", "--voce", "presentatore=Anna Neri", "--nome", "presentatore=Anna Neri", "--voce", "voce_a=Mario Rossi", "--voce", "voce_b=Giulia Bianchi", "--nome", "voce_a=Mario Rossi", "--nome", "voce_b=Giulia Bianchi", "--descrizione", "voce_a=conduttore", "--descrizione", "voce_b=analista")
+    check("cast completo -> bozza_musiche", out.get("cast_completo") and status(with_doc)["stato"] == "bozza_musiche", str(out.get("mancanti")))
+    tool("music_set.py", "--run-dir", with_doc, "--none", "intro", "outro", "sottofondo", config=config)
+    check("musiche scelte (anche nessuna) -> bozza_copione (passo 4)", status(with_doc)["stato"] == "bozza_copione" and status(with_doc)["passo"] == 4)
+
+    draft = approved_run(root, config, "Da approvare", SCRIPT_C2)
+    tool("script_approve.py", "--run-dir", draft, "--revoke", config=config)
+    row = status(draft)
+    check("copione salvato, non approvato -> copione_da_approvare", row["stato"] == "copione_da_approvare" and row["gruppo"] == "da_approvare" and row["azione"] == "Rivedi e approva", str(row))
+    tool("script_approve.py", "--run-dir", draft, "--version", "1", config=config)
+    check("approvato -> stima_e_consenso (passo 5)", status(draft)["stato"] == "stima_e_consenso" and status(draft)["passo"] == 5)
+    code, out, _ = tool("produce.py", "--run-dir", draft, config=config)
+    row = status(draft)
+    check("prodotto -> pronto, Ascolta, formato e voci", code == 0 and row["stato"] == "pronto" and row["azione"] == "Ascolta" and row["voci"] == 2, str(row))
+    tool("retake.py", "--run-dir", draft, "--turn", "1", "--takes", "1", config=config)
+    tool("retake.py", "--run-dir", draft, "--choose", "1=2", config=config)
+    check("take scelto dopo il montaggio -> da_aggiornare (Rimonta), sempre fra i pronti", status(draft)["stato"] == "da_aggiornare" and status(draft)["gruppo"] == "pronti")
+    tool("mix.py", "--run-dir", draft, config=config)
+    tool("script_edit.py", "--run-dir", draft, "--turn", "2", "--text", "I ricavi sono cresciuti molto.", config=config)
+    tool("script_approve.py", "--run-dir", draft, "--version", "2", config=config)
+    row = status(draft)
+    check("approvato con battute ancora da generare -> interrotta, 1 battuta mancante, Riprendi", row["stato"] == "interrotta" and row["battute_mancanti"] == 1 and row["azione"] == "Riprendi", str(row))
+
+    from src.run_lock import work_lock
+
+    events = Path(draft) / "_eventi.jsonl"
+    events.write_text(json.dumps({"evento": "iniziata", "totale": 6}) + "\n" + json.dumps({"evento": "battuta", "n": 3, "totale": 6}) + "\n", encoding="utf-8")
+    with work_lock(Path(draft), "produzione"):
+        row = status(draft)
+        check("lock tenuto -> in_corso con battuta 3/6 dagli eventi", row["stato"] == "in_corso" and row["battuta"] == 3 and row["battute_totali"] == 6 and row["gruppo"] == "in_produzione", str(row))
+    code, out, _ = tool("produce.py", "--run-dir", draft, config=config)
+
+    legacy = root / "output" / "2026-09-01_10-00_vecchio-episodio"
+    legacy.mkdir()
+    (legacy / "conversazione.json").write_text(json.dumps({"titolo": "Vecchio episodio", "turni": SCRIPT["turni"]}), encoding="utf-8")
+    (legacy / "vecchio-episodio.mp3").write_bytes(b"ID3")
+    broken = root / "output" / "2026-09-02_rotta"
+    broken.mkdir()
+    (broken / "episodio.json").write_text("{non json", encoding="utf-8")
+    (root / "output" / ".nascosta").mkdir()
+    (root / "output" / "link-esterno").symlink_to(root / "musiche")
+
+    code, out, err = tool("runs_list.py", config=config)
+    rows = {r["run"]: r for r in out.get("episodi", [])}
+    check("runs_list: exit 0 anche con una run rotta", code == 0, err[-300:])
+    check("run creata prima dell'interfaccia (solo copione e mp3) -> pronto", rows[legacy.name]["stato"] == "pronto" and rows[legacy.name]["titolo"] == "Vecchio episodio", str(rows.get(legacy.name)))
+    check("run illeggibile: in elenco, senza far fallire le altre", rows[broken.name]["stato"] == "illeggibile", str(rows.get(broken.name)))
+    check("niente cartelle nascoste ne' link simbolici", ".nascosta" not in rows and "link-esterno" not in rows)
+    check("ordinati dal piu' recente", [r["aggiornato_il"] for r in out["episodi"]] == sorted((r["aggiornato_il"] for r in out["episodi"]), reverse=True))
+    check("conteggi per gruppo", out["conteggi"].get("bozze", 0) == 2 and out["conteggi"].get("pronti", 0) == 2 and out["conteggi"].get("problemi", 0) == 1, str(out["conteggi"]))
+    code, out, _ = tool("runs_list.py", "--status", "bozze", config=config)
+    check("filtro bozze", out["episodi"] and all(r["gruppo"] == "bozze" for r in out["episodi"]), str([r["stato"] for r in out["episodi"]]))
+    code, out, _ = tool("runs_list.py", "--search", "vecchio", config=config)
+    check("ricerca nel titolo (senza maiuscole)", [r["run"] for r in out["episodi"]] == [legacy.name], str([r["run"] for r in out["episodi"]]))
+    code, out, _ = tool("runs_list.py", "--search", "report", config=config)
+    check("ricerca nel nome del documento", out["episodi"] and all(r["documento"] == "report.txt" for r in out["episodi"]), str([r.get("documento") for r in out["episodi"]]))
+    code, out, _ = tool("runs_list.py", "--status", "in_lavorazione", config=config)
+    check("gruppo sconosciuto -> InvalidArguments", code == 1 and out.get("error_type") == "InvalidArguments")
+    check("nessun percorso assoluto nell'Archivio", str(root) not in json.dumps(tool("runs_list.py", config=config)[1]))
+    import shutil as _shutil
+
+    _shutil.rmtree(broken)
+
+
+def test_c4_documents(root: Path, config: Path) -> None:
+    print("\n[C4] libreria Documenti")
+    docs = root / "documenti"
+    make_blank_pdf(docs / "scansione.pdf")
+    (docs / "nuovo.md").write_text("# Titolo\\n\\nUn documento mai usato con sette parole.", encoding="utf-8")
+    (docs / "foglio.xyz").write_text("x", encoding="utf-8")
+    (docs / ".nascosto.txt").write_text("x", encoding="utf-8")
+    (docs / "collegato.txt").symlink_to(root / "config-web.yaml")
+    code, out, err = tool("documents_list.py", config=config)
+    rows = {r["nome"]: r for r in out.get("documenti", [])}
+    check("documents_list: exit 0", code == 0, err[-300:])
+    check("report.txt: TXT, estraibile, parole, usato in piu' episodi", rows["report.txt"]["tipo"] == "TXT" and rows["report.txt"]["estraibile"] and rows["report.txt"]["parole"] == 10 and rows["report.txt"]["usato_in"] >= 2, str(rows.get("report.txt")))
+    check("scansione.pdf: non estraibile, motivo scansione, mai usato", rows["scansione.pdf"]["estraibile"] is False and rows["scansione.pdf"]["motivo"] == "scansione" and rows["scansione.pdf"]["usato_in"] == 0, str(rows.get("scansione.pdf")))
+    check("formato non gestito tra gli scartati, niente nascosti ne' link", "foglio.xyz" in out["scartati"] and ".nascosto.txt" not in rows and "collegato.txt" not in rows, str(sorted(rows)))
+    check("estrazione in cache legata allo sha256", (docs / ".estrazioni" / (rows["report.txt"]["sha256"].split(":")[1] + ".json")).is_file())
+    code, out2, _ = tool("documents_list.py", config=config)
+    check("seconda volta: stesso risultato dalla cache", {r["nome"]: r for r in out2["documenti"]}["report.txt"] == rows["report.txt"])
+    for filt, expected in (("mai_usati", "nuovo.md"), ("con_problemi", "scansione.pdf")):
+        code, out, _ = tool("documents_list.py", "--filter", filt, config=config)
+        check(f"filtro {filt}", expected in [r["nome"] for r in out["documenti"]] and "report.txt" not in [r["nome"] for r in out["documenti"]], str([r["nome"] for r in out["documenti"]]))
+    code, out, _ = tool("documents_list.py", "--filter", "gia_usati", config=config)
+    check("filtro gia_usati", [r["nome"] for r in out["documenti"]] == ["report.txt"], str([r["nome"] for r in out["documenti"]]))
+    code, out, _ = tool("documents_list.py", "--search", "SCANS", config=config)
+    check("ricerca nel nome", [r["nome"] for r in out["documenti"]] == ["scansione.pdf"])
+    legacy = root / "output" / "2026-09-03_dal-nome"
+    legacy.mkdir()
+    (legacy / "_script_session.json").write_text(json.dumps({"document_path": "/altrove/nuovo.md", "speakers": [], "prompt": ""}), encoding="utf-8")
+    code, out, _ = tool("documents_list.py", config=config)
+    check("run vecchia senza sha256: si riconosce dal nome del documento", {r["nome"]: r for r in out["documenti"]}["nuovo.md"]["episodi"] == [legacy.name], str({r["nome"]: r["episodi"] for r in out["documenti"]}))
+    check("nessun percorso assoluto", str(root) not in json.dumps(out))
+    (docs / "collegato.txt").unlink()
+
+
+def test_c4_voices(root: Path, config: Path) -> None:
+    print("\n[C4] libreria Voci e nome pronunciato")
+    make_wav(root / "voci" / "Voce Fabio.wav", 1.5, 470)
+    code, out, _ = tool("voice_meta.py", "--name", "Voce Fabio", "--spoken-name", "Fabio", "--consent", "--by", "Utente A", config=config)
+    check("nome senza cognome -> exit 3 SpokenNameIncomplete, e nessun consenso registrato", code == 3 and out.get("error_type") == "SpokenNameIncomplete" and tool("voice_meta.py", "--name", "Voce Fabio", config=config)[1]["consenso"]["stato"] == "mancante", str(out))
+    code, out, _ = tool("voice_meta.py", "--name", "Voce Fabio", "--spoken-name", "Fabio", "--accept-incomplete-name", "--by", "Utente A", config=config)
+    check("con la conferma esplicita: registrato", code == 0 and out["nome_pronunciato"] == "Fabio", str(out))
+    code, out, _ = tool("voice_meta.py", "--name", "Voce Fabio", "--spoken-name", "Fabio  Verdi", "--by", "Utente A", config=config)
+    check("nome e cognome: registrato (spazi normalizzati)", code == 0 and out["nome_pronunciato"] == "Fabio Verdi", str(out))
+    code, out, err = tool("voices_list.py", config=config)
+    rows = {v["name"]: v for v in out["voices"]}
+    check("voices_list: durata del campione", abs((rows["Voce Fabio"]["durata_campione_seconds"] or 0) - 1.5) < 0.1, str(rows.get("Voce Fabio")))
+    check("nome confermato al posto della proposta dal nome del file", rows["Voce Fabio"]["spoken_name"] == "Fabio Verdi" and rows["Voce Fabio"]["nome_confermato"] is True)
+    check("voce clonata: stato, data di clonazione, usata in N episodi", rows["Mario Rossi"]["stato"] == "Già clonata" and rows["Mario Rossi"]["clonata_il"] and rows["Mario Rossi"]["usata_in"] >= 1, str(rows.get("Mario Rossi")))
+    check("voce nuova: da clonare, mai usata, consenso mancante", rows["Voce Fabio"]["stato"] == "Da clonare" and rows["Voce Fabio"]["usata_in"] == 0 and rows["Voce Fabio"]["consenso"]["stato"] == "mancante")
+    check("i .json e i .lock accanto alle voci non sono scartati", out["rejected"] == [], str(out["rejected"]))
+    code, out, _ = tool("voices_list.py", "--filter", "consenso_da_confermare", config=config)
+    check("filtro consenso da confermare", "Voce Fabio" in [v["name"] for v in out["voices"]] and "Mario Rossi" not in [v["name"] for v in out["voices"]], str([v["name"] for v in out["voices"]]))
+    code, out, _ = tool("voices_list.py", "--filter", "da_clonare", "--search", "verdi", config=config)
+    check("filtro + ricerca anche nel nome pronunciato", [v["name"] for v in out["voices"]] == ["Voce Fabio"], str([v["name"] for v in out["voices"]]))
+    fresh = tool("run_init.py", "--title", "Proposta nome", config=config)[1]["run_dir"]
+    code, out, _ = episode(fresh, config, "--formato", "conversazione", "--voce", "voce_a=Voce Fabio")
+    role = {r["ruolo"]: r for r in out["ruoli"]}["voce_a"]
+    check("passo 2: il nome proposto viene dalla libreria Voci, ma non e' salvato", role["nome_proposto"] == "Fabio Verdi" and role["nome_proposto_completo"] and role["nome_pronunciato"] is None, str(role))
+
+
+def test_c4_music(root: Path, config: Path) -> None:
+    print("\n[C4] libreria Musiche: licenza, parlato, trascrizione")
+    (root / "musiche" / "sottofondo").mkdir(exist_ok=True)
+    make_wav(root / "musiche" / "sottofondo" / "Tappeto.wav", 1.0, 200)
+    code, out, _ = tool("music_meta.py", "--category", "intro", "--name", "piano calmo", "--licenza", "CC-BY 4.0, Autore X", config=config)
+    check("senza --by -> MusicMetaError", code == 1 and out.get("error_type") == "MusicMetaError", str(out))
+    code, out, _ = tool("music_meta.py", "--category", "intro", "--name", "piano calmo", "--licenza", "CC-BY 4.0, Autore X", "--by", "Utente A", config=config)
+    check("licenza registrata con chi e quando", code == 0 and out["licenza"] == "CC-BY 4.0, Autore X" and out["licenza_da"] == "Utente A" and out["licenza_il"] and out["has_licenza"], str(out))
+    code, out, _ = tool("music_meta.py", "--category", "intro", "--name", "Piano", "--no-licenza", "--by", "Utente A", config=config)
+    check("nome ambiguo -> exit 3 AmbiguousName", code == 3 and out.get("error_type") == "AmbiguousName", str(out))
+    code, out, _ = tool("music_meta.py", "--category", "sottofondo", "--name", "Tappeto", "--parlato", "true", "--by", "Utente A", config=config)
+    check("sottofondo con parlato -> MusicMetaError, file non scritto", code == 1 and out.get("error_type") == "MusicMetaError" and not (root / "musiche" / "sottofondo" / "Tappeto.json").exists(), str(out))
+    code, out, _ = tool("music_meta.py", "--category", "outro", "--name", "Chiusura", "--trascrizione", "Grazie", "--by", "Utente A", config=config)
+    check("trascrizione senza parlato -> MusicMetaError", code == 1 and out.get("error_type") == "MusicMetaError", str(out))
+    code, out, _ = tool("music_meta.py", "--category", "outro", "--name", "Chiusura", "--parlato", "true", "--trascrizione", "Grazie per l'ascolto", "--by", "Utente A", config=config)
+    check("outro con parlato e trascrizione", code == 0 and out["parlato"] is True and out["trascrizione"] == "Grazie per l'ascolto", str(out))
+    proc = run_python(
+        f"""
+        import threading
+        from src.config import load_config
+        from src.music_library import MusicLibrary
+        from src.music_meta import update_metadata
+        config = load_config({str(config)!r})
+        lib = MusicLibrary(config.music_dir, config.accepted_extensions); lib.scan()
+        track = lib.get_usable("intro", "Piano forte")
+        a = threading.Thread(target=update_metadata, args=(track,), kwargs={{"by": "A", "licenza": "Licenza A"}})
+        b = threading.Thread(target=update_metadata, args=(track,), kwargs={{"by": "B", "parlato": True, "trascrizione": "Ciao"}})
+        a.start(); b.start(); a.join(); b.join()
+        lib.scan(); t = lib.get_usable("intro", "Piano forte")
+        print(t.metadata.licenza, t.metadata.parlato, t.metadata.trascrizione)
+        """
+    )
+    check("due modifiche insieme allo stesso brano: nessuna persa", proc.stdout.strip() == "Licenza A True Ciao", proc.stdout + proc.stderr)
+    code, out, _ = tool("music_list.py", config=config)
+    intro = {t["name"]: t for t in out["intro"]}
+    check("music_list: licenza, trascrizione, usato in N episodi", intro["Piano calmo"]["licenza"] == "CC-BY 4.0, Autore X" and intro["Piano calmo"]["usato_in"] >= 1 and {t["name"]: t for t in out["outro"]}["Chiusura"]["trascrizione"] == "Grazie per l'ascolto", str(intro.get("Piano calmo")))
+    check("i .json e i .lock accanto ai brani non sono scartati", out["intro_rejected"] == [] and out["outro_rejected"] == [], str((out["intro_rejected"], out["outro_rejected"])))
+    code, out, _ = tool("music_list.py", "--filter", "licenza_mancante", config=config)
+    check("filtro licenza mancante", "Piano calmo" not in [t["name"] for t in out["intro"]] and "Tappeto" in [t["name"] for t in out["sottofondo"]])
+    code, out, _ = tool("music_list.py", "--filter", "con_parlato", config=config)
+    check("filtro con parlato", [t["name"] for t in out["outro"]] == ["Chiusura"] and out["sottofondo"] == [])
+
+
+def test_c4_settings_and_more(root: Path, config: Path) -> None:
+    print("\n[C4] impostazioni, diagnostica, lezioni")
+    code, out, err = tool("settings_show.py", config=config)
+    text = json.dumps(out)
+    check("settings_show: exit 0, provider, limiti, indicazioni dei retake", code == 0 and out["impostazioni"]["provider"]["attivo"] == "fake" and out["impostazioni"]["documenti"]["max_pages"] == 500 and "Più calmo" in out["impostazioni"]["retake"]["indicazioni"], err[-300:] + text[:300])
+    check("niente chiavi API, nomi di variabili d'ambiente o percorsi assoluti", "api_key" not in text and "ANTHROPIC_API_KEY" not in text and str(root) not in text and "client_factory" not in text and "voices_file" not in text, text[:400])
+    check("cartelle solo per nome", out["impostazioni"]["cartelle"] == {"documenti": "documenti", "voci": "voci", "musiche": "musiche", "archivio": "output"}, str(out["impostazioni"]["cartelle"]))
+    proc = subprocess.run([PYTHON, str(PROJECT_ROOT / "tools" / "doctor.py")], capture_output=True, text=True, cwd=str(PROJECT_ROOT), env=clean_env())
+    check("doctor: JSON e stderr senza percorsi assoluti del progetto", str(PROJECT_ROOT) not in proc.stdout and str(PROJECT_ROOT) not in proc.stderr and json.loads(proc.stdout)["checks"], proc.stdout[:300])
+
+    prompts = root / "prompts-prova"
+    prompts.mkdir()
+    entries = [{"id": f"L{i}", "stato": "proposta", "testo": f"Regola numero {i}.", "pattern": "x"} for i in range(1, 7)]
+    (prompts / "_lezioni.json").write_text(json.dumps(entries), encoding="utf-8")
+    procs = []
+    for i in range(1, 7):
+        action = f"lm.accept(p, p / 'lezioni.md', 'L{i}', text_override=None, remove_id=None, max_lines=50)" if i % 2 else f"lm.reject(p, 'L{i}', reason='no')"
+        code_text = "\n".join(["import src.lessons as lm", "from pathlib import Path", f"p = Path({str(prompts)!r})", action])
+        procs.append(subprocess.Popen([PYTHON, "-c", code_text], cwd=str(PROJECT_ROOT), env=clean_env(), stderr=subprocess.PIPE, text=True))
+    errors = [p.communicate(timeout=60)[1] for p in procs]
+    final = {e["id"]: e["stato"] for e in json.loads((prompts / "_lezioni.json").read_text(encoding="utf-8"))}
+    check("6 accetta/rifiuta in parallelo sul registro delle lezioni: nessuna modifica persa", final == {f"L{i}": ("attiva" if i % 2 else "rifiutata") for i in range(1, 7)}, str(final) + "".join(e[-200:] for e in errors))
+    md = (prompts / "lezioni.md").read_text(encoding="utf-8")
+    check("lezioni.md con tutte le lezioni attive", all(f"Regola numero {i}." in md for i in (1, 3, 5)), md[:300])
+
+
+def test_c4() -> None:
+    root = Path(tempfile.mkdtemp(prefix="podcast-web-c4-"))
+    setup(root)
+    (root / "musiche" / "outro").mkdir(parents=True)
+    make_wav(root / "musiche" / "outro" / "Chiusura.wav", 0.7, 330)
+    config = write_c2_config(root, "config-c4.yaml")
+    for name in ("Mario Rossi", "Giulia Bianchi"):
+        tool("voice_meta.py", "--name", name, "--consent", "--by", "Utente A", config=config)
+    test_c4_archive(root, config)
+    used = tool("run_init.py", "--title", "Con musica", "--document", "report.txt", config=config)[1]["run_dir"]
+    tool("music_set.py", "--run-dir", used, "--intro", "Piano calmo", config=config)
+    test_c4_documents(root, config)
+    test_c4_voices(root, config)
+    test_c4_music(root, config)
+    test_c4_settings_and_more(root, config)
+
+
+# ----------------------------------------------------------------------
 
 
 def main() -> None:
@@ -2169,6 +2399,7 @@ def main() -> None:
 
     test_c2()
     test_c3()
+    test_c4()
 
     from tests.test_tools_cli import PASSED
 

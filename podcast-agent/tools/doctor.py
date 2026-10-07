@@ -160,15 +160,19 @@ def main() -> int:
 
     all_required_ok = all(c["ok"] for c in checks if c["required"])
 
+    # Lo schermo "Diagnostica" mostra questi dettagli: niente percorsi assoluti
+    # del server (il progetto diventa ".", la home "~"), come negli errori.
+    from src.redaction import redact
+
     for c in checks:
         marker = "ok  " if c["ok"] else ("FAIL" if c["required"] else "warn")
-        print(f"  {marker} {c['name']}: {c['detail']}", file=sys.stderr)
+        print(redact(f"  {marker} {c['name']}: {c['detail']}"), file=sys.stderr)
 
-    payload = {
+    payload = redact({
         "ok": all_required_ok,
         "checks": checks,
         "ffmpeg_path": ffmpeg_exe,
-    }
+    })
     json.dump(payload, sys.stdout, ensure_ascii=False, indent=2)
     sys.stdout.write("\n")
     return 0 if all_required_ok else 1

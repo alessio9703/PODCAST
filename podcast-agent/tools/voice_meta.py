@@ -5,6 +5,7 @@
     python tools/voice_meta.py --name "Mario Rossi" --consent --by "Utente A"
     python tools/voice_meta.py --name "Mario Rossi" --revoke-consent --by "Utente A"
     python tools/voice_meta.py --name "Mario Rossi" --confirm-clone-retry --by "Utente A"
+    python tools/voice_meta.py --name "Voce Mario" --spoken-name "Mario Rossi" --by "Utente A"
 
 Il consenso si registra SOLO dopo che la persona lo ha dato davvero: e' la
 casella "Confermo che [Nome Cognome] ha dato il consenso..." del passo 5. Vale
@@ -20,6 +21,10 @@ modalita' web e' obbligatorio con --consent.
 CloneOutcomeUnknown) l'utente ha controllato le voci sul provider e accetta
 di clonare di nuovo.
 
+--spoken-name: nome e cognome come vanno pronunciati (la "Nuova voce" della
+libreria Voci). Senza cognome exit 3 SpokenNameIncomplete, a meno di
+--accept-incomplete-name. Si puo' passare insieme a --consent.
+
 Senza azioni mostra lo stato e basta. Il nome deve
 corrispondere a una voce della libreria (maiuscole e accenti a parte): un nome
 incerto da' exit 3 AmbiguousName con i candidati, mai una scelta al posto
@@ -31,7 +36,7 @@ from __future__ import annotations
 import argparse
 
 from _common import InvalidArguments, add_config_arg, bootstrap, emit, note, parse_args, run_tool, web_mode  # noqa: E402
-from src.voice_meta import consent_view, load_meta, record_consent, revoke_consent  # noqa: E402
+from src.voice_meta import consent_view, load_meta, record_consent, record_spoken_name, revoke_consent  # noqa: E402
 from src.voice_prep import confirm_clone_retry, pending_clone, resolve_library_voice  # noqa: E402
 
 
@@ -48,6 +53,10 @@ def main() -> None:
     )
     parser.add_argument("--by", default=None, help="Chi registra o revoca il consenso")
     parser.add_argument("--expect-sha256", default=None, help="sha256 della registrazione che l'utente ha visto")
+    parser.add_argument("--spoken-name", default=None, help="Nome e cognome come vanno pronunciati")
+    parser.add_argument(
+        "--accept-incomplete-name", action="store_true", help="Conferma un nome pronunciato senza cognome"
+    )
     add_config_arg(parser)
     args = parse_args(parser)
 
@@ -62,6 +71,14 @@ def main() -> None:
 
     revoked = None
     cleared = None
+    if args.spoken_name is not None:
+        # Prima del consenso: un nome incompleto (exit 3) non lascia un consenso
+        # registrato a meta' richiesta.
+        record_spoken_name(
+            voice.path, voice=voice.name, name=args.spoken_name, by=args.by,
+            accept_incomplete=args.accept_incomplete_name,
+        )
+        note(f"Nome pronunciato di {voice.name}: {' '.join(args.spoken_name.split())}.")
     if args.consent:
         record_consent(voice.path, voice=voice.name, by=args.by, expect_sha256=args.expect_sha256)
         note(f"Consenso registrato per {voice.name}.")
@@ -87,6 +104,7 @@ def main() -> None:
         {
             "voce": voice.name,
             "file": voice.path.name,
+            "nome_pronunciato": meta.get("nome_pronunciato"),
             "consenso": consent_view(voice.path, meta),
             "consenso_revocato": revoked,
             "clonazione_incerta": pending_clone(config, voice.name),

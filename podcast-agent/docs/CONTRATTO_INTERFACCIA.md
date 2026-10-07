@@ -2,9 +2,9 @@
 
 > Documento in costruzione: si completa fase per fase (vedi `docs/avanzamento/`).
 > Coperti finora: contratto generale (C0), passi 1–4 + Confronto (C1), correzioni
-> della revisione di sicurezza C0+C1 e modalità web, passi 5–6 (C2), passo 7 (C3).
-> Archivio e Librerie arrivano con la fase C4; la versione completa con la
-> sezione "a carico dell'adattatore" chiude la C5.
+> della revisione di sicurezza C0+C1 e modalità web, passi 5–6 (C2), passo 7 (C3),
+> Archivio, Librerie, Impostazioni, Lezioni e Diagnostica (C4). La versione completa
+> con la sezione "a carico dell'adattatore" chiude la C5.
 
 ## 1. Come si chiama un comando
 
@@ -80,7 +80,9 @@ Le risposte di successo contengono ancora percorsi **assoluti** del server,
 che servono al subagent: `run_dir`, `session_file`, `script_file`,
 `episodio_file`, `musiche_file`, `musiche_usate_file`, `output`, `path`,
 `documento.percorso`, `voices_dir`, `music_dir`, `timings_file`,
-`segnali_file`, `voci_usate`, `text_file`, `audio_file`, `events_file`. **L'adattatore non
+`segnali_file`, `voci_usate`, `text_file`, `audio_file`, `events_file`. In
+`voices_list.py` non si mostrano neanche `voice_id` e `cache_reason` (dati del
+provider). **L'adattatore non
 li mostra mai all'utente.** Per la UI ci sono i nomi relativi:
 
 - `run`: il nome della cartella dell'episodio (è anche un `--run-dir` valido);
@@ -292,6 +294,13 @@ stata sostituita dopo il consenso) o `revocato` (vale anche per una voce già cl
 | `SegmentsMissing` | 1 | `mix.py` senza tutti i segmenti in cache (copione cambiato o episodio vecchio): serve `produce.py` | `missing` |
 | `WaveformError` | 1 | Numero di punti fuori scala, file non decodificabile | `campo`, `minimo`, `massimo` |
 | `EpisodeNotProduced` | 1 | Forma d'onda di un episodio senza file finale | — |
+
+### Introdotti in C4
+
+| error_type | exit | Quando | `details` |
+|---|---|---|---|
+| `MusicMetaError` | 1 | Metadati di un brano non validi (sottofondo con parlato, trascrizione senza parlato, testo vuoto o troppo lungo, `--by` mancante, brano inesistente) | `campo` |
+| `SpokenNameIncomplete` | 3 | Anche per `voice_meta.py --spoken-name` senza cognome: si conferma con `--accept-incomplete-name` | `campo`, `voce`, `nome` |
 
 ### `LockTimeout` · exit 1
 
@@ -913,4 +922,161 @@ dopo l'ultima produzione) esce con `SegmentsMissing`: serve `produce.py`.
 | 1 | `WaveformError`, `EpisodeNotProduced`, `UnknownDirection`, `DirectionNeedsTextEdit`, `ConflictingDirections`, `TooManyTakes`, `SegmentsMissing`, `RunBusy`, gate di approvazione (`retake.py`/`mix.py` su un copione non approvato), `ScriptMissing` |
 | 2 | errore del provider durante la sintesi di un take |
 | 3 | `ConsentRequired` (retake, anteprime o rimontaggio con una voce revocata), `MusicChangedError` |
+
+## Archivio
+
+| Azione | Comando | Lunga | Costa |
+|---|---|---|---|
+| Elenco degli episodi | `runs_list.py [--status bozze\|da_approvare\|in_produzione\|pronti] [--search T]` | no | no |
+| Stato di un episodio (una riga) | `run_status.py --run-dir R` | no | no |
+| Nuovo episodio | `run_init.py --title T [--document NOME]` | no | no |
+
+Esempio reale (tre righe):
+
+```json
+{"ok": true,
+ "episodi": [
+   {"run": "2026-10-07_13-53_proposta-nome", "titolo": "Proposta nome", "documento": null, "formato": "conversazione",
+    "voci": 1, "stato": "bozza_documento", "etichetta": "Bozza · Documento", "gruppo": "bozze", "azione": "Riprendi",
+    "passo": 1, "aggiornato_il": "2026-10-07T13:53:48"},
+   {"run": "2026-10-07_13-53_con-musica", "titolo": "Con musica", "documento": "report.txt", "formato": null, "voci": null,
+    "stato": "bozza_copione", "etichetta": "Bozza · Copione", "gruppo": "bozze", "azione": "Riprendi", "passo": 4,
+    "aggiornato_il": "2026-10-07T13:53:38"},
+   "…"],
+ "totale": 7, "conteggi": {"bozze": 5, "pronti": 2}}
+```
+
+Lo **stato è derivato** dai file della run e dai lock (`src/run_state.py`), dalla prima
+regola che vale:
+
+| `stato` | Quando | `gruppo` | `azione` | `passo` |
+|---|---|---|---|---|
+| `in_corso` | un'operazione lunga tiene il lock; per la produzione `battuta`/`battute_totali` dagli eventi | `in_produzione` | Segui l'avanzamento | 6 |
+| `pronto` | file finale coerente con la run (o run di prima, con il file) | `pronti` | Ascolta | 7 |
+| `da_aggiornare` | file finale, copione approvato, nessuna battuta da generare, ma take o musiche cambiati | `pronti` | Rimonta | 7 |
+| `interrotta` | approvato, voci pronte, battute mancanti (`battute_mancanti`, `null` se non calcolabile) | `in_produzione` | Riprendi | 6 |
+| `stima_e_consenso` | approvato | `in_produzione` | Vai alla stima | 5 |
+| `copione_da_approvare` | copione salvato, non approvato | `da_approvare` | Rivedi e approva | 4 |
+| `bozza_copione` | musiche scelte (anche "nessuna") | `bozze` | Riprendi | 4 |
+| `bozza_musiche` | cast completo | `bozze` | Riprendi | 3 |
+| `bozza_cast` | documento registrato | `bozze` | Riprendi | 2 |
+| `bozza_documento` | solo il titolo | `bozze` | Riprendi | 1 |
+| `illeggibile` | file della run rotti: la riga c'è, con `errore` | `problemi` | — | — |
+
+- L'elenco viene **solo** dalle sottocartelle di `output/` (niente nascoste, niente link
+  simbolici): l'adattatore passa ai comandi solo i `run` di questo elenco.
+- Ordinato dal più recente (`aggiornato_il`). `conteggi` per gruppo, sull'intero
+  Archivio.
+- La ricerca guarda titolo e nome del documento (senza maiuscole né accenti).
+
+## Libreria Documenti
+
+| Azione | Comando | Lunga | Costa |
+|---|---|---|---|
+| Elenco | `documents_list.py [--filter mai_usati\|gia_usati\|con_problemi] [--search T]` | la prima volta, per estrarre | no |
+| Carica documento | *adattatore*: salva il file in `documenti/` (vedi fondo) | — | — |
+| Anteprima | `doc_extract.py NOME` | no | no |
+| Crea episodio | `run_init.py --title T --document NOME` | no | no |
+
+Esempio reale (una riga):
+
+```json
+{"nome": "report.txt", "tipo": "TXT", "dimensione_bytes": 59, "caricato_il": "2026-10-07T13:53:15",
+ "sha256": "sha256:1d61…4bab", "estraibile": true, "motivo": null, "pagine": null, "parole": 10, "caratteri": 59,
+ "usato_in": 3, "episodi": ["2026-10-07_13-53_con-documento", "…"]}
+```
+
+- `estraibile: false` con `motivo` (`scansione`, `protetto`, `vuoto`, `illeggibile`,
+  `troppo_grande`): è la riga "Testo non estraibile" del wireframe (filtro
+  `con_problemi`).
+- L'estrazione è in cache in `documenti/.estrazioni/<sha256>.json`: un file sostituito
+  con lo stesso nome si ri-estrae.
+- `usato_in`/`episodi`: dallo sha256 registrato nelle run; per le run di prima, dal nome.
+- `scartati[]`: file con un formato non gestito.
+
+## Libreria Voci
+
+| Azione | Comando | Lunga | Costa |
+|---|---|---|---|
+| Elenco | `voices_list.py [--filter clonate\|da_clonare\|consenso_da_confermare] [--search T]` | no | no |
+| Nuova voce | *adattatore*: salva la registrazione in `voci_disponibili/`, poi `voice_meta.py --name VOCE --spoken-name "Nome Cognome" --consent --expect-sha256 H --by U` | no | no |
+| Registra il consenso | `voice_meta.py --name VOCE --consent --expect-sha256 H --by U` | no | no |
+
+Esempio reale (una voce; omessi `path`, `voice_id`, `cache_reason`, che restano per il subagent):
+
+```json
+{"name": "Voce Fabio", "spoken_name": "Fabio Verdi", "name_complete": true, "nome_pronunciato": "Fabio Verdi",
+ "nome_confermato": true, "file": "Voce Fabio.wav", "extension": ".wav", "size_mb": 0.13,
+ "durata_campione_seconds": 1.5, "cached": false, "stato": "Da clonare", "clonata_il": null,
+ "consenso": {"stato": "mancante", "audio_sha256": "sha256:d83f…350f", "da": null, "il": null,
+              "revocato_da": null, "revocato_il": null},
+ "usata_in": 0, "episodi": []}
+```
+
+- "Campione": `durata_campione_seconds`. "Stato": `stato` (`Già clonata` con `clonata_il`,
+  `Da clonare`). "Usata in": `usata_in` (episodi prodotti, da `voci.json`).
+- `nome_pronunciato` è quello confermato con `voice_meta.py --spoken-name` (senza
+  cognome: exit 3 `SpokenNameIncomplete`, salvo `--accept-incomplete-name`); se manca,
+  `spoken_name` è solo una proposta dal nome del file. Il passo 2 lo propone come nome
+  per il ruolo, senza salvarlo da solo.
+- Con `--spoken-name` e `--consent` insieme, un nome incompleto ferma tutto prima del
+  consenso. La voce si clona solo alla prima produzione che la usa, dopo la stima.
+
+## Libreria Musiche
+
+| Azione | Comando | Lunga | Costa |
+|---|---|---|---|
+| Elenco | `music_list.py [--filter strumentali\|con_parlato\|licenza_mancante] [--search T]` | no | no |
+| "Ho la licenza per questo brano" | `music_meta.py --category C --name N --licenza "testo" --by U` (togliere: `--no-licenza`) | no | no |
+| Parlato e trascrizione | `music_meta.py --category C --name N --parlato true\|false [--trascrizione "…"] --by U` | no | no |
+| Carica brano | *adattatore*: salva il file in `musiche/<categoria>/` | — | — |
+
+Esempio reale (un brano):
+
+```json
+{"name": "Piano calmo", "extension": ".wav", "duration_seconds": 0.5, "has_licenza": true,
+ "licenza": "CC-BY 4.0, Autore X", "licenza_da": "Utente A", "licenza_il": "2026-10-07T13:53:49",
+ "parlato": false, "trascrizione": null, "usable": true, "error": null, "usato_in": 1,
+ "episodi": ["2026-10-07_13-53_con-musica"]}
+```
+
+- Stesse regole della libreria: un sottofondo non può avere parlato, la trascrizione vale
+  solo con parlato (`MusicMetaError`). La licenza non si verifica: si registra chi l'ha
+  dichiarata e quando.
+- `usato_in`: episodi che hanno scelto il brano (`musiche.json`).
+- Le modifiche ai metadati sono atomiche e sotto lock (nessuna modifica persa con più
+  utenti).
+
+## Impostazioni
+
+`settings_show.py` → `{"impostazioni": {provider, copione, audio, musica, documenti,
+retake, valuta, lezioni, cartelle}}`. Sola lettura, solo una **whitelist** di chiavi
+(`src/settings_view.py`): mai chiavi API, nomi di variabili d'ambiente, percorsi assoluti
+(le cartelle per nome). Le impostazioni si cambiano in `config.yaml`, non dall'interfaccia.
+
+## Lezioni
+
+| Azione | Comando | Lunga | Costa |
+|---|---|---|---|
+| Lezioni attive, proposte, rifiutate | `lessons.py --list` | no | no |
+| Schemi ricorrenti | `lessons.py --evidence [--last N]` | no | no |
+| Proponi lezioni (stima prima) | `lessons.py --propose --dry-run`, poi `lessons.py --propose` | sì | **sì** (API Anthropic) |
+| Accetta / rifiuta | `lessons.py --accept ID [--text=…] [--remove-id ID]` / `--reject ID --reason=…` | no | no |
+| Revisione, andamento | `lessons.py --review`, `lessons.py --trend` | no | no |
+
+- Il registro delle lezioni è condiviso: accetta, rifiuta, revisione e proposte si
+  scrivono sotto lock e in modo atomico (anche `lezioni.md`). `lezioni_md` nel JSON è
+  relativo (`prompts/lezioni.md`).
+- Una lezione accettata entra nel prompt di **tutti** gli episodi successivi.
+- `--accept` può dare exit 3 `needs_user_input` (serve togliere una lezione: si richiama con
+  `--remove-id`).
+- Da sistemare nella fase finale: gli errori dell'API in `--propose` non hanno ancora gli
+  `error_type` del copione (`ModelAuthError`, …).
+
+## Diagnostica
+
+`doctor.py` (nessun argomento) → `{"ok", "checks": [{"name", "ok", "required", "detail"}],
+"ffmpeg_path"}`. Fa eccezione al contratto degli exit code: 0 se tutti i controlli
+obbligatori passano, 1 altrimenti, sempre con il JSON. Percorsi relativi al progetto
+(`.`) o alla home (`~`), anche su stderr.
 

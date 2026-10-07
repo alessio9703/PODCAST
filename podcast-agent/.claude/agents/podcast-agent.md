@@ -100,7 +100,7 @@ stderr. Leggi il JSON, non il testo.
 | `tools/script_show.py --run-dir D` | rilegge il copione corrente | `rendered`, `version`, `approved`, `approval_problem`, `versions[]` |
 | `tools/script_versions.py --run-dir D --list \| --diff A [B] \| --restore N` | storico, confronto fra versioni, ripristino (= nuova versione da riapprovare) | `versions[]` / `righe[]` con `stato` (invariata, modificata, aggiunta, rimossa) / la versione nuova |
 | `tools/script_approve.py --run-dir D --current` | registra il sì dell'utente (sulla versione corrente; `--version V` al posto di `--current` la fissa) | `version`, `sha256` |
-| `tools/voice_meta.py --name N [--consent \| --revoke-consent] --by U` | stato del consenso di una voce; lo registra (solo dopo il sì dell'utente) o lo revoca | `consenso: {stato, da, il}` |
+| `tools/voice_meta.py --name N [--consent \| --revoke-consent] [--spoken-name "Nome Cognome"] --by U` | stato del consenso di una voce; lo registra (solo dopo il sì dell'utente) o lo revoca; registra il nome pronunciato confermato dall'utente | `consenso: {stato, da, il}`, `nome_pronunciato` |
 | `tools/voices_prepare.py --speakers A B --out V --run-dir D [--dry-run]` | cache o clonazione (consenso controllato prima) | `voice_map`, `newly_cloned[]`, `reused[]`, `audio_paths_file`; exit `3` `ConsentRequired` |
 | `tools/estimate.py --script S` | stima | `chars`, `duration_label`, `cost_usd`, `rendered`, `duration_with_music_seconds` se ci sono musiche |
 | `tools/estimate.py --script S --run-dir D` | stima **incrementale**: conta solo i turni non in cache | `turns_to_generate`, `chars_to_generate`, `cost_to_generate_usd` |

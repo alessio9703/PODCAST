@@ -28,7 +28,7 @@ from .run_lock import session_lock
 from .script_session import FILENAME as SESSION_FILENAME
 from .script_session import ScriptSession
 from .voice_library import VoiceLibrary, VoiceLibraryError, spoken_name_guess
-from .voice_meta import consent_view
+from .voice_meta import consent_view, load_meta
 
 
 def resolve_voice(library: VoiceLibrary, query: str, role: str) -> str:
@@ -236,6 +236,12 @@ def episode_view(run_dir: Path, config: Any, episode: EpisodeConfig | None = Non
             voice_id, _ = registry.lookup(voice.name, voice.path, config.active_provider)
             cloned = voice_id is not None
         proposed = spoken_name_guess(row["voce"]) if row["voce"] else None
+        if voice is not None:
+            # Il nome confermato nella libreria Voci vale piu' della proposta
+            # ricavata dal nome del file (resta comunque solo una proposta).
+            confirmed = load_meta(voice.path).get("nome_pronunciato")
+            if confirmed:
+                proposed = (confirmed, True)
         roles.append(
             {
                 **row,

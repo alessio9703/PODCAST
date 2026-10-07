@@ -3,6 +3,12 @@
 
     python tools/voices_list.py
     python tools/voices_list.py --resolve "Mario Rossi" --resolve "giulia b"
+    python tools/voices_list.py --filter consenso_da_confermare --search rossi
+
+Per ogni voce (libreria Voci): durata del campione, se e' gia' clonata e
+quando, consenso, nome pronunciato (`nome_confermato` se registrato con
+voice_meta.py --spoken-name, altrimenti solo proposto dal nome del file) e in
+quanti episodi e' stata usata.
 
 REGOLA: per le corrispondenze parziali questo tool ritorna `match: null` e la
 lista dei `candidates`. Non sceglie mai al posto tuo. Stai selezionando la voce
@@ -14,8 +20,8 @@ from __future__ import annotations
 import argparse
 
 from _common import add_config_arg, bootstrap, emit, note, parse_args, run_tool  # noqa: E402
-from src.registry import VoiceRegistry  # noqa: E402
-from src.voice_library import VoiceLibrary, spoken_name_guess  # noqa: E402
+from src.voice_catalog import FILTERS, filter_rows, voice_rows  # noqa: E402
+from src.voice_library import VoiceLibrary  # noqa: E402
 
 
 def main() -> None:
@@ -30,6 +36,8 @@ def main() -> None:
     parser.add_argument(
         "--require", type=int, default=0, help="Fallisci se ci sono meno di N voci"
     )
+    parser.add_argument("--filter", choices=FILTERS, default=None, help="Filtro della libreria Voci")
+    parser.add_argument("--search", default=None, help="Cerca nel nome")
     add_config_arg(parser)
     args = parse_args(parser)
 
@@ -39,28 +47,7 @@ def main() -> None:
     if args.require:
         library.require(args.require)
 
-    registry = VoiceRegistry(config.registry_file, project_root=config.registry_file.parent)
-    provider_name = config.active_provider
-
-    voices = []
-    for voice in library.voices:
-        voice_id, reason = registry.lookup(voice.name, voice.path, provider_name)
-        spoken, complete = spoken_name_guess(voice.name)
-        voices.append(
-            {
-                "name": voice.name,
-                # Proposta per la presentazione iniziale, da far confermare.
-                # name_complete=false: manca nome o cognome, va chiesto.
-                "spoken_name": spoken,
-                "name_complete": complete,
-                "path": str(voice.path),
-                "extension": voice.extension,
-                "size_mb": round(voice.size_bytes / (1024 * 1024), 2),
-                "cached": voice_id is not None,
-                "voice_id": voice_id,
-                "cache_reason": reason,
-            }
-        )
+    voices = filter_rows(voice_rows(config, library), args.filter, args.search)
 
     resolved = []
     for query in args.resolve:
@@ -81,7 +68,7 @@ def main() -> None:
     emit(
         {
             "voices_dir": str(config.voices_dir),
-            "provider": provider_name,
+            "provider": config.active_provider,
             "count": len(voices),
             "voices": voices,
             "rejected": [p.name for p in library.rejected_files],

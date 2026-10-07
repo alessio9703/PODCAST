@@ -21,7 +21,8 @@ import argparse
 
 from _common import add_config_arg, bootstrap, emit, note, parse_args, run_tool  # noqa: E402
 from src.errors import AmbiguousName  # noqa: E402
-from src.music_library import CATEGORIES, MusicLibrary, MusicTrack  # noqa: E402
+from src.music_catalog import FILTERS, keep, music_usage, track_row  # noqa: E402
+from src.music_library import CATEGORIES, MusicLibrary  # noqa: E402
 
 
 def main() -> None:
@@ -30,6 +31,8 @@ def main() -> None:
         "--resolve", nargs=2, metavar=("CATEGORIA", "NOME"), default=None,
         help="Risolve un nome dentro una categoria (intro|outro|sottofondo)",
     )
+    parser.add_argument("--filter", choices=FILTERS, default=None, help="Filtro della libreria Musiche")
+    parser.add_argument("--search", default=None, help="Cerca nel nome del brano")
     add_config_arg(parser)
     args = parse_args(parser)
 
@@ -39,32 +42,22 @@ def main() -> None:
 
     if args.resolve:
         category, name = args.resolve
-        _do_resolve(library, category, name)
+        _do_resolve(library, config, category, name)
         return
 
-    _do_list(library)
+    _do_list(library, config, args.filter, args.search)
 
 
-def _track_summary(track: MusicTrack) -> dict:
-    return {
-        "name": track.name,
-        "extension": track.extension,
-        "duration_seconds": track.duration_seconds(),
-        "has_licenza": bool(track.metadata.licenza),
-        "parlato": track.metadata.parlato,
-        "usable": track.metadata_error is None,
-        "error": track.metadata_error,
-    }
-
-
-def _do_list(library: MusicLibrary) -> None:
+def _do_list(library: MusicLibrary, config, filter_, search) -> None:  # type: ignore[no-untyped-def]
+    usage = music_usage(config)
     payload: dict[str, object] = {
         "music_dir": str(library.dir), "available": library.available(),
     }
     for category in CATEGORIES:
         tracks = library.tracks(category)
         rejected = library.rejected_files(category)
-        payload[category] = [_track_summary(t) for t in tracks]
+        rows = [track_row(t, config, usage) for t in tracks]
+        payload[category] = [r for r in rows if keep(r, filter_, search)]
         payload[f"{category}_rejected"] = [p.name for p in rejected]
 
         note(
@@ -87,7 +80,7 @@ def _do_list(library: MusicLibrary) -> None:
     emit(payload)
 
 
-def _do_resolve(library: MusicLibrary, category: str, name: str) -> None:
+def _do_resolve(library: MusicLibrary, config, category: str, name: str) -> None:  # type: ignore[no-untyped-def]
     if category not in CATEGORIES:
         raise ValueError(f"Categoria '{category}' sconosciuta. Ammesse: {', '.join(CATEGORIES)}.")
 
@@ -99,7 +92,7 @@ def _do_resolve(library: MusicLibrary, category: str, name: str) -> None:
                 f"'{match.name}' ({category}) non e' utilizzabile: {match.metadata_error}"
             )
         note(f"'{name}' -> '{match.name}'")
-        emit({"category": category, "query": name, "match": match.name, **_track_summary(match)})
+        emit({"category": category, "query": name, "match": match.name, **track_row(match, config)})
         return
 
     if candidates:

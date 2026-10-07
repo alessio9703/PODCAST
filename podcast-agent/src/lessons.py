@@ -29,6 +29,7 @@ from pathlib import Path
 from typing import Any, Callable
 
 from .episode_signals import SCHEMA_VERSION
+from .fileio import file_lock, write_text_atomic
 
 DB_FILENAME = "_lezioni.json"
 MD_FILENAME = "lezioni.md"
@@ -139,12 +140,19 @@ def load_db(prompts_dir: Path) -> list[dict[str, Any]]:
 
 
 def save_db(prompts_dir: Path, entries: list[dict[str, Any]]) -> Path:
+    """Scrittura atomica (temporaneo con nome unico): chi legge non vede mai
+    un file a meta'. Le modifiche passano da _db_lock() con rilettura dentro."""
     target = Path(prompts_dir) / DB_FILENAME
     target.parent.mkdir(parents=True, exist_ok=True)
-    tmp = target.with_suffix(target.suffix + ".tmp")
-    tmp.write_text(json.dumps(entries, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
-    tmp.replace(target)
-    return target
+    return write_text_atomic(target, json.dumps(entries, indent=2, ensure_ascii=False) + "\n")
+
+
+def _db_lock(prompts_dir: Path):  # type: ignore[no-untyped-def]
+    """Lock fra processi sul registro delle lezioni: con l'interfaccia web due
+    persone possono accettare o rifiutare lezioni insieme. Chi lo tiene
+    rilegge il registro dentro il lock (nessuna modifica persa)."""
+    Path(prompts_dir).mkdir(parents=True, exist_ok=True)
+    return file_lock(Path(prompts_dir) / DB_FILENAME)
 
 
 def _next_id(entries: list[dict[str, Any]]) -> str:
@@ -531,6 +539,14 @@ def propose(
     )
     raw = call_model(prompt, api_key=api_key, model=model, caller=caller)
 
+    # La chiamata al modello sta FUORI dal lock (dura secondi); il registro si
+    # rilegge dentro, cosi' gli id non si scontrano con quelli scritti intanto.
+    with _db_lock(prompts_dir):
+        return _record_proposals(prompts_dir, raw, aggregated, model)
+
+
+def _record_proposals(prompts_dir: Path, raw: dict[str, Any], aggregated: dict[str, Any], model: str) -> dict[str, Any]:
+    entries = load_db(prompts_dir)
     proposte: list[dict[str, Any]] = []
     scartate: list[dict[str, Any]] = []
     for item in (raw.get("lezioni") or [])[:2]:
@@ -607,7 +623,7 @@ def _removal_candidates(entries: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return out
 
 
-def accept(
+def _accept(
     prompts_dir: Path,
     lezioni_md_path: Path,
     lesson_id: str,
@@ -656,17 +672,30 @@ def accept(
         removed["rimossa_il"] = accettata_il
         removed["motivo_rimozione"] = f"tolta per far posto a {lesson_id}"
 
-    lezioni_md_path.write_text(render_lezioni_md(entries), encoding="utf-8")
+    write_text_atomic(lezioni_md_path, render_lezioni_md(entries))
     save_db(prompts_dir, entries)
     return {
         "id": lesson_id,
         "testo": testo_finale,
-        "lezioni_md": str(lezioni_md_path),
+        # Relativo: niente percorsi del server nella risposta.
+        "lezioni_md": f"{lezioni_md_path.parent.name}/{lezioni_md_path.name}",
         "rimossa": remove_id,
     }
 
 
+def accept(prompts_dir: Path, lezioni_md_path: Path, lesson_id: str, **kwargs: Any) -> dict[str, Any]:
+    """Promuove una proposta: sotto il lock del registro (vedi _db_lock)."""
+    with _db_lock(prompts_dir):
+        return _accept(prompts_dir, lezioni_md_path, lesson_id, **kwargs)
+
+
 def reject(prompts_dir: Path, lesson_id: str, *, reason: str | None) -> dict[str, Any]:
+    """Scarta una proposta: sotto il lock del registro (vedi _db_lock)."""
+    with _db_lock(prompts_dir):
+        return _reject(prompts_dir, lesson_id, reason=reason)
+
+
+def _reject(prompts_dir: Path, lesson_id: str, *, reason: str | None) -> dict[str, Any]:
     entries = load_db(prompts_dir)
     entry = next((e for e in entries if e.get("id") == lesson_id), None)
     if entry is None:
@@ -680,7 +709,7 @@ def reject(prompts_dir: Path, lesson_id: str, *, reason: str | None) -> dict[str
     return {"id": lesson_id, "stato": "rifiutata", "motivo_rifiuto": entry["motivo_rifiuto"]}
 
 
-def review(
+def _review(
     prompts_dir: Path, signals_by_episode: list[dict[str, Any]], *, after_episodes: int
 ) -> dict[str, Any]:
     """Ricontrolla, con lo STESSO aggregatore deterministico usato per
@@ -721,6 +750,12 @@ def review(
     if controllate:
         save_db(prompts_dir, entries)
     return {"lezioni_non_funzionanti": segnalate, "lezioni_controllate_tutte": controllate}
+
+
+def review(prompts_dir: Path, signals_by_episode: list[dict[str, Any]], *, after_episodes: int) -> dict[str, Any]:
+    """Ricontrolla le lezioni attive: sotto il lock del registro (vedi _db_lock)."""
+    with _db_lock(prompts_dir):
+        return _review(prompts_dir, signals_by_episode, after_episodes=after_episodes)
 
 
 _TREND_WARNING = (

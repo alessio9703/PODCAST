@@ -447,7 +447,8 @@ def test_accept_unico_scrittore_di_lezioni_md() -> None:
         content = md_path.read_text(encoding="utf-8")
         check("contiene la regola", "Regola di prova." in content)
         check("L1 risulta attiva nel DB", any(e["id"] == "L1" and e["stato"] == "attiva" for e in lm.load_db(prompts_dir)))
-        check("accept ritorna il path di lezioni.md", result["lezioni_md"] == str(md_path))
+        # Relativo alla cartella dei prompt: niente percorsi del server nella risposta.
+        check("accept ritorna il path di lezioni.md", result["lezioni_md"] == f"{md_path.parent.name}/{md_path.name}")
 
 
 def test_accept_tetto_di_righe() -> None:

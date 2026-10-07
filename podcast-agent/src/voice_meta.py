@@ -91,6 +91,12 @@ def _validate(meta: dict[str, Any], path: Path) -> None:
             raise VoiceMetaError(
                 f"{path.name}: '{key}' deve essere un oggetto o null.", details={"file": path.name, "campo": key}
             )
+    spoken = meta.get("nome_pronunciato")
+    if spoken is not None and not isinstance(spoken, str):
+        raise VoiceMetaError(
+            f"{path.name}: 'nome_pronunciato' deve essere un testo o null.",
+            details={"file": path.name, "campo": "nome_pronunciato"},
+        )
     consent = meta.get("consenso")
     if consent is not None:
         digest = consent.get("audio_sha256")
@@ -199,6 +205,39 @@ def record_consent(
     return meta
 
 
+def record_spoken_name(
+    audio_path: Path | str, *, voice: str, name: str, by: str | None, accept_incomplete: bool = False
+) -> dict[str, Any]:
+    """Il nome e cognome della persona, come va pronunciato negli episodi.
+
+    Stessa regola del passo 2 (episode_config.py --nome): senza cognome exit 3
+    SpokenNameIncomplete, a meno della conferma esplicita `accept_incomplete`.
+    Il passo 2 lo propone poi come nome per il ruolo (mai salvato da solo).
+    """
+    from .episode_config import SpokenNameIncomplete, spoken_name_is_complete
+
+    clean = " ".join(str(name).split())
+    if not clean:
+        raise VoiceMetaError("Il nome da pronunciare e' vuoto.", details={"campo": "nome_pronunciato"})
+    if not accept_incomplete and not spoken_name_is_complete(clean):
+        raise SpokenNameIncomplete(
+            f"'{clean}': manca il cognome. Aggiungilo, non lo indoviniamo; se va detto proprio "
+            "cosi', confermalo esplicitamente.",
+            details={"campo": "nome_pronunciato", "voce": voice, "nome": clean},
+        )
+    audio_path = Path(audio_path)
+    target = meta_path(audio_path)
+    with file_lock(target):
+        meta = load_meta(audio_path)
+        meta["schema_version"] = SCHEMA_VERSION
+        meta["voce"] = voice
+        meta["nome_pronunciato"] = clean
+        meta["nome_pronunciato_da"] = " ".join(by.split()) if by else None
+        meta["nome_pronunciato_il"] = _now()
+        write_json_atomic(target, meta)
+    return meta
+
+
 def revoke_consent(audio_path: Path | str, *, voice: str, by: str | None) -> tuple[dict[str, Any], dict[str, Any] | None]:
     """Revoca il consenso. Ritorna (metadati, consenso revocato o None).
 
@@ -232,5 +271,6 @@ __all__ = [
     "load_meta",
     "meta_path",
     "record_consent",
+    "record_spoken_name",
     "revoke_consent",
 ]
