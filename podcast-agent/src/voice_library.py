@@ -12,6 +12,8 @@ import unicodedata
 from dataclasses import dataclass
 from pathlib import Path
 
+from .registry import RESERVED_NAMES
+
 
 class VoiceLibraryError(RuntimeError):
     """Problema nella cartella delle voci disponibili."""
@@ -97,6 +99,12 @@ class VoiceLibrary:
             # Metadati accanto alla registrazione (src/voice_meta.py) e i loro
             # lock: non sono registrazioni, ne' file in un formato sbagliato.
             if entry.suffix.lower() in _SIDECAR_EXTENSIONS:
+                continue
+            if entry.stem.strip() in RESERVED_NAMES:
+                # Nomi riservati del registro (revoche, storico): una voce cosi'
+                # si clonerebbe a pagamento e poi non si potrebbe registrare
+                # (revisione di sicurezza C7, MEDIA-2). Scartata prima di spendere.
+                rejected.append(entry)
                 continue
             if entry.suffix.lower() in self.accepted_extensions:
                 voices.append(AvailableVoice(name=entry.stem.strip(), path=entry))

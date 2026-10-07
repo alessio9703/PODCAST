@@ -1,6 +1,6 @@
 # Stato dell'integrazione web
 
-Ultimo aggiornamento: 2026-10-07 (correzioni di sicurezza e modalità web). Branch `integrazione-web`.
+Ultimo aggiornamento: 2026-10-07 (fase C7: correzioni della revisione finale). Branch `integrazione-web`.
 
 Il metodo di lavoro e le regole sono in `CLAUDE.md`. I dettagli di ogni fase sono nei
 resoconti accanto a questo file:
@@ -13,6 +13,8 @@ resoconti accanto a questo file:
 - `C4.md`, `C4-sicurezza.md`
 - `C5.md` (con il riepilogo finale dell'integrazione web), `C5-sicurezza.md`
 - `C6.md`, `C6-sicurezza.md`
+- `REVISIONE-FINALE.md` (revisione indipendente dell'intero branch)
+- `C7.md`, `C7-sicurezza.md`
 
 ## 1. Commit
 
@@ -41,10 +43,16 @@ resoconti accanto a questo file:
 | `9212351` | sicurezza C5: medie e basse corrette |
 | `be9b674` | **C6** fase finale: run.py, lessons, ffmpeg, sha256 dei documenti, flusso in modalità web, pulizia |
 | `ff4670d` | rapporto di sicurezza C6 |
-| (questo) | sicurezza C6: basse corrette. **Fine del lavoro di questa sessione** |
+| `d88b9d2` | sicurezza C6: basse corrette |
+| `b06c70c` | prompt iniziale dell'integrazione web in `docs/avanzamento/` |
+| `39c1178` | revisione finale: controllo automatico su ffmpeg/ffprobe con `-i` |
+| `d61ee5e` | **revisione finale** dell'intero branch (3 bloccanti, 32 non bloccanti) |
+| `400b781` … `269b7a6` | **C7** correzioni della revisione finale, blocchi A–G (dettaglio in `C7.md`) |
+| (questo) | C7: resoconto, `STATO.md`, rapporto di sicurezza C7, correzioni di ALTA-1, MEDIA-1, MEDIA-2 |
 
-Test all'ultimo commit, sempre con `.venv/bin/python`: smoke 68, tools_cli 183 (+2
-saltati, servono `ANTHROPIC_API_KEY`), music 73, lessons 80, web_integration 666.
+Test all'ultimo commit, sempre con `.venv/bin/python`: smoke 68, tools_cli 190 (+1
+saltato: il test reale con Anthropic, solo con `PODCAST_E2E_REALE=1`), music 73,
+lessons 80, web_integration 799.
 
 ## 2. Fasi
 
@@ -59,6 +67,8 @@ saltati, servono `ANTHROPIC_API_KEY`), music 73, lessons 80, web_integration 666
 | C4 | Archivio e librerie (Documenti, Voci, Musiche), Impostazioni, verifica di Lezioni e Diagnostica | **fatta**; revisione: 0 alte, 3 medie, 5 basse, **tutte corrette** |
 | C5 | Contratto completo + README/LEGENDA + riepilogo finale | **fatta** (verifica finale compresa); revisione: 0 alte, 2 medie, 5 basse, **tutte corrette** |
 | C6 | Fase finale: `run.py` su `src/music_context.py`, `lessons --propose`, ffmpeg, sha256 dei documenti, flusso in modalità web, pulizia | **fatta**; revisione: 0 alte, 0 medie, 3 basse, **tutte corrette** |
+| Revisione finale | Revisione indipendente dell'intero branch (`REVISIONE-FINALE.md`) | **fatta**: 3 bloccanti, 32 non bloccanti |
+| C7 | Correzioni della revisione finale: B1–B3, N1, §8.6, N2–N6, N8–N12, N14–N27, percorso dei wireframe | **fatta**; revisione: 1 alta, 2 medie, 4 basse; **alta e medie corrette**, basse da decidere (`C7.md` §6) |
 
 A fine di **ogni** fase: revisione di sicurezza (`<fase>-sicurezza.md`), alte corrette
 prima della fase successiva.
@@ -198,8 +208,17 @@ musiche → copione → modifica → approva → stima → consenso → produce 
   al suo sha256), non per il singolo episodio. Un consenso revocato blocca anche il riuso;
   una registrazione sostituita va riconfermata. `clone_cost_usd` sta in
   `providers.<nome>.clone_cost_usd`.
+- **Attuata per intero solo in C7 (N1)**: in C2 era diventata soltanto "la revoca blocca
+  anche il riuso". Ora, dal web, anche il riuso richiede il consenso registrato; le voci
+  clonate senza consenso risultano "da confermare" (niente migrazione); le revoche
+  restano nel registro (`__revoche__`) anche cancellando i file; retake e mix controllano i
+  `voice_id` di `voci.json`.
 
 ### D5 · Consenso
+- **Superata in C7 (2026-10-07, decisione dell'utente su B1)**: `run.py` passa da
+  `src/voice_prep` (lock, marcatore, hash); una voce revocata blocca sempre; il consenso
+  mancante di una voce da clonare si chiede con `input()` e si registra come dal web;
+  senza un sì esplicito non clona. Il testo sotto è la storia della decisione.
 - **Decisione del piano** (approvato il 2026-10-06): il blocco "niente clonazione senza
   consenso registrato" vale per i tool (`voices_prepare.py`, `produce.py`) e quindi per
   l'adattatore e il subagent.
@@ -281,10 +300,15 @@ musiche → copione → modifica → approva → stima → consenso → produce 
 
 ## 4. Richieste ricevute e non ancora completate
 
-1. **Revisione finale dell'intero branch** (`33068cc..HEAD`), da fare in una **sessione
-   nuova** (richiesta dell'utente, 2026-10-07). Tutte le fasi C0–C6 sono fatte, ognuna con
-   la sua revisione di sicurezza e tutte le gravità corrette. Il riepilogo è in `C5.md`
-   (sezione 3) e `C6.md`.
+1. **Merge in `main`**: lo decide l'utente dopo aver letto `C7.md` (richiesta del
+   2026-10-07: "NON fare il merge"). Revisione finale fatta (`REVISIONE-FINALE.md`), C7
+   fatta.
+2. **Dopo il merge, fase di rifinitura separata**: N28–N32 di `REVISIONE-FINALE.md`
+   (nomi degli `error_type`, codice morto, logica rimasta in `tools/`, documenti in
+   disaccordo, installazione), salvo il percorso dei wireframe già corretto in C7.
+3. **Interpretazioni di C7 da confermare**: `C7.md` §4 (consenso per il riuso in
+   `run.py`, retake = riuso, revoca conservativa, …).
+4. **Basse della sicurezza C7 da decidere**: BASSA-1..4 in `C7.md` §6.
 
 ## 5. Annotazioni per le fasi successive e per la fase finale
 

@@ -43,8 +43,10 @@ from src.voice_prep import (  # noqa: E402
     grant_consent,
     pending_clone,
     resolve_library_voice,
+    revoke_missing_voice,
     revoke_voice_consent,
 )
+from src.voice_library import VoiceLibraryError  # noqa: E402
 
 
 def main() -> None:
@@ -76,7 +78,29 @@ def main() -> None:
             "registrazione che l'utente ha visto.",
             details={"messaggio": "manca --expect-sha256"},
         )
-    voice = resolve_library_voice(config, args.name)
+    try:
+        voice = resolve_library_voice(config, args.name)
+    except VoiceLibraryError:
+        if not args.revoke_consent:
+            raise
+        # La registrazione e' gia' stata cancellata: la revoca si scrive lo
+        # stesso nel registro, per il nome esatto che il registro conosce
+        # (revisione di sicurezza C7, MEDIA-1).
+        items = revoke_missing_voice(config, args.name, by=args.by)
+        note(f"{args.name}: la registrazione non c'e' piu'; revoca scritta nel registro delle voci.")
+        emit(
+            {
+                "voce": args.name,
+                "file": None,
+                "nome_pronunciato": None,
+                "consenso": {"stato": "revocato", "revoca_nel_registro": True, "da_confermare": False},
+                "consenso_revocato": None,
+                "revoche_registro": len(items),
+                "clonazione_incerta": None,
+                "clonazione_incerta_tolta": None,
+            }
+        )
+        return
 
     revoked = None
     cleared = None

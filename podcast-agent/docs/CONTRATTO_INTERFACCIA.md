@@ -821,15 +821,22 @@ exit 3 `AmbiguousName` con `candidates`. Il consenso vale per la registrazione a
 ne salva lo sha256): se il file audio viene sostituito lo stato diventa `superato`. Una
 voce con il consenso **revocato** non si clona, non si riusa e non si rimonta.
 
-**Revoche nel registro** (C7, N1). `--revoke-consent` scrive la revoca anche in
-`voices_registry.json` (chiave riservata `__revoche__`: voce, `voice_id` clonato,
-sha256 della registrazione, chi e quando). La revoca vale quindi anche dopo aver
-cancellato la registrazione e il suo `.json`: la stessa registrazione ricaricata risulta
-`revocato` (`revoca_nel_registro: true`), e un retake o un rimontaggio di un episodio
-vecchio con quel `voice_id` dà exit 3 `ConsentRequired`. Un nuovo `--consent` sulla
-**stessa** registrazione toglie la revoca; una registrazione diversa con lo stesso nome
-non rende di nuovo usabile il `voice_id` revocato. Per cancellare una voce, quindi,
-**prima** si revoca, poi si cancellano i file.
+**Revoche nel registro** (C7, N1 e sicurezza C7). `--revoke-consent` scrive le revoche
+anche in `voices_registry.json`, sotto la chiave riservata `__revoche__`: **una per ogni
+registrazione** nota della voce (l'attuale, quella del consenso revocato, quelle clonate
+in passato, dallo storico del registro `__storico__` e da `voci_usate.json` delle run),
+ognuna con i `voice_id` clonati **da quella** registrazione, chi e quando. La revoca vale
+quindi anche dopo aver cancellato la registrazione e il suo `.json`: la stessa
+registrazione ricaricata risulta `revocato` (`revoca_nel_registro: true`), e un retake o
+un rimontaggio di un episodio con uno di quei `voice_id` dà exit 3 `ConsentRequired`. Un
+nuovo `--consent` toglie solo la revoca di **quella** registrazione (e dei voice_id clonati
+da lei); le altre restano. Per cancellare una voce **prima** si revoca, poi si cancellano
+i file. Se i file sono già stati cancellati, `voice_meta.py --name VOCE --revoke-consent
+--by U` funziona lo stesso per il **nome esatto** che il registro conosce (risposta con
+`file: null` e `revoche_registro`, il numero di revoche scritte); un nome che il registro
+non conosce, o incompleto, è un errore (non si indovina). I nomi `__revoche__` e
+`__storico__` sono riservati: una registrazione con quel nome è fra i file scartati e non
+si clona.
 
 ## Passo 6 · Generazione
 

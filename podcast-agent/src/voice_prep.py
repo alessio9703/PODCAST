@@ -333,32 +333,72 @@ def grant_consent(config: Any, voice: AvailableVoice, *, by: str | None, expect_
     return meta
 
 
+def _clones_in_runs(config: Any, voice: str) -> list[tuple[str | None, str]]:
+    """(sha256, voice_id) della voce in voci_usate.json delle run: anche le
+    clonazioni precedenti al registro con lo storico (C7, MEDIA-1)."""
+    pairs: list[tuple[str | None, str]] = []
+    output = Path(config.output_dir)
+    if not output.is_dir():
+        return pairs
+    for run in sorted(output.iterdir()):
+        target = run / "voci_usate.json"
+        if run.name.startswith(".") or run.is_symlink() or not run.is_dir() or target.is_symlink() or not target.is_file():
+            continue
+        try:
+            speakers = json.loads(target.read_text(encoding="utf-8")).get("speakers") or {}
+        except (OSError, ValueError, AttributeError):
+            continue
+        row = speakers.get(voice) if isinstance(speakers, dict) else None
+        if isinstance(row, dict) and isinstance(row.get("voice_id"), str):
+            pairs.append((row.get("audio_hash") if isinstance(row.get("audio_hash"), str) else None, row["voice_id"]))
+    return pairs
+
+
+def _record_revocation(config: Any, registry: VoiceRegistry, voice: str, hashes: list[str | None], by: str, when: str) -> list[dict[str, Any]]:
+    """Una revoca per registrazione, ognuna con i voice_id clonati da lei."""
+    clones: dict[str | None, list[str]] = {h: [] for h in hashes if h}
+    for digest, voice_id in [*registry.clones_of(voice), *_clones_in_runs(config, voice)]:
+        clones.setdefault(digest, []).append(voice_id)
+    entry = registry.get(voice) or {}
+    return registry.record_revocation(voice, clones=clones, provider=entry.get("provider"), by=by, when=when)
+
+
 def revoke_voice_consent(config: Any, voice: AvailableVoice, *, by: str | None) -> tuple[dict[str, Any], dict[str, Any] | None]:
     """Revoca il consenso nei metadati E nel registro delle voci.
 
-    Nel registro restano lo sha256 della registrazione (attuale, del consenso
-    revocato e della voce clonata) e il voice_id clonato: cosi' la revoca
-    vale anche dopo aver cancellato il file audio e il suo .json, come chiede
-    la procedura del README, e un retake o un mix di una run vecchia non usa
-    piu' quel voice_id (revisione finale, N1).
+    Nel registro si scrive una revoca per ogni registrazione nota della voce
+    (l'attuale, quella del consenso revocato, quelle clonate in passato, dal
+    registro, dal suo storico e da voci_usate.json delle run), ognuna con i
+    voice_id clonati da lei. Cosi' la revoca vale anche dopo aver cancellato il
+    file audio e il suo .json, e un retake o un mix di una run vecchia non usa
+    piu' nessuno di quei voice_id (revisione finale N1; sicurezza C7, ALTA-1 e
+    MEDIA-1).
     """
     meta, previous = revoke_consent(voice.path, voice=voice.name, by=by)
-    registry = _registry(config)
-    entry = registry.get(voice.name) or {}
     revocation = meta["consenso_revocato"]
-    registry.record_revocation(
-        voice.name,
-        audio_hashes=[
-            file_hash(voice.path),
-            (previous or {}).get("audio_sha256"),
-            entry.get("audio_hash"),
-        ],
-        voice_ids=[entry.get("voice_id")],
-        provider=entry.get("provider"),
-        by=revocation["da"],
-        when=revocation["il"],
+    _record_revocation(
+        config, _registry(config), voice.name, [file_hash(voice.path), (previous or {}).get("audio_sha256")],
+        revocation["da"], revocation["il"],
     )
     return meta, previous
+
+
+def revoke_missing_voice(config: Any, name: str, *, by: str | None) -> list[dict[str, Any]]:
+    """Revoca una voce la cui registrazione non e' piu' nella libreria.
+
+    Vale solo per un nome ESATTO che il registro conosce (riga o storico): non si
+    indovina. Senza file non ci sono metadati da aggiornare, ma la revoca nel
+    registro blocca i voice_id clonati (sicurezza C7, MEDIA-1).
+    """
+    from .voice_meta import _now, _require_by
+
+    who = _require_by(by)
+    registry = _registry(config)
+    if not registry.knows(name):
+        raise VoiceLibraryError(
+            f"'{name}' non e' nella libreria e il registro delle voci non lo conosce: niente da revocare.",
+        )
+    return _record_revocation(config, registry, name, [], who, _now())
 
 
 def _clone_lock_target(config: Any, name: str) -> Path:
@@ -545,6 +585,7 @@ __all__ = [
     "check_consent",
     "check_not_revoked",
     "grant_consent",
+    "revoke_missing_voice",
     "revoke_voice_consent",
     "plan_voices",
     "prepare_voices",

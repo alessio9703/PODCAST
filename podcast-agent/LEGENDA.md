@@ -73,10 +73,10 @@ podcast-agent/
     ├── fake_provider.py ........... provider finto (toni sinusoidali) — anche da esempio
     ├── fake_anthropic.py .......... client Anthropic finto: i test non chiamano mai l'API
     ├── test_smoke.py .............. 68 controlli sui moduli src/
-    ├── test_tools_cli.py .......... 183 controlli sui CLI del subagent
+    ├── test_tools_cli.py .......... 190 controlli sui CLI del subagent
     ├── test_music.py .............. 73 controlli su intro/outro/sottofondo
     ├── test_lessons.py ............ 80 controlli: segnali e lezioni, mai sui file veri di prompts/
-    └── test_web_integration.py .... 666 controlli sull'integrazione web
+    └── test_web_integration.py .... 799 controlli sull'integrazione web
 ```
 
 Come si incastrano (le frecce vanno da "chi chiama" a "chi viene chiamato"):

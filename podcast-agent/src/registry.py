@@ -16,18 +16,27 @@ Il registro e' condiviso fra tutti i processi (piu' utenti dall'interfaccia
 web): ogni modifica passa da `file_lock` e RILEGGE il file dentro il lock, cosi'
 due clonazioni concorrenti non si cancellano a vicenda (vedi src/fileio.py).
 
-Le revoche del consenso stanno sotto una chiave riservata, che non e' una voce:
+Due chiavi riservate, che non sono voci:
 
-  "__revoche__": [
-    {"voce": "Mario Rossi", "audio_sha256": ["sha256:..."], "voice_id": ["abc123"],
+  "__storico__": [   # ogni clonazione registrata, anche quelle poi sovrascritte
+    {"voce": "Mario Rossi", "audio_sha256": "sha256:...", "voice_id": "abc123",
+     "provider": "fish_audio", "cloned_at": "2026-10-07T10:00:00"}
+  ],
+  "__revoche__": [   # UNA revoca per registrazione (sha256)
+    {"voce": "Mario Rossi", "audio_sha256": "sha256:...", "voice_id": ["abc123"],
      "provider": "fish_audio", "da": "Utente A", "il": "2026-10-07T18:00:00"}
   ]
 
-Restano anche se si cancellano la registrazione, il suo .json e la riga della
-voce: un voice_id revocato non torna a parlare in un retake di una run vecchia,
-e la stessa registrazione ricaricata risulta ancora revocata (revisione
-finale, N1). Una revoca si toglie solo registrando di nuovo il consenso per
-quella registrazione (`lift_revocations`).
+Una revoca riguarda una registrazione (il suo sha256) e i voice_id clonati DA
+QUELLA registrazione. Resta anche se si cancellano l'audio, il suo .json e la
+riga della voce: un voice_id revocato non torna a parlare in un retake di una
+run vecchia, e la stessa registrazione ricaricata risulta ancora revocata
+(revisione finale, N1). Si toglie solo registrando di nuovo il consenso per
+QUELLA registrazione (`lift_revocations`): il consenso su una registrazione
+diversa con lo stesso nome non rende usabili i voice_id della vecchia
+(revisione di sicurezza C7, ALTA-1). Lo storico serve a conoscere anche i
+voice_id di clonazioni precedenti, che una riclonazione ha tolto dalla riga
+della voce (C7, MEDIA-1).
 """
 
 from __future__ import annotations
@@ -43,8 +52,10 @@ from .fileio import file_lock, write_json_atomic
 
 _CHUNK = 1024 * 1024
 
-#: Chiave riservata delle revoche: non e' il nome di una voce.
+#: Chiavi riservate (revoche, storico delle clonazioni): non sono nomi di voci.
 REVOCATIONS_KEY = "__revoche__"
+HISTORY_KEY = "__storico__"
+RESERVED_NAMES = frozenset({REVOCATIONS_KEY, HISTORY_KEY})
 
 
 def file_hash(path: str | Path) -> str:
@@ -122,7 +133,7 @@ class VoiceRegistry:
             return p.as_posix()
 
     def _voices(self) -> dict[str, dict[str, Any]]:
-        return {k: v for k, v in self._data.items() if k != REVOCATIONS_KEY and isinstance(v, dict)}
+        return {k: v for k, v in self._data.items() if k not in RESERVED_NAMES and isinstance(v, dict)}
 
     def lookup(
         self, name: str, audio_path: str | Path, provider: str, *, audio_hash: str | None = None
@@ -158,14 +169,30 @@ class VoiceRegistry:
         raw = self._data.get(REVOCATIONS_KEY)
         return [r for r in raw if isinstance(r, dict)] if isinstance(raw, list) else []
 
+    def history(self) -> list[dict[str, Any]]:
+        raw = self._data.get(HISTORY_KEY)
+        return [r for r in raw if isinstance(r, dict)] if isinstance(raw, list) else []
+
     def revocation_for(self, *, voice_id: str | None = None, audio_hash: str | None = None) -> dict[str, Any] | None:
         """La revoca che riguarda questo voice_id o questa registrazione, o None."""
         for item in self.revocations():
             if voice_id and voice_id in (item.get("voice_id") or []):
                 return item
-            if audio_hash and audio_hash in (item.get("audio_sha256") or []):
+            if audio_hash and audio_hash == item.get("audio_sha256"):
                 return item
         return None
+
+    def clones_of(self, voice: str) -> list[tuple[str | None, str]]:
+        """(sha256 della registrazione, voice_id) di ogni clonazione nota della voce."""
+        pairs = [(h.get("audio_sha256"), h["voice_id"]) for h in self.history() if h.get("voce") == voice and h.get("voice_id")]
+        entry = self.get(voice)
+        if entry and entry.get("voice_id"):
+            pairs.append((entry.get("audio_hash"), entry["voice_id"]))
+        return list(dict.fromkeys(pairs))
+
+    def knows(self, voice: str) -> bool:
+        """La voce e' (o e' stata) nel registro con questo nome esatto."""
+        return self.get(voice) is not None or any(h.get("voce") == voice for h in self.history())
 
     # -- mutazioni --------------------------------------------------------
 
@@ -187,8 +214,8 @@ class VoiceRegistry:
         cambiato durante la clonazione, il voice_id verrebbe legato
         all'audio sbagliato (revisione di sicurezza C2, ALTA-1).
         """
-        if name == REVOCATIONS_KEY:
-            raise ValueError(f"'{REVOCATIONS_KEY}' e' riservato alle revoche del consenso, non e' un nome di voce.")
+        if name in RESERVED_NAMES:
+            raise ValueError(f"'{name}' e' un nome riservato del registro, non un nome di voce.")
         entry = RegistryEntry(
             name=name,
             audio_file=self._relative(audio_path),
@@ -204,6 +231,10 @@ class VoiceRegistry:
         with file_lock(self.path):
             self._data = self._load()
             self._data[name] = entry.to_dict()
+            self._data[HISTORY_KEY] = [
+                *self.history(),
+                {"voce": name, "audio_sha256": entry.audio_hash, "voice_id": voice_id, "provider": provider, "cloned_at": entry.cloned_at},
+            ]
             write_json_atomic(self.path, self._data)
         return entry
 
@@ -211,39 +242,42 @@ class VoiceRegistry:
         self,
         voice: str,
         *,
-        audio_hashes: list[str],
-        voice_ids: list[str],
+        clones: dict[str | None, list[str]],
         provider: str | None,
         by: str,
         when: str,
-    ) -> dict[str, Any]:
-        """Aggiunge una revoca (sotto lock, rileggendo dentro il lock)."""
-        item = {
-            "voce": voice,
-            "audio_sha256": sorted({h for h in audio_hashes if h}),
-            "voice_id": sorted({v for v in voice_ids if v}),
-            "provider": provider,
-            "da": by,
-            "il": when,
-        }
+    ) -> list[dict[str, Any]]:
+        """Aggiunge le revoche, una per registrazione (sotto lock, rileggendo dentro).
+
+        `clones`: sha256 della registrazione -> voice_id clonati da QUELLA
+        registrazione (lista vuota se non e' mai stata clonata). Una chiave None
+        raccoglie voice_id di cui non si conosce la registrazione: quella revoca
+        non si toglie mai con un consenso.
+        """
+        items = [
+            {"voce": voice, "audio_sha256": digest, "voice_id": sorted(set(ids)), "provider": provider, "da": by, "il": when}
+            for digest, ids in clones.items()
+            if digest or ids
+        ]
         with file_lock(self.path):
             self._data = self._load()
-            self._data[REVOCATIONS_KEY] = [*self.revocations(), item]
+            self._data[REVOCATIONS_KEY] = [*self.revocations(), *items]
             write_json_atomic(self.path, self._data)
-        return item
+        return items
 
     def lift_revocations(self, voice: str, audio_hash: str) -> list[dict[str, Any]]:
-        """Toglie le revoche di questa voce per QUESTA registrazione.
+        """Toglie le revoche di questa voce per QUESTA registrazione e basta.
 
         Si chiama solo quando il consenso viene registrato di nuovo per la
-        stessa registrazione. Le revoche di registrazioni diverse (un altro
-        file con lo stesso nome) restano: i loro voice_id non tornano usabili.
+        stessa registrazione: tornano usabili lei e i voice_id clonati da lei.
+        Le revoche di registrazioni diverse (un altro file con lo stesso nome)
+        e i loro voice_id restano (revisione di sicurezza C7, ALTA-1).
         """
         with file_lock(self.path):
             self._data = self._load()
             kept, lifted = [], []
             for item in self.revocations():
-                (lifted if item.get("voce") == voice and audio_hash in (item.get("audio_sha256") or []) else kept).append(item)
+                (lifted if item.get("voce") == voice and item.get("audio_sha256") == audio_hash else kept).append(item)
             if lifted:
                 if kept:
                     self._data[REVOCATIONS_KEY] = kept
@@ -259,4 +293,4 @@ class VoiceRegistry:
         return name in self._voices()
 
 
-__all__ = ["REVOCATIONS_KEY", "VoiceRegistry", "RegistryEntry", "file_hash"]
+__all__ = ["HISTORY_KEY", "RESERVED_NAMES", "REVOCATIONS_KEY", "VoiceRegistry", "RegistryEntry", "file_hash"]
