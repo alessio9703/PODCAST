@@ -66,7 +66,7 @@ def main() -> None:
             "path": str(document.path),
             "name": document.path.name,
             "kind": document.kind,
-            "size_bytes": document.path.stat().st_size,
+            "size_bytes": document.size_bytes,
             "sha256": document.sha256,
             "extractable": True,
             "pages": document.pages,

@@ -40,10 +40,11 @@ resoconti accanto a questo file:
 | `93862d9` | rapporto di sicurezza C5 |
 | `9212351` | sicurezza C5: medie e basse corrette |
 | `be9b674` | **C6** fase finale: run.py, lessons, ffmpeg, sha256 dei documenti, flusso in modalità web, pulizia |
-| (questo) | rapporto di sicurezza C6 |
+| `ff4670d` | rapporto di sicurezza C6 |
+| (questo) | sicurezza C6: basse corrette. **Fine del lavoro di questa sessione** |
 
 Test all'ultimo commit, sempre con `.venv/bin/python`: smoke 68, tools_cli 183 (+2
-saltati, servono `ANTHROPIC_API_KEY`), music 73, lessons 80, web_integration 661.
+saltati, servono `ANTHROPIC_API_KEY`), music 73, lessons 80, web_integration 666.
 
 ## 2. Fasi
 
@@ -57,7 +58,7 @@ saltati, servono `ANTHROPIC_API_KEY`), music 73, lessons 80, web_integration 661
 | C3 | Episodio e correzioni: passo 7 | **fatta**; revisione (con le correzioni di C2): 0 alte, 2 medie, 6 basse, **tutte corrette** |
 | C4 | Archivio e librerie (Documenti, Voci, Musiche), Impostazioni, verifica di Lezioni e Diagnostica | **fatta**; revisione: 0 alte, 3 medie, 5 basse, **tutte corrette** |
 | C5 | Contratto completo + README/LEGENDA + riepilogo finale | **fatta** (verifica finale compresa); revisione: 0 alte, 2 medie, 5 basse, **tutte corrette** |
-| C6 | Fase finale: `run.py` su `src/music_context.py`, `lessons --propose`, ffmpeg, sha256 dei documenti, flusso in modalità web, pulizia | **fatta**; revisione: 0 alte, 0 medie, 3 basse **in attesa di decisione** |
+| C6 | Fase finale: `run.py` su `src/music_context.py`, `lessons --propose`, ffmpeg, sha256 dei documenti, flusso in modalità web, pulizia | **fatta**; revisione: 0 alte, 0 medie, 3 basse, **tutte corrette** |
 
 A fine di **ogni** fase: revisione di sicurezza (`<fase>-sicurezza.md`), alte corrette
 prima della fase successiva.
@@ -280,13 +281,10 @@ musiche → copione → modifica → approva → stima → consenso → produce 
 
 ## 4. Richieste ricevute e non ancora completate
 
-1. **Decidere le basse della revisione C6** (`C6-sicurezza.md`): BASSA-1 brano con
-   l'estensione sbagliata accettato in libreria e fallito solo al mix; BASSA-2
-   `lessons.api_key_env` ignora `client_factory` e il messaggio `ModelAuthError` nomina
-   sempre `ANTHROPIC_API_KEY`; BASSA-3 `size_bytes` di `doc_extract` da un secondo `stat()`
-   e codice non raggiungibile in `extract_text`.
-2. **Dopo C6 questa sessione si ferma** (richiesta dell'utente): la revisione finale
-   dell'intero branch la fa una sessione nuova.
+1. **Revisione finale dell'intero branch** (`33068cc..HEAD`), da fare in una **sessione
+   nuova** (richiesta dell'utente, 2026-10-07). Tutte le fasi C0–C6 sono fatte, ognuna con
+   la sua revisione di sicurezza e tutte le gravità corrette. Il riepilogo è in `C5.md`
+   (sezione 3) e `C6.md`.
 
 ## 5. Annotazioni per le fasi successive e per la fase finale
 

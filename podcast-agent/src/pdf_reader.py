@@ -134,6 +134,8 @@ class Document:
     #: Calcolato sugli stessi byte, non rileggendo il file dopo: un file
     #: sostituito nel frattempo non da' sha256 e testo che non corrispondono.
     sha256: str | None = None
+    #: Dimensione degli stessi byte (C6, BASSA-3: non un secondo stat()).
+    size_bytes: int | None = None
 
     @property
     def char_count(self) -> int:
@@ -254,16 +256,10 @@ def extract_text(
     else:
         document = _read_plain(doc_path, data)
     document.sha256 = digest
-    if document is not None:
-        if document.char_count > limits.max_chars:
-            raise _too_large(doc_path, "caratteri", limits.max_chars, document.char_count, "caratteri del testo")
-        return document
-    raise UnsupportedDocument(
-        f"Estensione '{suffix}' non supportata. Formati gestiti: PDF, DOCX, "
-        f"{', '.join(sorted(TEXT_EXTENSIONS))}.",
-        extension=suffix,
-        supported=SUPPORTED_EXTENSIONS,
-    )
+    document.size_bytes = len(data)
+    if document.char_count > limits.max_chars:
+        raise _too_large(doc_path, "caratteri", limits.max_chars, document.char_count, "caratteri del testo")
+    return document
 
 
 def _read_pdf(path: Path, limits: DocumentLimits, data: bytes | None = None) -> Document:

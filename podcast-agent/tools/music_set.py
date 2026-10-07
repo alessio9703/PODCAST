@@ -89,8 +89,9 @@ def main() -> None:
             raise ValueError(
                 f"'{name}' non corrisponde a nessun brano in {category}/. Disponibili: {available}."
             )
-        if match.metadata_error:
-            raise ValueError(f"'{match.name}' ({category}) non e' utilizzabile: {match.metadata_error}")
+        problem = match.metadata_error or match.readability_error()
+        if problem:
+            raise ValueError(f"'{match.name}' ({category}) non e' utilizzabile: {problem}")
 
         updated[category] = match.name
         if not match.metadata.licenza:

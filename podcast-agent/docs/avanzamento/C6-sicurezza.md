@@ -156,3 +156,25 @@ con il limite di dimensione. La verifica in modalità web gira davvero con
 - **Revisione finale del branch**: controllare che nessuna nuova invocazione di ffmpeg usi
   `-i` direttamente; un test con `grep` su `"-i"` fuori da `ffmpeg_tool.py` lo
   garantirebbe.
+
+
+---
+
+## Esito delle correzioni (aggiunto da chi ha implementato, non dal revisore)
+
+Data: 2026-10-07. Nessuna alta né media. L'utente ha deciso di correggere le tre basse.
+
+- **BASSA-1**: `MusicTrack.readability_error()`: con ffmpeg disponibile, un brano non-wav
+  la cui durata non si legge con il formato della sua estensione è "non utilizzabile" con
+  il motivo, in `music_list.py` (`usable: false`, `error`), in `music_set.py` e in
+  `get_usable` (quindi in `preflight`, prima di qualunque spesa). Per le voci,
+  `voices_list.py` le segna `errore: "Illeggibile"` con `motivo`.
+- **BASSA-2**: con `script.client_factory` impostato `lessons.py --propose` usa sempre
+  quel client, anche se `lessons.api_key_env` è impostato. Il messaggio di
+  `ModelAuthError` non nomina più una variabile fissa: rimanda alla chiave nel `.env`
+  indicata in `config.yaml`.
+- **BASSA-3**: `Document.size_bytes` dagli stessi byte di testo e sha256, usato da
+  `doc_extract.py`; tolto il codice non più raggiungibile in `extract_text`.
+- Test: web_integration da 661 a 666; `[sicurezza C6]` (5 controlli: brano AAC chiamato .mp3 in elenco e in
+  `music_set`, voce illeggibile, messaggio di `ModelAuthError`, `size_bytes`).
+

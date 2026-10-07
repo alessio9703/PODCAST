@@ -55,18 +55,24 @@ def track_row(track: MusicTrack, config: Any, usage: dict[tuple[str, str], list[
     usage = music_usage(config) if usage is None else usage
     raw = _raw_meta(track)
     runs = usage.get((track.category, track.name), [])
+    duration = track.duration_seconds()
+    error = track.metadata_error
+    if error is None and duration is None:
+        # Durata non leggibile con ffmpeg disponibile: il file non e' quello
+        # che dice l'estensione (C6, BASSA-1).
+        error = track.readability_error()
     return {
         "name": track.name,
         "extension": track.extension,
-        "duration_seconds": track.duration_seconds(),
+        "duration_seconds": duration,
         "has_licenza": bool(track.metadata.licenza),
         "licenza": track.metadata.licenza,
         "licenza_da": raw.get("licenza_da"),
         "licenza_il": raw.get("licenza_il"),
         "parlato": track.metadata.parlato,
         "trascrizione": track.metadata.trascrizione,
-        "usable": track.metadata_error is None,
-        "error": track.metadata_error,
+        "usable": error is None,
+        "error": error,
         "usato_in": len(runs),
         "episodi": runs,
     }

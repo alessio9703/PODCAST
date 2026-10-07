@@ -88,7 +88,8 @@ def classify_api_error(exc: Exception) -> ScriptWriterError:
     if isinstance(exc, (anthropic.AuthenticationError, anthropic.PermissionDeniedError)):
         return ModelAccessError(
             f"Accesso all'API Anthropic rifiutato (HTTP {status}): chiave non valida o "
-            "senza permessi. Controlla ANTHROPIC_API_KEY.",
+            "senza permessi. Controlla la chiave Anthropic nel file .env (la variabile "
+            "indicata in config.yaml, di solito ANTHROPIC_API_KEY).",
             error_type="ModelAuthError",
             status=status,
         )

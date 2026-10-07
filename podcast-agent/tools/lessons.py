@@ -119,7 +119,9 @@ def _do_propose(config, lessons_config: dict, last: int | None, dry_run: bool) -
     # da script.api_key_env (o lessons.api_key_env), client finto nei test, e
     # gli errori dell'API classificati come per il copione.
     api_key_env = lessons_config.get("api_key_env")
-    if api_key_env:
+    # Con un client_factory (configurazione di prova) si usa SEMPRE quello: mai
+    # una chiamata vera da una configurazione di prova (C6, BASSA-2).
+    if api_key_env and not config.script.get("client_factory"):
         api_key = os.environ.get(str(api_key_env), "").strip()
         if not api_key:
             raise ConfigError(

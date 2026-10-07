@@ -76,7 +76,7 @@ podcast-agent/
     ├── test_tools_cli.py .......... 183 controlli sui CLI del subagent
     ├── test_music.py .............. 73 controlli su intro/outro/sottofondo
     ├── test_lessons.py ............ 80 controlli: segnali e lezioni, mai sui file veri di prompts/
-    └── test_web_integration.py .... 661 controlli sull'integrazione web
+    └── test_web_integration.py .... 666 controlli sull'integrazione web
 ```
 
 Come si incastrano (le frecce vanno da "chi chiama" a "chi viene chiamato"):

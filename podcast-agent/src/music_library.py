@@ -19,7 +19,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-from .ffmpeg_tool import media_duration_seconds
+from .ffmpeg_tool import find_ffmpeg, media_duration_seconds
 from .fileio import write_json_atomic
 from .registry import file_hash
 
@@ -73,6 +73,23 @@ class MusicTrack:
 
     def sha256(self) -> str:
         return file_hash(self.path)
+
+    def readability_error(self) -> str | None:
+        """Il motivo per cui il file non si legge come dice la sua estensione, o None.
+
+        ffmpeg apre ogni file con il formato forzato dall'estensione (C6): un AAC
+        chiamato .mp3, o un .wav che contiene un mp3, non si legge. Meglio dirlo
+        negli elenchi e prima di spendere che con un errore di ffmpeg al mix
+        (revisione di sicurezza C6, BASSA-1). Senza ffmpeg non si giudica.
+        """
+        if self.extension == ".wav" or find_ffmpeg() is None:
+            return None
+        if media_duration_seconds(self.path) is None:
+            return (
+                f"il file non si legge come {self.extension}: l'estensione non corrisponde al "
+                "contenuto, oppure il file e' rovinato. Ricaricalo nel formato giusto."
+            )
+        return None
 
     def duration_seconds(self) -> float | None:
         """Durata del brano. None se non misurabile.
@@ -264,6 +281,9 @@ class MusicLibrary:
                     raise MusicLibraryError(
                         f"'{name}' ({category}) non e' utilizzabile: {track.metadata_error}"
                     )
+                unreadable = track.readability_error()
+                if unreadable:
+                    raise MusicLibraryError(f"'{name}' ({category}) non e' utilizzabile: {unreadable}")
                 return track
         raise MusicLibraryError(
             f"'{name}' non e' piu' fra i brani di {category}/ in {self.dir}: "

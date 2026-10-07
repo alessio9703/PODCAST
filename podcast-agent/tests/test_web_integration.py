@@ -2791,6 +2791,42 @@ def test_c6() -> None:
     )
     check("file sostituito dopo la lettura: sha256 e testo restano dello stesso contenuto", proc.stdout.strip() == "I ricavi del trimest True", proc.stdout + proc.stderr)
 
+    print("\n[sicurezza C6] file con l'estensione sbagliata, messaggi, dimensione")
+    import imageio_ffmpeg
+
+    source = root / "sorgente.wav"
+    make_wav(source, 1.0, 300)
+    subprocess.run([imageio_ffmpeg.get_ffmpeg_exe(), "-y", "-loglevel", "error", "-i", str(source), "-c:a", "aac", "-f", "mp4", str(root / "musiche" / "intro" / "Travestito.mp3")], check=True)
+    code, out, _ = tool("music_list.py", config=config)
+    disguised = {t["name"]: t for t in out["intro"]}["Travestito"]
+    check("brano AAC chiamato .mp3: non utilizzabile, con il motivo, gia' nell'elenco", disguised["usable"] is False and "non si legge come .mp3" in disguised["error"], str(disguised))
+    run_dir = tool("run_init.py", "--title", "Travestito", config=config)[1]["run_dir"]
+    code, out, _ = tool("music_set.py", "--run-dir", run_dir, "--intro", "Travestito", config=config)
+    check("sceglierlo per una run -> errore chiaro prima di qualunque spesa", code == 1 and "non si legge come .mp3" in out.get("error", ""), str(out)[:300])
+    (root / "musiche" / "intro" / "Travestito.mp3").unlink()
+    (root / "voci" / "Voce Travestita.mp3").write_bytes(source.read_bytes()[:44] + b"x" * 10)
+    code, out, _ = tool("voices_list.py", config=config)
+    row = {v["name"]: v for v in out["voices"]}["Voce Travestita"]
+    check("voce che non si legge come la sua estensione: 'Illeggibile' con il motivo", row.get("errore") == "Illeggibile" and ".mp3" in row.get("motivo", ""), str(row)[:300])
+    (root / "voci" / "Voce Travestita.mp3").unlink()
+    proc = run_python(
+        f"""
+        from pathlib import Path
+        from src.config import load_config
+        import src.lessons as lm
+        from tests.fake_anthropic import queue_responses
+        config = load_config({str(config)!r})
+        queue_responses(Path({str(root / "anthropic_risposte.json")!r}), {{"raise": "auth"}})
+        try:
+            lm.call_model("prompt", model="m", client=config.anthropic_client())
+        except Exception as exc:
+            print("Controlla ANTHROPIC_API_KEY." in str(exc), ".env" in str(exc))
+        """
+    )
+    check("ModelAuthError non nomina una variabile fissa: rimanda al .env e a config.yaml", proc.stdout.split() == ["False", "True"], proc.stdout + proc.stderr)
+    code, out, _ = tool("doc_extract.py", "report.txt", config=config)
+    check("doc_extract: size_bytes degli stessi byte di sha256 e testo", code == 0 and out["size_bytes"] == len((root / "documenti" / "report.txt").read_bytes()), str(out)[:200])
+
 
 # ----------------------------------------------------------------------
 

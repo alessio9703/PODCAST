@@ -13,7 +13,7 @@ import unicodedata
 from pathlib import Path
 from typing import Any
 
-from .ffmpeg_tool import media_duration_seconds
+from .ffmpeg_tool import find_ffmpeg, media_duration_seconds
 from .hash_cache import HashCache
 from .registry import VoiceRegistry
 from .voice_library import VoiceLibrary, spoken_name_guess
@@ -100,7 +100,11 @@ def _voice_row(voice: Any, config: Any, registry: VoiceRegistry, usage: dict, ca
     entry = registry.get(voice.name) or {}
     runs = usage.get(voice.name, [])
     duration = cache.value(voice.path, "durata", _duration)
-    return {
+    unreadable = None
+    if duration is None and voice.path.suffix.lower() != ".wav" and find_ffmpeg() is not None:
+        # Non si legge come dice l'estensione (C6, BASSA-1): da ricaricare.
+        unreadable = f"Il file non si legge come {voice.path.suffix.lower()}: estensione sbagliata o file rovinato."
+    row = {
         "name": voice.name,
         # Proposta per la presentazione iniziale, da far confermare.
         # name_complete=false: manca nome o cognome, va chiesto.
@@ -122,6 +126,10 @@ def _voice_row(voice: Any, config: Any, registry: VoiceRegistry, usage: dict, ca
         "usata_in": len(runs),
         "episodi": runs,
     }
+    if unreadable:
+        row["errore"] = "Illeggibile"
+        row["motivo"] = unreadable
+    return row
 
 
 def filter_rows(rows: list[dict[str, Any]], filter_: str | None, search: str | None) -> list[dict[str, Any]]:
