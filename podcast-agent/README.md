@@ -411,8 +411,10 @@ completo, schermata per schermata, è in
 
 L'adattatore lancia sempre i comandi con **`PODCAST_AGENT_WEB=1`**: in questa modalità i
 comandi rifiutano gli argomenti riservati all'uso locale (`--config`, `--trusted-paths`,
-`--no-approval-gate`, `--no-consent-gate`, i file passati per percorso…) e non danno
-percorsi del server né `voice_id` nelle risposte. Le garanzie di sempre restano nei
+`--no-approval-gate`, `--no-consent-gate`, i file passati per percorso…). Alcune risposte
+contengono ancora percorsi assoluti (`run_dir`, `session_file`…) per il subagent: il
+contratto elenca i campi che l'adattatore non mostra, e quelli relativi da usare (`run`,
+`output/<run>/…`). Le garanzie di sempre restano nei
 comandi, non nell'adattatore: gate di approvazione sullo sha256, consenso prima di ogni
 clonazione, nessun retry sulla clonazione, nomi mai indovinati, percorsi confinati alle
 cartelle del progetto, lock e scritture atomiche per più utenti.
@@ -808,7 +810,7 @@ podcast-agent/
 │   ├── test_tools_cli.py         # 183 controlli sui CLI del subagent
 │   ├── test_music.py             # 73 controlli su intro/outro/sottofondo
 │   ├── test_lessons.py           # 80 controlli su segnali e lezioni
-│   └── test_web_integration.py   # 593 controlli sull'integrazione web (C0-C5)
+│   └── test_web_integration.py   # 625 controlli sull'integrazione web (C0-C5)
 ├── docs/
 │   ├── CONTRATTO_INTERFACCIA.md  # il contratto per l'adattatore web
 │   ├── wireframe/                # le schermate dell'interfaccia

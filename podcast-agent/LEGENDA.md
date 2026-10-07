@@ -75,7 +75,7 @@ podcast-agent/
     ├── test_tools_cli.py .......... 183 controlli sui CLI del subagent
     ├── test_music.py .............. 73 controlli su intro/outro/sottofondo
     ├── test_lessons.py ............ 80 controlli: segnali e lezioni, mai sui file veri di prompts/
-    └── test_web_integration.py .... 593 controlli sull'integrazione web
+    └── test_web_integration.py .... 625 controlli sull'integrazione web
 ```
 
 Come si incastrano (le frecce vanno da "chi chiama" a "chi viene chiamato"):
@@ -1409,8 +1409,9 @@ aggiunto moduli in `src/` e comandi in `tools/` senza cambiare il comportamento 
 
 **Modalita' web.** Con `PODCAST_AGENT_WEB=1` (sempre, dall'adattatore) i tool rifiutano
 gli argomenti riservati all'uso locale (`NotAllowedInWebMode`), `voices_prepare.py` e
-`synthesize.py` non partono, e le risposte non contengono percorsi del server ne'
-`voice_id` dove la UI li mostrerebbe. L'elenco e' `WEB_FORBIDDEN_ARGS` in
+`synthesize.py` non partono, e gli elenchi delle librerie non danno percorsi del server
+ne' `voice_id`. Altre risposte tengono campi assoluti per il subagent (`run_dir`,
+`session_file`...): il contratto elenca quelli che l'adattatore non mostra. L'elenco e' `WEB_FORBIDDEN_ARGS` in
 `tools/_common.py`: un flag di bypass nuovo va aggiunto li'.
 
 **Revisioni di sicurezza.** A fine di ogni fase il subagent

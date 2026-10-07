@@ -70,7 +70,12 @@ def voice_rows(config: Any, library: VoiceLibrary) -> list[dict[str, Any]]:
     rows = []
     for voice in library.voices:
         try:
-            rows.append(_voice_row(voice, config, registry, usage, cache))
+            row = _voice_row(voice, config, registry, usage, cache)
+            duplicates = library.duplicate_files(voice.name)
+            if duplicates:
+                row["errore"] = "Doppione"
+                row["doppioni"] = duplicates
+            rows.append(row)
         except FileNotFoundError:
             continue
         except Exception as exc:  # noqa: BLE001

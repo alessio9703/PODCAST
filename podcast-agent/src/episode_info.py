@@ -43,7 +43,11 @@ _HIDDEN_SUFFIXES = (".lock", ".tmp")
 #: File che restano sul server: _lavoro.json ha il pid del processo (C0+C1,
 #: BASSA-2); gli altri hanno percorsi assoluti delle registrazioni o i
 #: voice_id del provider (C3, BASSA-3).
-_HIDDEN_NAMES = ("_lavoro.json", "_audio_paths.json", "voci.json", "voci_usate.json")
+_HIDDEN_NAMES = (
+    "_lavoro.json", "_audio_paths.json", "voci.json", "voci_usate.json",
+    # con percorsi assoluti del server (revisione di sicurezza C5, BASSA-1)
+    "episodio.json", "musiche_usate.json",
+)
 #: Cache della forma d'onda (C3, BASSA-5) e riferimenti a percorsi del server.
 _HIDDEN_PREFIXES = ("_forma_onda_",)
 _HIDDEN_NAME_SUFFIXES = (".percorso.txt",)

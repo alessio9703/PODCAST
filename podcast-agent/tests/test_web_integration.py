@@ -2231,6 +2231,11 @@ def test_c4_documents(root: Path, config: Path) -> None:
     code, out, err = tool("documents_list.py", config=config)
     rows = {r["nome"]: r for r in out.get("documenti", [])}
     check("documents_list: exit 0", code == 0, err[-300:])
+    check("un PDF mai estratto: in attesa, l'elenco non lo estrae da solo (C5, MEDIA-2)", rows["scansione.pdf"]["in_attesa"] is True and rows["scansione.pdf"]["estraibile"] is None and out["in_attesa"] == 1, str(rows.get("scansione.pdf")))
+    code, one, _ = tool("documents_list.py", "--name", "scansione.pdf", config=config)
+    check("--name estrae il PDF", code == 0 and one["documenti"][0]["in_attesa"] is False, str(one)[:200])
+    code, out, err = tool("documents_list.py", config=config)
+    rows = {r["nome"]: r for r in out.get("documenti", [])}
     check("report.txt: TXT, estraibile, parole, usato in piu' episodi", rows["report.txt"]["tipo"] == "TXT" and rows["report.txt"]["estraibile"] and rows["report.txt"]["parole"] == 10 and rows["report.txt"]["usato_in"] >= 2, str(rows.get("report.txt")))
     check("scansione.pdf: non estraibile, motivo scansione, mai usato", rows["scansione.pdf"]["estraibile"] is False and rows["scansione.pdf"]["motivo"] == "scansione" and rows["scansione.pdf"]["usato_in"] == 0, str(rows.get("scansione.pdf")))
     check("formato non gestito tra gli scartati, niente nascosti ne' link", "foglio.xyz" in out["scartati"] and ".nascosto.txt" not in rows and "collegato.txt" not in rows, str(sorted(rows)))
@@ -2509,6 +2514,35 @@ def test_c4_fixes(root: Path, config: Path) -> None:
     check("in modalita' web niente percorsi assoluti ne' voice_id", str(root) not in proc.stdout and '"voice_id"' not in proc.stdout and '"voices_dir": "voci"' in proc.stdout and '"music_dir": "musiche"' in proc.stdout, proc.stdout[:400] + proc.stderr[-300:])
 
 
+def test_c5_fixes(root: Path, config: Path) -> None:
+    """Revisione di sicurezza C5: MEDIA-1 (stesso nome, altra estensione), BASSA-1."""
+    print("\n[sicurezza C5] librerie: stesso nome con un'altra estensione")
+    make_wav(root / "voci" / "Doppia Voce.wav", 1.0, 480)
+    (root / "voci" / "Doppia Voce.mp3").write_bytes((root / "voci" / "Doppia Voce.wav").read_bytes())
+    tool("voice_meta.py", "--name", "Doppia Voce", config=config)
+    code, out, _ = tool("voices_list.py", config=config)
+    doubles = [v for v in out["voices"] if v["name"] == "Doppia Voce"]
+    check("voices_list: le due registrazioni compaiono con 'Doppione' e i file", len(doubles) == 2 and all(v.get("errore") == "Doppione" and len(v["doppioni"]) == 2 for v in doubles), str(doubles)[:300])
+    code, out, _ = tool("voices_prepare.py", "--speakers", "Doppia Voce", "--dry-run", config=config)
+    check("una voce doppia non si usa: errore esplicito, non una scelta", code == 1 and "stesso nome" in out.get("error", ""), str(out)[:300])
+    (root / "voci" / "Doppia Voce.mp3").unlink()
+    (root / "musiche" / "intro" / "Piano calmo.mp3").write_bytes((root / "musiche" / "intro" / "Piano calmo.wav").read_bytes())
+    code, out, _ = tool("music_list.py", config=config)
+    calm = [t for t in out["intro"] if t["name"] == "Piano calmo"]
+    check("music_list: due brani 'Piano calmo' non utilizzabili, con il motivo", len(calm) == 2 and all(not t["usable"] and "stesso nome" in t["error"] for t in calm), str(calm)[:300])
+    check("...e il nuovo non eredita la licenza dell'altro in silenzio: e' bloccato", all(t["usable"] is False for t in calm))
+    code, out, _ = tool("music_set.py", "--run-dir", tool("run_init.py", "--title", "Doppi", config=config)[1]["run_dir"], "--intro", "Piano calmo", config=config)
+    check("sceglierlo per una run -> errore, non una scelta a caso", code != 0, str(out)[:300])
+    (root / "musiche" / "intro" / "Piano calmo.mp3").unlink()
+
+    print("\n[sicurezza C5] file della run offerti al download")
+    run_dir = tool("run_init.py", "--title", "Download", "--document", "report.txt", config=config)[1]["run_dir"]
+    (Path(run_dir) / "conversazione.json").write_text(json.dumps(SCRIPT_C2), encoding="utf-8")
+    code, info, _ = tool("episode_info.py", "--run-dir", run_dir, config=config)
+    names = {f["nome"] for f in info["file"]}
+    check("episodio.json e musiche_usate.json (percorsi del server) non sono fra i file", "episodio.json" not in names and "musiche_usate.json" not in names and "conversazione.json" in names, str(sorted(names)))
+
+
 def test_c4() -> None:
     root = Path(tempfile.mkdtemp(prefix="podcast-web-c4-"))
     setup(root)
@@ -2525,6 +2559,7 @@ def test_c4() -> None:
     test_c4_music(root, config)
     test_c4_settings_and_more(root, config)
     test_c4_fixes(root, config)
+    test_c5_fixes(root, config)
 
 
 # ----------------------------------------------------------------------

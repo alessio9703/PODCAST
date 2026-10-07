@@ -73,10 +73,8 @@ intero** `voices_prepare.py` e `synthesize.py` (`NotAllowedInWebMode` con
 parte di `produce.py`, legato al copione approvato. Per lo stesso motivo
 `run_finalize.py` (`--voices` obbligatorio) non si usa. `NotAllowedInWebMode` indica un
 errore dell'adattatore, non dell'utente: va registrato nei log, non mostrato
-come campo da correggere. Conseguenza: `synthesize.py` ed `estimate.py`
-(entrambi con `--script` obbligatorio) e `script_save.py` (`--script-json`)
-non sono utilizzabili in modalità web; produzione e stima per `--run-dir`
-arrivano in C2.
+come campo da correggere. Anche `script_save.py` (`--script-json` obbligatorio) non
+si usa; la stima dall'interfaccia è `estimate.py --run-dir` (senza `--script`).
 
 ### Campi da mostrare e campi da non mostrare
 
@@ -1000,8 +998,8 @@ regola che vale:
 
 | Azione | Comando | Lunga | Costa |
 |---|---|---|---|
-| Elenco | `documents_list.py [--filter mai_usati\|gia_usati\|con_problemi] [--search T]` | no (al massimo ~20 s di estrazioni nuove) | no |
-| Un documento, estratto subito | `documents_list.py --name NOME` | per un PDF lungo, fino al limite di tempo | no |
+| Elenco | `documents_list.py [--filter mai_usati\|gia_usati\|con_problemi] [--search T]` | no (estrae da solo solo i file di testo, entro ~20 s) | no |
+| Un documento, estratto subito | `documents_list.py --name=NOME` | per un PDF lungo, fino a un'estrazione intera | no |
 | Carica documento | *adattatore*: salva il file in `documenti/` (vedi fondo) | — | — |
 | Anteprima | `doc_extract.py NOME` | no | no |
 | Crea episodio | `run_init.py --title T --document NOME` | no | no |
@@ -1018,9 +1016,11 @@ Esempio reale (una riga):
   `troppo_grande`): è la riga "Testo non estraibile" del wireframe (filtro
   `con_problemi`).
 - L'estrazione è in cache in `documenti/.estrazioni/<sha256>.json`: un file sostituito
-  con lo stesso nome si ri-estrae. Le estrazioni **nuove** di una chiamata hanno un
-  budget di tempo: i documenti rimasti tornano con `in_attesa: true` (campi `null`) e
-  `in_attesa` in cima dice quanti sono; la UI richiama l'elenco, o `--name` per uno solo.
+  con lo stesso nome si ri-estrae. L'elenco estrae da solo **solo i file di testo**
+  (entro un budget di tempo) e non aspetta un'estrazione in corso: PDF e DOCX non ancora
+  estratti tornano con `in_attesa: true` (campi `null`), e `in_attesa` in cima dice
+  quanti sono. La UI li estrae uno alla volta con `--name=NOME` (subito dopo il
+  caricamento, o in background), poi richiama l'elenco.
   Gli sha256 sono in cache (`.cache_file.json`, validi finché file, dimensione e data non
   cambiano).
 - Una riga che non si riesce a leggere ha `errore` (l'elenco non fallisce).
@@ -1148,8 +1148,9 @@ come arrivano e come escono i file, come si gestiscono i processi.
 
 | Comando | Durata tipica | Timeout consigliato | Note |
 |---|---|---|---|
-| elenchi, viste, `*_meta.py`, `music_set.py`, `episode_config.py` (senza documento), `script_edit/approve/versions/show`, `estimate.py`, `run_status.py`, `settings_show.py`, `turn_at.py` | < 2 s | 30 s | `documents_list.py` fino a ~25 s (budget di estrazioni) |
-| `doc_extract.py`, `run_init.py --document`, `episode_config.py --documento`, `documents_list.py --name` | secondi | 120 s | estrazioni: limite interno di 60 s fra una pagina e l'altra, ma una pagina non si interrompe da dentro |
+| elenchi, viste, `*_meta.py`, `music_set.py`, `episode_config.py` (senza documento), `script_edit/approve/versions/show`, `estimate.py`, `run_status.py`, `settings_show.py`, `turn_at.py` | < 2 s | 30 s | `documents_list.py` (senza `--name`) fino a ~25 s: estrae solo file di testo |
+| `doc_extract.py`, `run_init.py --document`, `episode_config.py --documento` | secondi | 120 s | estrazioni: limite interno di 60 s fra una pagina e l'altra, ma una pagina non si interrompe da dentro |
+| `documents_list.py --name` | secondi | 240 s | un'estrazione intera (fino a ~60 s + una pagina) più l'eventuale attesa di un'estrazione dello stesso file già in corso (fino a 120 s) |
 | `waveform.py` (prima volta), `mix.py`, `retake.py --list` | secondi | 15 min | ffmpeg ha un limite interno di 15 minuti |
 | `script_write.py`, `script_revise.py` | 1–5 min | 10 min | chiamata al modello: costa |
 | `produce.py`, `retake.py --turn` | minuti | nessun timeout duro | costano; si seguono con gli eventi / `run_status.py` |
@@ -1174,7 +1175,15 @@ Le tre librerie sono cartelle: un caricamento è la scrittura di un file lì den
 
 - **Nome**: ridotto a un nome semplice (niente `/`, `\`, `..`, caratteri di controllo),
   **mai con il punto iniziale** (in `documenti/` `.estrazioni` e `.cache_file.json` sono
-  riservati, in `voci_disponibili/` i file nascosti sono copie temporanee).
+  riservati, in `voci_disponibili/` i file nascosti sono copie temporanee) e **mai con il
+  trattino iniziale** (verrebbe letto come un'opzione). In più, gli argomenti
+  posizionali si passano sempre dopo `--`: `doc_extract.py -- NOME`.
+- **Il nome vale senza l'estensione**: `Sigla.wav` e `Sigla.mp3` sono lo stesso brano,
+  `Mario Rossi.wav` e `Mario Rossi.m4a` la stessa voce (il confronto è quello dei
+  comandi: minuscole, senza accenti, `_` e `-` come spazi). Un caricamento che collide
+  con un nome esistente è una **sostituzione**: richiede la conferma e il file vecchio si
+  toglie insieme. Se restano due file con lo stesso nome, i comandi non scelgono: la
+  voce o il brano non si usano (errore esplicito, `errore: "Doppione"` negli elenchi).
 - **Estensioni ammesse** (le altre si rifiutano al caricamento):
   - `documenti/`: `.pdf`, `.docx`, `.txt`, `.md`, `.markdown`, `.rst`, `.text`;
   - `voci_disponibili/`: quelle di `audio.accepted_extensions` (`.wav`, `.mp3`, `.m4a`,
@@ -1183,6 +1192,10 @@ Le tre librerie sono cartelle: un caricamento è la scrittura di un file lì den
   - `musiche/intro|outro|sottofondo/`: le stesse estensioni audio. **Mai `.json`,
     `.lock`, `.tmp`**: un `.json` caricato varrebbe come metadati del brano, licenza
     compresa.
+- **Contenuto**: oltre all'estensione si controlla la **firma** del file (i primi byte:
+  `RIFF…WAVE`, `ID3`/frame MP3, `ftyp` per m4a, `fLaC`, `OggS`, `%PDF`, `PK` per DOCX).
+  Sulle registrazioni e sui brani gira ffmpeg: un file "mp3" che in realtà è una playlist
+  o un `ffconcat` non deve entrare in libreria.
 - **Dimensione**: limite in streaming, prima di scrivere su disco. Per i documenti lo
   stesso `documents.max_bytes` di `config.yaml` (20 MB); per le registrazioni una soglia
   adatta a 10–30 secondi (es. 20 MB): la registrazione si legge per intero in memoria al
@@ -1206,10 +1219,13 @@ Le tre librerie sono cartelle: un caricamento è la scrittura di un file lì den
 ## Download
 
 - Si servono solo: `file_finale.percorso` di `episode_info.py`, i file di `file[]` con
-  `interno: false`, le anteprime dei take (`preview`, `preview_with_music`), i documenti
-  della libreria (per l'anteprima).
+  `interno: false` (`episodio.json` e `musiche_usate.json`, che hanno percorsi del server,
+  non sono in `file[]`), le anteprime dei take (`preview`, `preview_with_music`), i
+  documenti della libreria (per l'anteprima).
 - I percorsi sono relativi (`output/<run>/…`): vanno risolti dentro la cartella
   `output/<run>` del run richiesto, rifiutando `..` e link simbolici.
+- Un documento della libreria si serve per **nome** (uno di `documents_list.py`), risolto
+  dentro `documenti/`: niente nomi con il punto iniziale, niente link simbolici.
 
 ## Autorizzazioni
 
@@ -1223,6 +1239,12 @@ Nessun comando sa chi è l'utente: queste decisioni sono dell'adattatore.
 | Dichiarare la licenza di un brano, scriverne la trascrizione | la trascrizione entra nei prompt del copione degli altri |
 | Accettare o rifiutare una lezione | una lezione accettata entra nel prompt di **tutti** gli episodi |
 | `produce.py`, `retake.py --turn`, `script_write.py`, `script_revise.py`, `lessons.py --propose` | costano |
+| `--accept-changed-music` (`produce.py`, `mix.py`) | conferma di usare un brano sostituito dopo un montaggio |
+| `--accept-incomplete-name` (`voice_meta.py`), `--accetta-nome-incompleto` (`episode_config.py`, passo 2) | conferma un nome da pronunciare senza cognome |
+
+I **flag di conferma** (`--accept-changed-music`, `--accept-incomplete-name`,
+`--accetta-nome-incompleto`, `--confirm-clone-retry`) si passano **solo** dopo l'esito 3
+che li chiede e dopo che l'utente ha risposto, mai d'ufficio.
 | Vedere le run degli altri | `runs_list.py` elenca tutte le run di `output/` |
 
 ## Ambiente

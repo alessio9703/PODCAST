@@ -163,6 +163,24 @@ class MusicLibrary:
                             metadata_error=error,
                         )
                     )
+            # Due file con lo stesso nome (a meno dell'estensione) si leggerebbero
+            # lo stesso <nome>.json e sarebbero ambigui: nessuno dei due si usa
+            # finche' uno non viene tolto (revisione di sicurezza C5, MEDIA-1).
+            groups: dict[str, list[MusicTrack]] = {}
+            for track in tracks:
+                groups.setdefault(_normalize(track.name), []).append(track)
+            for group in groups.values():
+                if len(group) > 1:
+                    files = ", ".join(t.path.name for t in group)
+                    for track in group:
+                        index = tracks.index(track)
+                        tracks[index] = MusicTrack(
+                            category=track.category,
+                            name=track.name,
+                            path=track.path,
+                            metadata=track.metadata,
+                            metadata_error=f"piu' brani con lo stesso nome in {category}/ ({files}): tienine uno solo.",
+                        )
             self._tracks[category] = tracks
             self._rejected[category] = rejected
         return dict(self._tracks)

@@ -104,6 +104,25 @@ class VoiceLibrary:
         return list(self._voices)
 
     @property
+    def duplicates(self) -> dict[str, list[str]]:
+        """{nome normalizzato: [file]} per i nomi con piu' di una registrazione.
+
+        "Mario Rossi.wav" e "Mario Rossi.mp3" sono la STESSA voce per nome: una
+        delle due va tolta. Finche' ci sono entrambe, la voce non si usa
+        (src/voice_prep.py): scegliere un file al posto dell'utente vorrebbe
+        dire indovinare quale persona far parlare (revisione di sicurezza C5,
+        MEDIA-1).
+        """
+        groups: dict[str, list[str]] = {}
+        for voice in self._voices:
+            groups.setdefault(_normalize(voice.name), []).append(voice.path.name)
+        return {key: sorted(files) for key, files in groups.items() if len(files) > 1}
+
+    def duplicate_files(self, name: str) -> list[str]:
+        """I file che condividono il nome di questa voce (vuoto se e' unica)."""
+        return self.duplicates.get(_normalize(name), [])
+
+    @property
     def rejected_files(self) -> list[Path]:
         """File presenti nella cartella ma in un formato audio non atteso."""
         return list(self._rejected)

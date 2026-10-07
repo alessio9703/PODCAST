@@ -231,3 +231,35 @@ consigliati (MEDIA-2). Il test end-to-end usa solo il provider e il client finti
     ora 617;
   - `:1064` scrive `--licenza "testo"` e `--by U` senza la forma `=` che il contratto
     chiede per i valori liberi.
+
+
+---
+
+## Esito delle correzioni (aggiunto da chi ha implementato, non dal revisore)
+
+Data: 2026-10-07. Nessuna alta. L'utente ha deciso di correggere tutte le medie e le basse.
+
+- **MEDIA-1**: nel contratto, il nome di un file di libreria vale senza estensione (stesso
+  confronto dei comandi) e una collisione è una sostituzione da confermare. Nel codice:
+  `VoiceLibrary.duplicates`; `plan_voices` rifiuta una voce con più registrazioni
+  (errore esplicito, nessuna scelta); `voices_list` le segna `errore: "Doppione"`;
+  `MusicLibrary.scan` rende inutilizzabili i brani con lo stesso nome (nessuno eredita in
+  silenzio i metadati dell'altro).
+- **MEDIA-2**: `documents_list.py` senza `--name` estrae da solo solo i file di testo
+  (entro il budget) e non aspetta il lock di un'estrazione in corso; PDF e DOCX non ancora
+  estratti tornano `in_attesa` e si estraggono con `--name`. Timeout nel contratto: 30 s
+  per l'elenco, 240 s per `--name`.
+- **BASSA-1**: `episodio.json` e `musiche_usate.json` esclusi da `file[]`; regola per
+  servire i documenti della libreria.
+- **BASSA-2**: README e LEGENDA non dicono più che le risposte non hanno percorsi del
+  server; conteggi dei test aggiornati; testo superato su `estimate.py` corretto.
+- **BASSA-3**: nomi caricati mai con il trattino iniziale; argomenti posizionali dopo
+  `--`.
+- **BASSA-4**: controllo della firma dei file al caricamento.
+- **BASSA-5**: `--accept-changed-music`, `--accept-incomplete-name`,
+  `--accetta-nome-incompleto` fra le autorizzazioni; i flag di conferma solo dopo l'esito
+  3 che li chiede.
+- Test: web_integration da 617 a 625; le altre suite verdi.
+- Il test end-to-end resta con `--config` (serve il provider finto): il flusso in modalità
+  web è coperto, comando per comando, dalla sezione `[modalita' web]`.
+

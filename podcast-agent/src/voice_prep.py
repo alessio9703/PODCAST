@@ -154,6 +154,13 @@ def plan_voices(config: Any, speakers: list[str], *, registry: VoiceRegistry | N
     """Per ogni speaker: riuso o clonazione, e lo stato del consenso. Gratis."""
     library = _library(config)
     by_name = {v.name: v for v in library.voices}
+    doubled = {s: library.duplicate_files(s) for s in speakers if library.duplicate_files(s)}
+    if doubled:
+        raise VoiceLibraryError(
+            "Ci sono piu' registrazioni con lo stesso nome: "
+            + "; ".join(f"{name} ({', '.join(files)})" for name, files in doubled.items())
+            + ". Tienine una sola per persona: non scelgo io quale usare."
+        )
     unknown = [s for s in speakers if s not in by_name]
     if unknown:
         raise VoiceLibraryError(

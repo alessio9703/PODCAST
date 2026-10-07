@@ -14,11 +14,12 @@ seconda trova il risultato della prima.
 episodio.json (o quello della copia documento_originale.*); solo per le run
 che non hanno uno sha256 si ripiega sul nome del file.
 
-Costo dell'elenco (revisione di sicurezza C4, MEDIA-3): gli sha256 sono in
-cache (src/hash_cache.py) e le estrazioni NUOVE di una chiamata hanno un
-budget di tempo; i documenti rimasti tornano con `in_attesa: true` e si
-estraggono alla chiamata dopo (o subito, chiedendo il solo documento con
---name).
+Costo dell'elenco (revisioni di sicurezza C4, MEDIA-3, e C5, MEDIA-2): gli
+sha256 sono in cache (src/hash_cache.py); l'elenco estrae da solo solo i file
+di testo (veloci, entro un budget di tempo) e non aspetta il lock di
+un'estrazione in corso. PDF e DOCX non ancora estratti tornano con
+`in_attesa: true` e si estraggono uno alla volta con --name, che puo'
+durare quanto un'estrazione intera.
 """
 
 from __future__ import annotations
@@ -32,11 +33,12 @@ from pathlib import Path
 from typing import Any
 
 from .episode_config import EpisodeConfig
-from .fileio import file_lock, write_json_atomic
+from .fileio import LockTimeout, file_lock, write_json_atomic
 from .hash_cache import HashCache
 from .paths import PathNotAllowed
 from .pdf_reader import (
     SUPPORTED_EXTENSIONS,
+    TEXT_EXTENSIONS,
     DocumentError,
     DocumentNotExtractable,
     DocumentTooLarge,
@@ -105,13 +107,13 @@ def _stat_signature(path: Path) -> tuple[int, int, int]:
     return stat.st_size, stat.st_mtime_ns, stat.st_ino
 
 
-def extraction_info(path: Path, config: Any, digest: str) -> dict[str, Any]:
+def extraction_info(path: Path, config: Any, digest: str, *, lock_timeout: float = 120) -> dict[str, Any]:
     """Pagine, parole, estraibile: dalla cache, o estraendo (sotto lock)."""
     target = _cache_target(config.documents_dir, digest)
     cached = _read_cached(target)
     if cached is not None:
         return cached
-    with file_lock(target, timeout=120):
+    with file_lock(target, timeout=lock_timeout):
         # Rilettura dentro il lock: un'altra richiesta puo' averlo appena fatto.
         cached = _read_cached(target)
         if cached is not None:
@@ -227,8 +229,13 @@ def _row(entry: Path, config: Any, hashes: HashCache, by_hash: dict, by_name: di
     info = cached_extraction(config, digest)
     pending = False
     if info is None:
-        if budget is None or time.monotonic() - started < budget:
+        if budget is None:
             info = extraction_info(entry, config, digest)
+        elif entry.suffix.lower() in TEXT_EXTENSIONS and time.monotonic() - started < budget:
+            try:
+                info = extraction_info(entry, config, digest, lock_timeout=0)
+            except LockTimeout:
+                info, pending = dict(_PENDING), True
         else:
             info, pending = dict(_PENDING), True
     runs = sorted(by_hash.get(digest, set()) | by_name.get(entry.name, set()))
