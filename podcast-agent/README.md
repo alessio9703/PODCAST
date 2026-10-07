@@ -181,6 +181,8 @@ Una voce **si clona solo se il consenso della persona è registrato**, in
   confermare" (`consenso.da_confermare: true`) e si confermano una volta. In locale
   (subagent, `voices_prepare.py`) una voce già clonata si riusa senza chiederlo di
   nuovo.
+- In `run.py` il consenso si chiede (una volta, e si registra) sia per una voce da clonare
+  sia per una già clonata da riusare.
 - Una voce **revocata** non si clona, non si riusa, non si rimonta, in ogni modalità
   (anche in `run.py`). Un nuovo consenso sulla **stessa** registrazione toglie la
   revoca; una registrazione diversa con lo stesso nome non rende di nuovo usabile la
@@ -822,7 +824,7 @@ podcast-agent/
 │   ├── test_tools_cli.py         # 190 controlli sui CLI del subagent
 │   ├── test_music.py             # 73 controlli su intro/outro/sottofondo
 │   ├── test_lessons.py           # 80 controlli su segnali e lezioni
-│   └── test_web_integration.py   # 799 controlli sull'integrazione web (C0-C7)
+│   └── test_web_integration.py   # 822 controlli sull'integrazione web (C0-C7)
 ├── docs/
 │   ├── CONTRATTO_INTERFACCIA.md  # il contratto per l'adattatore web
 │   ├── wireframe/                # le schermate dell'interfaccia

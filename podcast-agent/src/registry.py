@@ -48,6 +48,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
+from .errors import DomainError
 from .fileio import file_lock, write_json_atomic
 
 _CHUNK = 1024 * 1024
@@ -65,6 +66,14 @@ def file_hash(path: str | Path) -> str:
         while chunk := handle.read(_CHUNK):
             digest.update(chunk)
     return f"sha256:{digest.hexdigest()}"
+
+
+class RegistryCorrupt(DomainError):
+    """Le revoche o lo storico del registro non hanno la forma attesa.
+
+    Nel dubbio ci si ferma (sicurezza C7, BASSA-2): ignorare le revoche
+    illeggibili vorrebbe dire usare voci forse revocate.
+    """
 
 
 @dataclass(frozen=True)
@@ -165,13 +174,24 @@ class VoiceRegistry:
         entry = self._voices().get(name)
         return dict(entry) if entry else None
 
+    def _reserved_list(self, key: str) -> list[dict[str, Any]]:
+        """La lista sotto una chiave riservata; RegistryCorrupt se non e' ben formata."""
+        if key not in self._data:
+            return []
+        raw = self._data[key]
+        if not isinstance(raw, list) or not all(isinstance(r, dict) for r in raw):
+            raise RegistryCorrupt(
+                f"{self.path.name}: '{key}' non e' una lista di oggetti. Mi fermo invece di ignorarla "
+                "(potrebbe contenere revoche del consenso): va corretta a mano.",
+                details={"file": self.path.name, "campo": key},
+            )
+        return list(raw)
+
     def revocations(self) -> list[dict[str, Any]]:
-        raw = self._data.get(REVOCATIONS_KEY)
-        return [r for r in raw if isinstance(r, dict)] if isinstance(raw, list) else []
+        return self._reserved_list(REVOCATIONS_KEY)
 
     def history(self) -> list[dict[str, Any]]:
-        raw = self._data.get(HISTORY_KEY)
-        return [r for r in raw if isinstance(r, dict)] if isinstance(raw, list) else []
+        return self._reserved_list(HISTORY_KEY)
 
     def revocation_for(self, *, voice_id: str | None = None, audio_hash: str | None = None) -> dict[str, Any] | None:
         """La revoca che riguarda questo voice_id o questa registrazione, o None."""
@@ -293,4 +313,4 @@ class VoiceRegistry:
         return name in self._voices()
 
 
-__all__ = ["HISTORY_KEY", "RESERVED_NAMES", "REVOCATIONS_KEY", "VoiceRegistry", "RegistryEntry", "file_hash"]
+__all__ = ["HISTORY_KEY", "RESERVED_NAMES", "REVOCATIONS_KEY", "RegistryCorrupt", "VoiceRegistry", "RegistryEntry", "file_hash"]

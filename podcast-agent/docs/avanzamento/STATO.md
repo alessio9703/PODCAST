@@ -52,7 +52,7 @@ resoconti accanto a questo file:
 
 Test all'ultimo commit, sempre con `.venv/bin/python`: smoke 68, tools_cli 190 (+1
 saltato: il test reale con Anthropic, solo con `PODCAST_E2E_REALE=1`), music 73,
-lessons 80, web_integration 799.
+lessons 80, web_integration 822.
 
 ## 2. Fasi
 
@@ -167,6 +167,27 @@ Inoltre `tools/lessons.py --propose` passa a `classify_api_error`.
 **Verifica finale** (fatta in C5: `test_full_flow`): un flusso completo da CLI su una run fittizia: documento → cast →
 musiche → copione → modifica → approva → stima → consenso → produce interrotto e ripreso
 → info → forma d'onda → retake → scegli → mix → archivio.
+
+### Piano di C7 · seconda tornata (decisioni del 2026-10-07 dopo il resoconto di C7)
+
+Ogni punto è una decisione dell'utente (regola di `CLAUDE.md`: le decisioni entrano nel
+piano della fase che le attua). **Fatto** (`C7.md` §7):
+- `run.py`: consenso chiesto e registrato anche per il riuso;
+- indice numerico dei brani vietato dal web, ammesso in locale;
+- revoche precedenti a C7: verificato che non ce ne sono (niente migrazione);
+- BASSA-1 (vince sempre la revoca), BASSA-2 (nel dubbio ci si ferma), BASSA-3, BASSA-4;
+- regola sulle decisioni nel piano, in `CLAUDE.md`;
+- poi: test, revisione di sicurezza del diff, correzioni di alte e medie, `C7.md`,
+  `STATO.md`, **merge in `main`** (`--no-ff`, "Integrazione web: C0-C7"), **senza tag**.
+
+### Piano di C8 · rifinitura (branch `rifinitura`, da `main` dopo il merge)
+
+1. **N28 per primo** (prioritario: l'adattatore si basa su quei nomi): `error_type`
+   coerenti, con un **elenco unico** nel contratto (§3) con gli exit code. Resoconto in
+   `C8.md`, poi **fermarsi e aspettare l'OK** dell'utente.
+2. Dopo l'OK: N29 (codice morto), N30 (logica in `tools/` e duplicata), N31 (documenti in
+   disaccordo; il percorso dei wireframe è già fatto), N32 (installazione: `doctor` e
+   chiavi, versione minima di Python, `httpx2`).
 
 ## 3. Decisioni prese (con il motivo)
 
@@ -288,6 +309,14 @@ musiche → copione → modifica → approva → stima → consenso → produce 
 - **Motivo**: un `doc_extract.py .env` restituiva le chiavi; un `--run-dir` qualsiasi
   scriveva fuori dall'Archivio. Riprodotto e corretto.
 
+### D12 · Consenso e revoche dopo C7 (2026-10-07)
+- **Decisione dell'utente**: in `run.py` anche il riuso chiede il consenso; consenso e
+  revoca concorrenti → vince sempre la revoca; registro con revoche illeggibili → ci si
+  ferma; dal web un numero non vale come nome di brano.
+- **Motivo**: il consenso è una proprietà della voce in ogni percorso; nel dubbio si
+  sbaglia verso la revoca.
+- **Attuata** nella seconda tornata di C7.
+
 ### Altre decisioni minori (dettagli nei resoconti)
 - L'interruzione (Ctrl-C/SIGTERM) dà exit 1 `Interrupted`, mai codici nuovi.
 - `music_list`/`music_set`: un nome ambiguo dà `AmbiguousName` (era `needs_user_input`).
@@ -300,15 +329,11 @@ musiche → copione → modifica → approva → stima → consenso → produce 
 
 ## 4. Richieste ricevute e non ancora completate
 
-1. **Merge in `main`**: lo decide l'utente dopo aver letto `C7.md` (richiesta del
-   2026-10-07: "NON fare il merge"). Revisione finale fatta (`REVISIONE-FINALE.md`), C7
-   fatta.
-2. **Dopo il merge, fase di rifinitura separata**: N28–N32 di `REVISIONE-FINALE.md`
-   (nomi degli `error_type`, codice morto, logica rimasta in `tools/`, documenti in
-   disaccordo, installazione), salvo il percorso dei wireframe già corretto in C7.
-3. **Interpretazioni di C7 da confermare**: `C7.md` §4 (consenso per il riuso in
-   `run.py`, retake = riuso, revoca conservativa, …).
-4. **Basse della sicurezza C7 da decidere**: BASSA-1..4 in `C7.md` §6.
+1. **Merge in `main`** autorizzato dall'utente (2026-10-07) quando tutto è verde e non ci
+   sono alte o medie aperte: `--no-ff`, messaggio "Integrazione web: C0-C7", **nessun tag**.
+2. **C8 · rifinitura** (piano qui sopra): N28 subito, poi stop in attesa dell'OK per
+   N29–N32.
+3. Interpretazioni di C7 e basse della sicurezza: decise e attuate (`C7.md` §7, D12).
 
 ## 5. Annotazioni per le fasi successive e per la fase finale
 

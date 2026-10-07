@@ -358,14 +358,16 @@ def step_prepare_voices(
     incerto (nessun retry, nemmeno dopo un errore lasciato dall'interfaccia
     web), sha256 dei byte effettivamente clonati. Sul consenso:
       - una voce con il consenso REVOCATO non si usa mai (ne' clonata ne' riusata);
-      - a una voce da clonare senza consenso registrato lo si chiede qui, e lo si
-        registra come farebbe l'interfaccia (voice_meta, legato allo sha256 della
-        registrazione mostrata); senza un si' esplicito non si clona.
+      - a una voce senza consenso registrato lo si chiede qui, e lo si registra
+        come farebbe l'interfaccia (voice_meta, legato allo sha256 della
+        registrazione mostrata); senza un si' esplicito non si clona. Vale anche
+        per una voce gia' clonata da riusare: il consenso e' una proprieta' della
+        voce (D11, decisione dell'utente dopo C7).
     """
     heading("[6/9]", "Preparazione delle voci clonate")
     speakers = [voice.name for voice in selected]
     try:
-        plans = plan_voices(config, speakers, reuse_requires_consent=False)
+        plans = plan_voices(config, speakers, reuse_requires_consent=True)
     except (VoiceLibraryError, VoiceMetaError) as exc:
         fail(str(exc))
 
@@ -379,14 +381,15 @@ def step_prepare_voices(
         )
 
     for plan in plans:
-        if plan.action != ACTION_CLONE or plan.consent["stato"] == CONSENT_GRANTED:
+        if plan.consent["stato"] == CONSENT_GRANTED:
             continue
         why = (
             "la registrazione e' cambiata dopo il consenso"
             if plan.consent["stato"] == CONSENT_OUTDATED
             else "il consenso non e' registrato"
         )
-        print(f"\n  {plan.speaker} ({plan.voice.path.name}) va clonata, ma {why}.")
+        what = "va clonata" if plan.action == ACTION_CLONE else "e' gia' clonata e verra' riusata"
+        print(f"\n  {plan.speaker} ({plan.voice.path.name}) {what}, ma {why}.")
         print("  Si clona solo la voce di una persona che ha dato il consenso esplicito.")
         if not ask_yes_no(f"  {plan.speaker} ha dato il consenso alla clonazione della sua voce?"):
             fail(f"Consenso di {plan.speaker} non confermato: nessuna voce clonata, nessuna sintesi avviata.")
@@ -400,7 +403,10 @@ def step_prepare_voices(
         print(f"  Consenso di {plan.speaker} registrato (confermato da {by}).")
 
     try:
-        prepared = prepare_voices(config, speakers, provider=provider, note=lambda message: print(f"  {message}"))
+        prepared = prepare_voices(
+            config, speakers, provider=provider, reuse_requires_consent=True,
+            note=lambda message: print(f"  {message}"),
+        )
     except VoiceProviderError as exc:
         fail(f"Clonazione fallita.\n  {exc}\n  Nessuna sintesi e' stata avviata. Non ritento da solo.")
     except (DomainError, NeedsUserDecision, VoiceLibraryError, LockTimeout) as exc:

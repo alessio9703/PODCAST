@@ -3075,6 +3075,16 @@ def test_c7_run_py() -> None:
     out, err = step(["Mario Rossi"], [])
     check("voce gia' clonata con consenso: riusata senza domande", "MAPPA" in out and len(clone_attempts(root)) == 1 and "DOMANDA" not in out, out + err)
 
+    # Riuso senza consenso registrato: anche il riuso lo chiede (decisione dopo C7).
+    meta_file.unlink()
+    out, err = step(["Mario Rossi"], ["n"])
+    check("riuso senza consenso, 'no': esce, nessuna clonazione", "USCITA 1" in out and "gia' clonata e verra' riusata" in out and len(clone_attempts(root)) == 1 and not meta_file.exists(), out + err)
+    out, err = step(["Mario Rossi"], ["s", "Utente C"])
+    meta = json.loads(meta_file.read_text(encoding="utf-8")) if meta_file.exists() else {}
+    check("riuso senza consenso, 'si'': consenso registrato una volta, voce riusata", "MAPPA" in out and len(clone_attempts(root)) == 1 and (meta.get("consenso") or {}).get("da") == "Utente C", out + err)
+    out, err = step(["Mario Rossi"], [])
+    check("...e la volta dopo non lo chiede piu'", "MAPPA" in out and "DOMANDA" not in out, out + err)
+
     proc = run_python(
         f"""
         from src.config import load_config
@@ -3533,6 +3543,150 @@ def test_c7_security_fixes() -> None:
     check("...e nessuna clonazione parte", code != 0 and len(clone_attempts(root)) == clones, str(out)[:300])
 
 
+def test_c7_followup() -> None:
+    """Dopo C7: indice dei brani dal web, BASSA-1..4 di C7-sicurezza."""
+    print("\n[C7 bis] indice numerico dei brani: vietato dal web, ammesso in locale")
+    root, run = c7_project()
+    name = run("run_init.py", "--title", "Indice", "--document", "report.txt")[1]["run"]
+    code, out, _ = run("music_set.py", "--run-dir", name, "--intro=1")
+    check("web: --intro=1 non sceglie il primo brano (exit 1)", code == 1 and out["error_type"] == "MusicChoiceError" and not (root / "output" / name / "musiche.json").exists(), str(out)[:200])
+    code, out, _ = run("music_list.py", "--resolve", "intro", "1")
+    check("web: music_list --resolve con un numero: nessuna corrispondenza", code != 0 or not out["resolved"][0]["match"], str(out)[:300])
+    code, out, _ = run("music_set.py", "--run-dir", name, "--intro=1", web=False)
+    check("locale: --intro=1 sceglie il primo brano (run.py)", code == 0 and out["intro"] == "Piano calmo", str(out)[:200])
+
+    print("\n[sicurezza C7] BASSA-1 · consenso e revoca concorrenti: vince la revoca")
+    from src.config import load_config as _load_config
+    from src.fileio import file_lock as _file_lock
+    from src.voice_prep import _consent_lock_target
+    cfg = _load_config(str(root / "config.yaml"))
+    lock = _consent_lock_target(cfg, "Mario Rossi")
+    audio = root / "voci" / "Mario Rossi.wav"
+
+    def background(code_text: str) -> subprocess.Popen:
+        return subprocess.Popen([PYTHON, "-c", textwrap.dedent(code_text)], cwd=str(root), env=clean_env(), stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+
+    with _file_lock(lock):
+        waiting = background(f"""
+            from src.config import load_config
+            from src.voice_prep import grant_consent, resolve_library_voice, RevokedMeanwhile
+            config = load_config({str(root / "config.yaml")!r})
+            try:
+                grant_consent(config, resolve_library_voice(config, "Mario Rossi"), by="Utente A")
+                print("CONSENSO REGISTRATO")
+            except RevokedMeanwhile:
+                print("VINCE LA REVOCA")
+            """)
+        time.sleep(1.5)
+        proc = run_python(f"""
+            from pathlib import Path
+            from src.config import load_config
+            from src.voice_meta import revoke_consent
+            from src.voice_prep import _record_revocation, _registry
+            config = load_config({str(root / "config.yaml")!r})
+            meta, _ = revoke_consent(Path({str(audio)!r}), voice="Mario Rossi", by="Utente B")
+            _record_revocation(config, _registry(config), "Mario Rossi", [], "Utente B", meta["consenso_revocato"]["il"])
+            """)
+    stdout, stderr = waiting.communicate(timeout=60)
+    state = run("voice_meta.py", "--name", "Mario Rossi")[1]["consenso"]["stato"]
+    check("consenso in attesa mentre arriva una revoca: rifiutato, la voce resta revocata", "VINCE LA REVOCA" in stdout and state == "revocato", stdout + stderr + proc.stderr + state)
+    with _file_lock(lock):
+        waiting = background(f"""
+            from src.config import load_config
+            from src.voice_prep import resolve_library_voice, revoke_voice_consent
+            config = load_config({str(root / "config.yaml")!r})
+            revoke_voice_consent(config, resolve_library_voice(config, "Mario Rossi"), by="Utente B")
+            print("REVOCATA")
+            """)
+        time.sleep(1.5)
+        run_python(f"""
+            from pathlib import Path
+            from src.voice_meta import record_consent
+            record_consent(Path({str(audio)!r}), voice="Mario Rossi", by="Utente A")
+            """)
+    stdout, stderr = waiting.communicate(timeout=60)
+    state = run("voice_meta.py", "--name", "Mario Rossi")[1]["consenso"]["stato"]
+    check("revoca in attesa mentre si registra un consenso: alla fine e' revocata", "REVOCATA" in stdout and state == "revocato", stdout + stderr + state)
+    digest = run("voice_meta.py", "--name", "Mario Rossi")[1]["consenso"]["audio_sha256"]
+    code, out, _ = run("voice_meta.py", "--name", "Mario Rossi", "--consent", f"--expect-sha256={digest}", "--by=Utente A")
+    check("un consenso dato DOPO la revoca (non concorrente) vale", code == 0 and out["consenso"]["stato"] == "registrato", str(out)[:200])
+
+    print("\n[sicurezza C7] BASSA-2 · revoche illeggibili nel registro: ci si ferma")
+    for speaker in ("Mario Rossi", "Giulia Bianchi"):
+        digest = run("voice_meta.py", "--name", speaker)[1]["consenso"]["audio_sha256"]
+        run("voice_meta.py", "--name", speaker, "--consent", f"--expect-sha256={digest}", "--by=Utente A")
+    approved = c7_approved_run(root, run, "Registro rotto", SCRIPT_C2)
+    registry_file = root / "voices_registry.json"
+    registry_file.write_text(json.dumps({"__revoche__": "non una lista"}), encoding="utf-8")
+    code, out, _ = run("produce.py", "--run-dir", approved)
+    check("produce: exit 1 RegistryCorrupt, nessuna clonazione", code == 1 and out["error_type"] == "RegistryCorrupt" and clone_attempts(root) == [], str(out)[:300])
+    code, out, _ = run("estimate.py", "--run-dir", approved)
+    check("estimate: si ferma anche lei", code == 1 and out["error_type"] == "RegistryCorrupt", str(out)[:300])
+    registry_file.write_text(json.dumps({"__storico__": [1, 2]}), encoding="utf-8")
+    code, out, _ = run("voice_meta.py", "--name", "Mario Rossi", "--revoke-consent", "--by=Utente B")
+    meta = json.loads((root / "voci" / "Mario Rossi.json").read_text(encoding="utf-8"))
+    check(
+        "storico malformato: la revoca esce con errore, ma nei metadati e' gia' scritta (si sbaglia verso la revoca)",
+        code == 1 and out["error_type"] == "RegistryCorrupt" and not meta.get("consenso") and meta.get("consenso_revocato"),
+        str(out)[:300],
+    )
+    registry_file.unlink()
+
+    print("\n[sicurezza C7] BASSA-3 · campioni: niente link, hardlink, cartelle collegate")
+    outside = root / "fuori.wav"
+    make_wav(outside, 1.0, 455)
+    proc = run_python(f"""
+        import os
+        from pathlib import Path
+        from src.config import load_config
+        from src.voice_prep import _read_sample
+        from src.voice_library import VoiceLibraryError
+        config = load_config({str(root / "config.yaml")!r})
+        link = Path({str(root / "voci" / "Collegata.wav")!r})
+        link.symlink_to({str(outside)!r})
+        try:
+            _read_sample(link, config); print("link letto")
+        except VoiceLibraryError:
+            print("link rifiutato")
+        link.unlink()
+        hard = Path({str(root / "voci" / "Doppia.wav")!r})
+        os.link({str(outside)!r}, hard)
+        try:
+            _read_sample(hard, config); print("hardlink letto")
+        except VoiceLibraryError:
+            print("hardlink rifiutato")
+        hard.unlink()
+        print("normale", len(_read_sample(Path({str(root / "voci" / "Anna Neri.wav")!r}), config)) > 0)
+        """)
+    check("campione sostituito da un link dopo la scansione: rifiutato all'apertura", "link rifiutato" in proc.stdout, proc.stdout + proc.stderr)
+    check("campione con un secondo nome (hardlink): rifiutato", "hardlink rifiutato" in proc.stdout, proc.stdout + proc.stderr)
+    check("campione normale: letto", "normale True" in proc.stdout, proc.stdout + proc.stderr)
+    other = root / "altre-musiche"
+    other.mkdir()
+    make_wav(other / "Esterno.wav", 0.5, 480)
+    (root / "musiche" / "outro").symlink_to(other)
+    code, out, _ = run("music_list.py")
+    check("cartella di categoria collegata altrove: i suoi brani non si leggono", "Esterno" not in json.dumps(out), json.dumps(out)[:300])
+    (root / "musiche" / "outro").unlink()
+
+    print("\n[sicurezza C7] BASSA-4 · dopo l'attesa sul lock di clonazione si ricontrolla l'approvazione")
+    root, run = c7_project()
+    for speaker in ("Mario Rossi", "Giulia Bianchi"):
+        run("voice_meta.py", "--name", speaker, "--consent", "--by", "Utente A", web=False)
+    name = c7_approved_run(root, run, "Attesa sul lock", SCRIPT_C2)
+    from src.voice_prep import _clone_lock_target
+    cfg = _load_config(str(root / "config.yaml"))
+    env = clean_env()
+    env["PODCAST_AGENT_WEB"] = "1"
+    with _file_lock(_clone_lock_target(cfg, "Mario Rossi")), _file_lock(_clone_lock_target(cfg, "Giulia Bianchi")):
+        proc = subprocess.Popen([PYTHON, str(root / "tools" / "produce.py"), "--run-dir", name], cwd=str(root), env=env, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+        time.sleep(2.0)
+        run("script_approve.py", "--run-dir", name, "--revoke", "--by=Utente B")
+    stdout, stderr = proc.communicate(timeout=120)
+    out = json.loads(stdout) if stdout.strip() else {}
+    check("approvazione ritirata durante l'attesa: exit 1 ApprovalRequired, nessuna clonazione", proc.returncode == 1 and out.get("error_type") == "ApprovalRequired" and clone_attempts(root) == [], stdout[-300:] + stderr[-300:])
+
+
 def test_c7() -> None:
     test_c7_consent()
     test_c7_run_py()
@@ -3543,6 +3697,7 @@ def test_c7() -> None:
     test_c7_gaps(gaps)
     test_c7_security()
     test_c7_security_fixes()
+    test_c7_followup()
 
 
 def test_ffmpeg_input_confined() -> None:

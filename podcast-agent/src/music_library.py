@@ -22,6 +22,7 @@ from typing import Any
 from .ffmpeg_tool import find_ffmpeg, media_duration_seconds
 from .fileio import write_json_atomic
 from .registry import file_hash
+from .web_mode import web_mode
 
 CATEGORIES = ("intro", "outro", "sottofondo")
 
@@ -161,7 +162,11 @@ class MusicLibrary:
             tracks: list[MusicTrack] = []
             rejected: list[Path] = []
             category_dir = self.dir / category
-            if category_dir.is_dir():
+            if category_dir.is_symlink():
+                # Una cartella di categoria collegata altrove non si legge
+                # (sicurezza C7, BASSA-3): i brani starebbero fuori da musiche/.
+                rejected.append(category_dir)
+            elif category_dir.is_dir():
                 for entry in sorted(category_dir.iterdir()):
                     if entry.name.startswith("."):
                         continue
@@ -250,6 +255,11 @@ class MusicLibrary:
             return None, []
 
         if raw.isdigit():
+            # Dall'interfaccia un numero non vale come nome (come per le voci):
+            # l'indice resta solo per run.py, che mostra l'elenco numerato
+            # (decisione dell'utente dopo C7).
+            if web_mode():
+                return None, []
             index = int(raw)
             if 1 <= index <= len(pool):
                 return pool[index - 1], []

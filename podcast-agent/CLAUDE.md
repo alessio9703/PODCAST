@@ -79,6 +79,10 @@ Da leggere prima di toccare il codice:
 - **Niente installazioni senza chiedere**: nessun `pip install`, in nessuna venv. Gli
   strumenti di sviluppo si propongono in `requirements-dev.txt`.
 - Le decisioni aperte si chiedono all'utente, non si prendono da soli.
+- **Ogni decisione presa durante il lavoro** (dall'utente o confermata da lui) va inserita
+  come **punto del piano della fase in cui va attuata**, non solo registrata in
+  `STATO.md`: una decisione che vive solo nell'elenco delle decisioni rischia di non
+  essere mai attuata (è successo con D11 fra C2 e C7).
 
 ## Test
 

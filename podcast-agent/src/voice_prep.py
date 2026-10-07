@@ -51,6 +51,8 @@ from .voice_meta import (
     CONSENT_REVOKED,
     consent_state,
     consent_view,
+    VoiceMetaError,
+    load_meta,
     record_consent,
     revoke_consent,
     with_registry,
@@ -76,6 +78,15 @@ class CloneOutcomeUnknown(NeedsUserDecision):
     automatico, con il rischio di una voce duplicata a pagamento: serve che
     l'utente controlli sul provider e confermi (voice_meta.py
     --confirm-clone-retry). Revisione di sicurezza C2, MEDIA-1.
+    """
+
+
+class RevokedMeanwhile(NeedsUserDecision):
+    """Mentre si registrava il consenso, la stessa voce e' stata revocata.
+
+    Consenso e revoca concorrenti: vince sempre la revoca (decisione
+    dell'utente, sicurezza C7 BASSA-1). Il consenso non e' registrato; la UI
+    ricarica lo stato e, se serve, lo si chiede di nuovo.
     """
 
 
@@ -324,12 +335,43 @@ def check_not_revoked(
             )
 
 
+def _consent_lock_target(config: Any, name: str) -> Path:
+    """Lock per voce comune a consenso e revoca (metadati + registro insieme)."""
+    digest = hashlib.sha256(name.encode("utf-8")).hexdigest()[:16]
+    return config.registry_file.parent / f".consenso-{digest}"
+
+
+def _revocation_marks(config: Any, name: str, audio_path: Path | None) -> tuple[Any, ...]:
+    """Le tracce delle revoche di una voce: se cambiano, qualcuno ha revocato."""
+    revocations = tuple(sorted(json.dumps(r, sort_keys=True) for r in _registry(config).revocations() if r.get("voce") == name))
+    meta_mark: Any = None
+    if audio_path is not None:
+        try:
+            meta_mark = json.dumps(load_meta(audio_path).get("consenso_revocato"), sort_keys=True)
+        except VoiceMetaError:
+            meta_mark = "illeggibile"
+    return revocations, meta_mark
+
+
 def grant_consent(config: Any, voice: AvailableVoice, *, by: str | None, expect_sha256: str | None = None) -> dict[str, Any]:
     """Registra il consenso (metadati accanto all'audio) e toglie dal registro
-    le revoche di QUESTA registrazione: la persona ha dato di nuovo il consenso.
+    la revoca di QUESTA registrazione: la persona ha dato di nuovo il consenso.
+
+    Consenso e revoca della stessa voce passano dallo stesso lock. Se mentre
+    questa richiesta aspettava e' arrivata una revoca, vince la revoca: exit 3
+    RevokedMeanwhile, niente registrato (sicurezza C7, BASSA-1).
     """
-    meta = record_consent(voice.path, voice=voice.name, by=by, expect_sha256=expect_sha256)
-    _registry(config).lift_revocations(voice.name, meta["consenso"]["audio_sha256"])
+    before = _revocation_marks(config, voice.name, voice.path)
+    with file_lock(_consent_lock_target(config, voice.name)):
+        if _revocation_marks(config, voice.name, voice.path) != before:
+            raise RevokedMeanwhile(
+                f"Mentre registravo il consenso di {voice.name} qualcuno lo ha revocato: vale la "
+                "revoca, il consenso non e' stato registrato. Ricarica e, se la persona lo conferma "
+                "di nuovo, registralo ancora.",
+                details={"voce": voice.name},
+            )
+        meta = record_consent(voice.path, voice=voice.name, by=by, expect_sha256=expect_sha256)
+        _registry(config).lift_revocations(voice.name, meta["consenso"]["audio_sha256"])
     return meta
 
 
@@ -374,12 +416,13 @@ def revoke_voice_consent(config: Any, voice: AvailableVoice, *, by: str | None) 
     piu' nessuno di quei voice_id (revisione finale N1; sicurezza C7, ALTA-1 e
     MEDIA-1).
     """
-    meta, previous = revoke_consent(voice.path, voice=voice.name, by=by)
-    revocation = meta["consenso_revocato"]
-    _record_revocation(
-        config, _registry(config), voice.name, [file_hash(voice.path), (previous or {}).get("audio_sha256")],
-        revocation["da"], revocation["il"],
-    )
+    with file_lock(_consent_lock_target(config, voice.name)):
+        meta, previous = revoke_consent(voice.path, voice=voice.name, by=by)
+        revocation = meta["consenso_revocato"]
+        _record_revocation(
+            config, _registry(config), voice.name, [file_hash(voice.path), (previous or {}).get("audio_sha256")],
+            revocation["da"], revocation["il"],
+        )
     return meta, previous
 
 
@@ -398,7 +441,35 @@ def revoke_missing_voice(config: Any, name: str, *, by: str | None) -> list[dict
         raise VoiceLibraryError(
             f"'{name}' non e' nella libreria e il registro delle voci non lo conosce: niente da revocare.",
         )
-    return _record_revocation(config, registry, name, [], who, _now())
+    with file_lock(_consent_lock_target(config, name)):
+        return _record_revocation(config, _registry(config), name, [], who, _now())
+
+
+def _read_sample(path: Path, config: Any) -> bytes:
+    """I byte del campione da clonare, letti senza seguire link (sicurezza C7, BASSA-3).
+
+    La libreria scarta gia' i link alla scansione, ma fra scansione e lettura il
+    file puo' essere sostituito da un link: O_NOFOLLOW lo rifiuta all'apertura.
+    Il file deve stare direttamente nella cartella delle voci (niente cartelle
+    collegate) e non avere altri nomi (hardlink: un file fuori dalla libreria
+    con un secondo nome dentro).
+    """
+    folder = Path(config.voices_dir).resolve()
+    if path.parent.resolve() != folder or path.parent.is_symlink():
+        raise VoiceLibraryError(f"{path.name}: non e' direttamente nella cartella delle voci, non lo clono.")
+    flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0)
+    try:
+        fd = os.open(str(path), flags)
+    except OSError as exc:
+        raise VoiceLibraryError(f"{path.name}: non si apre come file normale (link simbolico?), non lo clono.") from exc
+    with os.fdopen(fd, "rb") as handle:
+        info = os.fstat(handle.fileno())
+        if info.st_nlink > 1:
+            raise VoiceLibraryError(
+                f"{path.name} ha altri nomi sul disco (hardlink): potrebbe essere un file fuori dalla "
+                "libreria. Caricalo come copia, non come collegamento."
+            )
+        return handle.read()
 
 
 def _clone_lock_target(config: Any, name: str) -> Path:
@@ -472,8 +543,12 @@ def prepare_voices(
     on_voice: Callable[[str, str], None] | None = None,
     should_stop: Callable[[], bool] | None = None,
     note: Callable[[str], None] | None = None,
+    reuse_requires_consent: bool | None = None,
 ) -> VoicePrepResult:
     """Riusa o clona le voci. Il consenso si controlla PRIMA di ogni clonazione.
+
+    `reuse_requires_consent`: anche il riuso vuole il consenso registrato (None =
+    solo in modalita' web; run.py lo chiede sempre).
 
     `on_voice(speaker, "riusata" | "clonata")` dopo ogni voce pronta;
     `should_stop()` si controlla fra una clonazione e l'altra (una clonazione
@@ -482,7 +557,7 @@ def prepare_voices(
     il chiamante decide come interrompersi.
     """
     registry = _registry(config)
-    plans = plan_voices(config, speakers, registry=registry)
+    plans = plan_voices(config, speakers, registry=registry, reuse_requires_consent=reuse_requires_consent)
     if consent_gate and not dry_run:
         check_consent(plans)
 
@@ -511,6 +586,11 @@ def prepare_voices(
             return result
 
         with file_lock(_clone_lock_target(config, name), timeout=CLONE_LOCK_TIMEOUT_SECONDS):
+            # L'attesa sul lock puo' durare minuti: nel frattempo l'approvazione
+            # puo' essere stata ritirata, o chiesta l'interruzione (sicurezza
+            # C7, BASSA-4). Si ricontrolla prima di spendere.
+            if should_stop and should_stop():
+                return result
             # Un'altra operazione puo' averla clonata mentre si aspettava.
             registry.reload()
             voice_id, reason = registry.lookup(name, plan.voice.path, config.active_provider)
@@ -531,7 +611,7 @@ def prepare_voices(
             # momento possono passare minuti (le clonazioni prima di questa),
             # durante i quali il consenso puo' essere revocato o la
             # registrazione sostituita (revisione di sicurezza C2, ALTA-1).
-            audio = plan.voice.path.read_bytes()
+            audio = _read_sample(plan.voice.path, config)
             audio_hash = "sha256:" + hashlib.sha256(audio).hexdigest()
             if consent_gate:
                 state = consent_state(plan.voice.path, audio_sha256=audio_hash)
@@ -578,6 +658,7 @@ __all__ = [
     "ACTION_REUSE",
     "CloneOutcomeUnknown",
     "ConsentRequired",
+    "RevokedMeanwhile",
     "confirm_clone_retry",
     "pending_clone",
     "VoicePlan",

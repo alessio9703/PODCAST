@@ -316,6 +316,8 @@ copione e mostra la versione nuova, non riprova da sola.
 | `CloneOutcomeUnknown` | **3** | Una clonazione precedente della stessa voce è finita con un errore o è stata interrotta: la voce potrebbe esistere sul provider. **Non si ritenta da soli** | `speaker`, `dal`, `provider` |
 | `RecordingChanged` | **3** | `voice_meta.py --consent --expect-sha256 H`: la registrazione non è più quella che l'utente ha visto. Niente registrato | `voce`, `atteso`, `attuale` |
 | `ConsentByRequired` | 1 | `voice_meta.py --consent`/`--revoke-consent` senza `--by` | `campo: "by"` |
+| `RevokedMeanwhile` | **3** | (C7) `voice_meta.py --consent` mentre la stessa voce veniva revocata: **vince la revoca**, il consenso non è registrato. La UI ricarica lo stato | `voce` |
+| `RegistryCorrupt` | 1 | (C7) Le revoche (`__revoche__`) o lo storico (`__storico__`) di `voices_registry.json` non sono ben formati: ci si ferma invece di ignorarli. Va corretto a mano (errore dell'amministratore) | `file`, `campo` |
 | `VoiceMetaError` | 1 | File dei metadati di una voce illeggibile | `file` |
 | `ApprovalRequired` | 1 | `produce.py` su un copione non approvato, o diverso da quello approvato; oppure (C7, N2) approvazione ritirata **a produzione in corso**: ci si ferma alla battuta successiva | `approval_problem`; a produzione in corso anche `done`, `total`, `missing` |
 | `ScriptMissing` | 1 | Stima o produzione di una run senza copione | — |
@@ -558,7 +560,9 @@ in sola lettura) dà `musiche`, una chiave per categoria:
 (C7, N5): due scelte contemporanee (intro da una scheda, outro da un'altra) non si
 cancellano. Argomenti in conflitto (`--intro X --none intro`), nessuna scelta, brano
 inesistente o inutilizzabile: exit 1 `MusicChoiceError` (prima `ValueError`); nome
-ambiguo: exit 3 `AmbiguousName`, come prima.
+ambiguo: exit 3 `AmbiguousName`, come prima. Dal web **un numero non vale come nome**
+(`--intro=1` non sceglie il primo brano: exit 1 `MusicChoiceError`; `music_list.py
+--resolve` non trova corrispondenze), come per le voci; l'indice resta solo per `run.py`.
 
 Le durate dei brani mp3/m4a si misurano anche senza `ffprobe` di sistema. Per
 ogni brano `music_list.py` dà anche licenza, parlato, trascrizione e "usato in"
@@ -836,7 +840,10 @@ i file. Se i file sono già stati cancellati, `voice_meta.py --name VOCE --revok
 `file: null` e `revoche_registro`, il numero di revoche scritte); un nome che il registro
 non conosce, o incompleto, è un errore (non si indovina). I nomi `__revoche__` e
 `__storico__` sono riservati: una registrazione con quel nome è fra i file scartati e non
-si clona.
+si clona. Consenso e revoca della stessa voce passano da un lock comune: se arrivano
+insieme vince la revoca (un consenso in attesa mentre la voce viene revocata esce con
+exit 3 `RevokedMeanwhile`). Il campione da clonare si apre senza seguire link e senza
+altri nomi sul disco (hardlink): altrimenti exit 1, niente clonato.
 
 ## Passo 6 · Generazione
 
