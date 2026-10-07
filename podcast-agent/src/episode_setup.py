@@ -21,6 +21,7 @@ from .episode_config import (
 )
 from .errors import AmbiguousName
 from .fileio import write_text_atomic
+from .music_choice import music_choice_view
 from .music_context import music_durations
 from .pdf_reader import Document, extract_text
 from .registry import VoiceRegistry
@@ -278,6 +279,9 @@ def episode_view(run_dir: Path, config: Any, episode: EpisodeConfig | None = Non
         "participants": episode.participants,
         "mancanti": episode.missing(),
         "cast_completo": episode.cast_complete,
+        # Le musiche scelte (passo 3): "non_scelta" se il passo non e' stato
+        # fatto, null per "nessuna", altrimenti {nome, sha256, disponibile}.
+        "musiche": music_choice_view(run_dir, config),
         # Struttura del passo 3: parlato (durata obiettivo) + intro/outro misurate.
         "durata_indicativa": {
             "parlato_seconds": target_seconds or None,

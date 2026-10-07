@@ -22,8 +22,8 @@ from __future__ import annotations
 import argparse
 
 from _common import add_config_arg, bootstrap, emit, note, parse_args, run_dir_arg, run_tool  # noqa: E402
-from src.errors import AmbiguousName  # noqa: E402
-from src.music_library import CATEGORIES, MusicLibrary, load_music_choice, write_music_choice  # noqa: E402
+from src.music_choice import set_music_choice  # noqa: E402
+from src.music_library import CATEGORIES  # noqa: E402
 
 
 def main() -> None:
@@ -39,19 +39,6 @@ def main() -> None:
     add_config_arg(parser)
     args = parse_args(parser)
 
-    requested = {"intro": args.intro, "outro": args.outro, "sottofondo": args.sottofondo}
-    for category in args.none:
-        if requested[category] is not None:
-            raise ValueError(
-                f"--{category} e '--none {category}' sono in conflitto: scegli uno dei due."
-            )
-
-    if not any(requested.values()) and not args.none:
-        raise ValueError(
-            "Nessuna scelta indicata: passa almeno uno fra --intro/--outro/--sottofondo, "
-            "oppure --none CATEGORIA per azzerarne una."
-        )
-
     config = bootstrap(args)
     run_dir = run_dir_arg(args.run_dir, config)
     if not run_dir.is_dir():
@@ -59,52 +46,8 @@ def main() -> None:
             f"Cartella della run inesistente: {run_dir.name}. Chiama prima run_init.py."
         )
 
-    library = MusicLibrary(config.music_dir, config.accepted_extensions)
-    library.scan()
-
-    updated = load_music_choice(run_dir)
-    warnings: list[str] = []
-
-    for category in args.none:
-        updated[category] = None
-        note(f"{category}: nessuna musica.")
-
-    for category, name in requested.items():
-        if name is None:
-            continue
-        match, candidates = library.resolve(category, name)
-        if match is None and candidates:
-            names = ", ".join(c.name for c in candidates)
-            note(f"'{name}' ({category}): nome ambiguo, candidati: {names}")
-            raise AmbiguousName(
-                f"'{name}' ({category}) non e' un nome certo: candidati {names}.",
-                details={
-                    "category": category,
-                    "query": name,
-                    "candidates": [c.name for c in candidates],
-                },
-            )
-        if match is None:
-            available = ", ".join(t.name for t in library.tracks(category)) or "nessuno"
-            raise ValueError(
-                f"'{name}' non corrisponde a nessun brano in {category}/. Disponibili: {available}."
-            )
-        problem = match.metadata_error or match.readability_error()
-        if problem:
-            raise ValueError(f"'{match.name}' ({category}) non e' utilizzabile: {problem}")
-
-        updated[category] = match.name
-        if not match.metadata.licenza:
-            warning = (
-                f"'{match.name}' ({category}) non ha una licenza dichiarata nei metadati: "
-                "verifica di poterlo pubblicare (vedi la nota etica sulle musiche in README.md)."
-            )
-            warnings.append(warning)
-            note(f"{category}: '{match.name}' (SENZA licenza dichiarata nei metadati)")
-        else:
-            note(f"{category}: '{match.name}'")
-
-    target = write_music_choice(run_dir, updated)
+    requested = {"intro": args.intro, "outro": args.outro, "sottofondo": args.sottofondo}
+    updated, warnings, target = set_music_choice(run_dir, config, requested, list(args.none), note=note)
 
     emit(
         {

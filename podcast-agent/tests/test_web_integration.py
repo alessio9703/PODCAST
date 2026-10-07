@@ -3088,9 +3088,67 @@ def test_c7_run_py() -> None:
     check("rilanciato: il marcatore blocca, nessun secondo tentativo", "USCITA 1" in out and "--confirm-clone-retry" in err and len(clone_attempts(root)) == 2, out + err)
 
 
+def test_c7_music() -> None:
+    """B2: le musiche scelte si leggono; N5: music_set scrive sotto lock."""
+    print("\n[C7] B2 · musiche scelte per la run; N5 · music_set sotto lock")
+    root, run = c7_project()
+    (root / "musiche" / "outro").mkdir()
+    make_wav(root / "musiche" / "outro" / "Chiusura.wav", 0.5, 300)
+    name = run("run_init.py", "--title", "Musiche", "--document", "report.txt")[1]["run"]
+    code, out, _ = run("episode_config.py", "--run-dir", name)
+    check("passo 3 non fatto: tutte 'non_scelta'", code == 0 and out["musiche"] == {"intro": "non_scelta", "outro": "non_scelta", "sottofondo": "non_scelta"}, str(out.get("musiche")))
+    code, out, _ = run("music_set.py", "--run-dir", name, "--intro=Piano calmo")
+    check("intro scelta", code == 0, str(out)[:200])
+    from src.registry import file_hash as _file_hash
+    code, out, _ = run("episode_config.py", "--run-dir", name)
+    check(
+        "episode_config mostra la scelta: brano, sha256, disponibile; il resto nessuna musica",
+        out["musiche"] == {
+            "intro": {"nome": "Piano calmo", "sha256": _file_hash(root / "musiche" / "intro" / "Piano calmo.wav"), "disponibile": True},
+            "outro": None,
+            "sottofondo": None,
+        },
+        str(out["musiche"]),
+    )
+    (root / "musiche" / "intro" / "Piano calmo.wav").rename(root / "musiche" / "intro" / "Altro.wav")
+    code, out, _ = run("episode_config.py", "--run-dir", name)
+    check("brano sparito dalla libreria: disponibile false, sha256 null", code == 0 and out["musiche"]["intro"] == {"nome": "Piano calmo", "sha256": None, "disponibile": False}, str(out["musiche"]))
+    (root / "musiche" / "intro" / "Altro.wav").rename(root / "musiche" / "intro" / "Piano calmo.wav")
+    code, out, _ = run("music_set.py", "--run-dir", name, "--none", "intro", "outro", "sottofondo")
+    code, out, _ = run("episode_config.py", "--run-dir", name)
+    check("passo saltato: tutte null (nessuna musica), non 'non_scelta'", out["musiche"] == {"intro": None, "outro": None, "sottofondo": None}, str(out["musiche"]))
+    code, out, _ = run("music_set.py", "--run-dir", name, "--intro=Piano calmo", "--none", "intro")
+    check("argomenti in conflitto: exit 1 MusicChoiceError", code == 1 and out["error_type"] == "MusicChoiceError", str(out)[:200])
+    code, out, _ = run("music_set.py", "--run-dir", name, "--intro=Piano")
+    check("nome ambiguo: exit 3 AmbiguousName, come prima", code == 3 and out["error_type"] == "AmbiguousName", str(out)[:200])
+
+    env = clean_env()
+    env["PODCAST_AGENT_WEB"] = "1"
+    lost = 0
+    for _ in range(6):
+        run("music_set.py", "--run-dir", name, "--none", "intro", "outro", "sottofondo")
+        procs = [
+            subprocess.Popen([PYTHON, str(root / "tools" / "music_set.py"), "--run-dir", name, arg], cwd=str(root), env=env, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            for arg in ("--intro=Piano calmo", "--outro=Chiusura")
+        ]
+        [proc.wait(timeout=60) for proc in procs]
+        choice = json.loads((root / "output" / name / "musiche.json").read_text(encoding="utf-8"))
+        lost += not (choice["intro"] == "Piano calmo" and choice["outro"] == "Chiusura")
+    check("intro e outro scelte insieme da due richieste: nessuna delle due va persa", lost == 0, f"perse in {lost} prove su 6")
+    proc = run_python(
+        f"""
+        import inspect
+        from src import music_choice
+        print("file_lock(target)" in inspect.getsource(music_choice.set_music_choice))
+        """
+    )
+    check("music_set legge e scrive musiche.json sotto lock", proc.stdout.strip() == "True", proc.stdout + proc.stderr)
+
+
 def test_c7() -> None:
     test_c7_consent()
     test_c7_run_py()
+    test_c7_music()
 
 
 def test_ffmpeg_input_confined() -> None:
