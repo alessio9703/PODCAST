@@ -1,10 +1,14 @@
 # Contratto d'interfaccia · podcast-agent per l'adattatore web
 
-> Documento in costruzione: si completa fase per fase (vedi `docs/avanzamento/`).
-> Coperti finora: contratto generale (C0), passi 1–4 + Confronto (C1), correzioni
-> della revisione di sicurezza C0+C1 e modalità web, passi 5–6 (C2), passo 7 (C3),
-> Archivio, Librerie, Impostazioni, Lezioni e Diagnostica (C4). La versione completa
-> con la sezione "a carico dell'adattatore" chiude la C5.
+> Versione completa (fase C5, 2026-10-07). Copre tutte le schermate del wireframe in
+> `docs/wireframe/`: per ogni azione il comando, gli argomenti, un esempio reale di JSON,
+> gli exit code, se è lunga e se costa. In fondo: cosa resta a carico dell'adattatore e
+> cosa non è supportato, con il motivo. Lo storico delle fasi è in `docs/avanzamento/`.
+>
+> Indice: §1 come si chiama un comando (modalità web compresa) · §2 i quattro esiti ·
+> §3 gli `error_type` · §4 concorrenza · Azioni per schermata (indice delle azioni, passi
+> 1–7, Confronto, Archivio, librerie, Impostazioni, Lezioni, Diagnostica) · A carico
+> dell'adattatore · Non supportato.
 
 ## 1. Come si chiama un comando
 
@@ -339,8 +343,31 @@ cancellati mentre un comando è in esecuzione (sono esclusi da git).
 
 Convenzioni delle tabelle: **Lunga** = può durare più di qualche secondo (la UI
 mostra uno stato di attesa); **Costa** = chiama un servizio a pagamento. Negli
-esempi `output/<run>` sta per il percorso assoluto della cartella dell'episodio
-e le liste lunghe sono accorciate con `"…"`.
+esempi `output/<run>` sta per la cartella dell'episodio (assoluta nei campi elencati
+in §1 "Campi da mostrare e campi da non mostrare", relativa negli altri) e le liste
+lunghe sono accorciate con `"…"`.
+
+### Indice: schermata del wireframe → comandi
+
+| Schermata (`docs/wireframe/`) | Comandi | Sezione |
+|---|---|---|
+| Menu laterale (`Sidebar`): Nuovo episodio | `run_init.py` | Passo 1 |
+| Archivio (`Main`) | `runs_list.py`, `run_status.py` | Archivio |
+| 1 · Documento | `documents_list.py`, `doc_extract.py`, `run_init.py`, `episode_config.py --documento` | Passo 1 |
+| 2 · Cast e formato | `episode_config.py`, `voices_list.py` | Passo 2 |
+| 3 · Musiche | `music_list.py`, `music_set.py`, `episode_config.py` | Passo 3 |
+| 4 · Copione | `script_write.py`, `script_show.py`, `script_edit.py`, `script_revise.py`, `script_approve.py`, `script_versions.py --list` | Passo 4 |
+| Confronto versioni | `script_versions.py --diff/--show/--restore` | Pannello Confronto |
+| 5 · Stima e consenso | `estimate.py --run-dir`, `voice_meta.py --consent` | Passo 5 |
+| 6 · Generazione | `produce.py --events`, `script_show.py` (`in_corso`), `run_status.py` | Passo 6 |
+| 7 · Episodio e correzioni | `episode_info.py`, `waveform.py`, `turn_at.py`, `retake.py`, `mix.py`, `script_edit.py`, `music_set.py` | Passo 7 |
+| Documenti | `documents_list.py`, `doc_extract.py`, `run_init.py` | Libreria Documenti |
+| Voci | `voices_list.py`, `voice_meta.py` | Libreria Voci |
+| Musiche | `music_list.py`, `music_meta.py` | Libreria Musiche |
+| Avanzate: Lezioni | `lessons.py` | Lezioni |
+| Avanzate: Impostazioni | `settings_show.py` | Impostazioni |
+| Avanzate: Diagnostica | `doctor.py` | Diagnostica |
+| Stati e errori (`Stati`) | exit code e `error_type` | §2, §3 |
 
 ## Passo 1 · Documento
 
@@ -440,7 +467,7 @@ Esempio reale (cast completo, con un'intro scelta al passo 3):
 | 1 | `EpisodeConfigError` (`details.campo`), voce inesistente (`VoiceLibraryError`), `DocumentNotExtractable`, `DocumentTooLarge` |
 | 3 | `AmbiguousName` (voce scritta in modo incerto), `SpokenNameIncomplete` |
 
-## Passo 3 · Musiche (parte già disponibile)
+## Passo 3 · Musiche
 
 | Azione | Comando | Lunga | Costa |
 |---|---|---|---|
@@ -449,9 +476,9 @@ Esempio reale (cast completo, con un'intro scelta al passo 3):
 | Salta il passo (nessuna musica) | `music_set.py --run-dir R --none intro outro sottofondo` | no | no |
 | Durata totale indicativa | `episode_config.py --run-dir R` → `durata_indicativa` | no | no |
 
-Le durate dei brani mp3/m4a ora si misurano anche senza `ffprobe` di sistema.
-"Usato in N episodi", la licenza e la trascrizione arrivano con la libreria
-Musiche (C4).
+Le durate dei brani mp3/m4a si misurano anche senza `ffprobe` di sistema. Per
+ogni brano `music_list.py` dà anche licenza, parlato, trascrizione e "usato in"
+(vedi Libreria Musiche).
 
 ## Passo 4 · Copione
 
@@ -1092,4 +1119,133 @@ retake, valuta, lezioni, cartelle}}`. Sola lettura, solo una **whitelist** di ch
 "ffmpeg_path"}`. Fa eccezione al contratto degli exit code: 0 se tutti i controlli
 obbligatori passano, 1 altrimenti, sempre con il JSON. Percorsi relativi al progetto
 (`.`) o alla home (`~`), anche su stderr.
+
+---
+
+# A carico dell'adattatore
+
+I comandi di `tools/` fanno da soli i controlli di dominio e di sicurezza descritti sopra
+(percorsi confinati, gate di approvazione, consenso, lock, modalità web). Restano
+all'adattatore le cose che i comandi non possono sapere: chi è l'utente, cosa può fare,
+come arrivano e come escono i file, come si gestiscono i processi.
+
+## Come lanciare i comandi
+
+- Sempre con `PODCAST_AGENT_WEB=1`, con il python della `.venv` del progetto e la cartella
+  del progetto come cartella corrente. Mai una shell: argomenti in lista.
+- Mai gli argomenti riservati all'uso locale (§1 "Modalità web"); li rifiuterebbero
+  comunque i comandi (`NotAllowedInWebMode`). Mai `voices_prepare.py`, `synthesize.py`,
+  `run_finalize.py`, `script_save.py`.
+- I valori scritti dall'utente sempre nella forma `--opzione=valore`.
+- `--run-dir` sempre con il `run` di un episodio dell'elenco `runs_list.py`; i nomi di
+  documenti, voci e brani sempre da quelli dei rispettivi elenchi.
+- `--by` sempre con l'utente autenticato, mai con un campo scritto dall'utente.
+- Leggere stdout per intero a processo finito (un oggetto JSON); stderr si registra nei log
+  o si mostra in un pannello "dettagli" (non contiene percorsi assoluti).
+- Ogni `error_type` che non è in §3 si tratta come un errore generico del suo exit code.
+
+## Processi, tempi e coda
+
+| Comando | Durata tipica | Timeout consigliato | Note |
+|---|---|---|---|
+| elenchi, viste, `*_meta.py`, `music_set.py`, `episode_config.py` (senza documento), `script_edit/approve/versions/show`, `estimate.py`, `run_status.py`, `settings_show.py`, `turn_at.py` | < 2 s | 30 s | `documents_list.py` fino a ~25 s (budget di estrazioni) |
+| `doc_extract.py`, `run_init.py --document`, `episode_config.py --documento`, `documents_list.py --name` | secondi | 120 s | estrazioni: limite interno di 60 s fra una pagina e l'altra, ma una pagina non si interrompe da dentro |
+| `waveform.py` (prima volta), `mix.py`, `retake.py --list` | secondi | 15 min | ffmpeg ha un limite interno di 15 minuti |
+| `script_write.py`, `script_revise.py` | 1–5 min | 10 min | chiamata al modello: costa |
+| `produce.py`, `retake.py --turn` | minuti | nessun timeout duro | costano; si seguono con gli eventi / `run_status.py` |
+| `lessons.py --propose` | < 1 min | 5 min | costa |
+| `voice_meta.py --confirm-clone-retry` | < 1 s, fino a 10 min | 11 min | aspetta il lock della clonazione di quella voce |
+
+- I comandi lunghi vanno lanciati come **lavori in background** (la coda dei lavori è
+  dell'adattatore). Due operazioni lunghe sulla stessa run sono già impedite dai comandi
+  (`RunBusy`): la coda può limitarsi a serializzare per run, o a mostrare l'errore.
+- Lo stato "in corso" non va tenuto dall'adattatore: si legge da `run_status.py` (o
+  `script_show.py` → `in_corso`), che lo derivano dal lock.
+- **Interrompi**: un SIGTERM al processo. Non mandarne un secondo mentre l'ultimo evento è
+  la preparazione delle voci (`fase_iniziata: preparazione_voci` senza `fase_finita`): la
+  clonazione in corso finisce comunque, e un'interruzione forzata a quel punto porta a
+  `CloneOutcomeUnknown`. Se un processo va ucciso (SIGKILL), il lock si libera da solo.
+- `in_corso` di una revisione del copione contiene `istruzione`, cioè la richiesta scritta
+  dall'utente: decidere se mostrarla agli altri utenti della stessa run.
+
+## Caricamenti
+
+Le tre librerie sono cartelle: un caricamento è la scrittura di un file lì dentro. Regole:
+
+- **Nome**: ridotto a un nome semplice (niente `/`, `\`, `..`, caratteri di controllo),
+  **mai con il punto iniziale** (in `documenti/` `.estrazioni` e `.cache_file.json` sono
+  riservati, in `voci_disponibili/` i file nascosti sono copie temporanee).
+- **Estensioni ammesse** (le altre si rifiutano al caricamento):
+  - `documenti/`: `.pdf`, `.docx`, `.txt`, `.md`, `.markdown`, `.rst`, `.text`;
+  - `voci_disponibili/`: quelle di `audio.accepted_extensions` (`.wav`, `.mp3`, `.m4a`,
+    `.flac`, `.ogg`, `.opus`, `.webm`). **Mai `.json`, `.lock`, `.tmp`**: un `.json`
+    caricato varrebbe come metadati della voce, consenso compreso;
+  - `musiche/intro|outro|sottofondo/`: le stesse estensioni audio. **Mai `.json`,
+    `.lock`, `.tmp`**: un `.json` caricato varrebbe come metadati del brano, licenza
+    compresa.
+- **Dimensione**: limite in streaming, prima di scrivere su disco. Per i documenti lo
+  stesso `documents.max_bytes` di `config.yaml` (20 MB); per le registrazioni una soglia
+  adatta a 10–30 secondi (es. 20 MB): la registrazione si legge per intero in memoria al
+  momento della clonazione; per i brani una soglia ragionevole (es. 50 MB).
+- **Scrittura atomica**: in un file temporaneo nella stessa cartella, con nome che
+  comincia con `.`, poi rinominato. Niente link simbolici.
+- **Nessuna sovrascrittura silenziosa**: un file con lo stesso nome si sostituisce solo
+  con una conferma esplicita dell'utente. Effetti di una sostituzione: una voce passa a
+  consenso `superato` (va riconfermato) e alla prossima produzione va clonata di nuovo; un
+  brano già usato fa uscire `produce.py`/`mix.py` con `MusicChangedError` finché non si
+  conferma `--accept-changed-music`; un documento si ri-estrae.
+- **Dopo il caricamento** di una voce: `voice_meta.py --name … --spoken-name=… --consent
+  --expect-sha256=… --by=…` (lo sha256 è quello che l'utente ha visto, da `voices_list.py`
+  o `voice_meta.py`). Durata consigliata 10–30 s: `voices_list.py` la riporta
+  (`durata_campione_seconds`), l'adattatore può avvisare.
+- **Cancellazione** (non c'è un comando): una voce si cancella **insieme** al suo `.json`
+  (e sparisce il consenso); un file non si cancella mentre una run che lo usa è
+  `in_corso`. Cancellare un episodio vuol dire cancellare la sua cartella in `output/`,
+  solo se `run_status.py` non dice `in_corso`.
+
+## Download
+
+- Si servono solo: `file_finale.percorso` di `episode_info.py`, i file di `file[]` con
+  `interno: false`, le anteprime dei take (`preview`, `preview_with_music`), i documenti
+  della libreria (per l'anteprima).
+- I percorsi sono relativi (`output/<run>/…`): vanno risolti dentro la cartella
+  `output/<run>` del run richiesto, rifiutando `..` e link simbolici.
+
+## Autorizzazioni
+
+Nessun comando sa chi è l'utente: queste decisioni sono dell'adattatore.
+
+| Azione | Perché conta |
+|---|---|
+| Registrare o **revocare** il consenso di una voce | la revoca blocca ogni produzione, ogni retake e ogni rimontaggio con quella voce |
+| `--confirm-clone-retry` | autorizza una spesa che potrebbe duplicare una voce sul provider |
+| Cambiare il nome pronunciato di una voce | lo pronuncia il presentatore negli episodi di tutti |
+| Dichiarare la licenza di un brano, scriverne la trascrizione | la trascrizione entra nei prompt del copione degli altri |
+| Accettare o rifiutare una lezione | una lezione accettata entra nel prompt di **tutti** gli episodi |
+| `produce.py`, `retake.py --turn`, `script_write.py`, `script_revise.py`, `lessons.py --propose` | costano |
+| Vedere le run degli altri | `runs_list.py` elenca tutte le run di `output/` |
+
+## Ambiente
+
+- Chiavi in `.env` del progetto (`FISH_AUDIO_API_KEY`, `ANTHROPIC_API_KEY`): mai passate
+  sulla riga di comando.
+- `config.yaml` si modifica solo da chi amministra il progetto (`settings_show.py` è in
+  sola lettura). Cambiare il provider o i parametri di sintesi rende "da generare" le
+  battute già in cache.
+- `doctor.py` dopo ogni installazione o aggiornamento.
+
+---
+
+# Non supportato
+
+| Cosa | Dove nel wireframe | Perché |
+|---|---|---|
+| "Altre indicazioni, con parole tue" nei retake | passo 7 | nessun testo libero arriva al sintetizzatore fuori dal copione approvato (decisione D1): solo le indicazioni della whitelist |
+| Formati monologo e tavola rotonda | passo 2 | il web supporta conversazione e intervista con presentatore (D4); gli altri restano in `run.py` |
+| Consenso per singolo episodio | passo 5 | il consenso vale per la voce e per la sua registrazione (D11) |
+| Modificare le impostazioni | Impostazioni | `config.yaml` è dell'amministratore; lo schermo è in sola lettura |
+| Rinominare il file dell'episodio cambiando il titolo | passo 7 | il nome resta quello del primo montaggio (G7), così i link non si rompono |
+| Cancellare episodi, documenti, voci, brani con un comando | menu "⋯" delle librerie | non c'è un comando: se l'adattatore lo fa, regole in "Caricamenti" |
+| Pronuncia diversa come retake | passo 7 | si corregge il testo ("Cosa dice"), con una nuova approvazione |
+| Errori dell'API in `lessons.py --propose` con gli `error_type` del copione | Lezioni | previsto nella fase finale (C6): oggi escono con exit 1 e il nome della classe della libreria |
 

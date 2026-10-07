@@ -2528,6 +2528,86 @@ def test_c4() -> None:
 
 
 # ----------------------------------------------------------------------
+# Verifica finale (C5): il flusso completo dell'interfaccia, dalla CLI
+# ----------------------------------------------------------------------
+
+
+def test_full_flow() -> None:
+    print("\n[finale] documento -> cast -> musiche -> copione -> modifica -> approva -> stima -> consenso -> produce interrotto e ripreso -> episodio -> forma d'onda -> retake -> scegli -> rimonta -> archivio")
+    root = Path(tempfile.mkdtemp(prefix="podcast-web-finale-"))
+    setup(root)
+    config = write_c2_config(root, "config-finale.yaml", tts_delay_seconds=0.4)
+    responses = root / "anthropic_risposte.json"
+
+    code, out, _ = tool("documents_list.py", config=config)
+    check("1. il documento e' nella libreria ed e' estraibile", code == 0 and out["documenti"][0]["nome"] == "report.txt" and out["documenti"][0]["estraibile"], str(out)[:200])
+    code, out, _ = tool("run_init.py", "--title=Il trimestre, finale", "--document=report.txt", config=config)
+    run = out["run"]
+    check("   bozza creata, prossimo passo: cast", code == 0 and tool("run_status.py", "--run-dir", run, config=config)[1]["stato"] == "bozza_cast")
+    code, out, err = tool(
+        "episode_config.py", "--run-dir", run, "--formato=intervista", "--durata=0:05",
+        f"--voce=presentatore={PRESENTER}", f"--voce=intervistatore={INTERVIEWER}", f"--voce=ospite={GUEST}",
+        f"--nome=presentatore={PRESENTER}", f"--nome=intervistatore={INTERVIEWER}", f"--nome=ospite={GUEST}",
+        "--descrizione=intervistatore=giornalista economico", "--descrizione=ospite=analista finanziaria", config=config,
+    )
+    check("2. cast completo", code == 0 and out["cast_completo"], err[-300:])
+    code, out, _ = tool("music_set.py", "--run-dir", run, "--intro=Piano calmo", config=config)
+    check("3. intro scelta", code == 0)
+    queue_responses(responses, {"json": INTERVISTA})
+    code, out, err = tool("script_write.py", "--run-dir", run, "--by=Utente A", config=config)
+    check("4. copione scritto dal modello (finto), versione 1, approvabile", code == 0 and out["version"] == 1 and out["approvable"], err[-300:] + str(out)[:200])
+    code, out, _ = tool("script_edit.py", "--run-dir", run, "--turn", "4", "--text=E perché, secondo te, è successo?", "--expected-version", "1", "--by=Utente A", config=config)
+    check("   battuta 4 corretta a mano: versione 2", code == 0 and out["version"] == 2, str(out)[:200])
+    code, out, _ = tool("script_approve.py", "--run-dir", run, "--version", "2", "--by=Utente A", config=config)
+    check("   versione 2 approvata", code == 0 and out["approved"], str(out)[:200])
+
+    code, out, _ = tool("estimate.py", "--run-dir", run, config=config)
+    check("5. stima: 3 voci da clonare, 5 battute, consenso da confermare", code == 0 and len(out["voices_to_clone"]) == 3 and out["turns_to_generate"] == 5 and len(out["consent_missing"]) == 3, str(out)[:300])
+    for voice in out["voices"]:
+        code, meta, _ = tool("voice_meta.py", "--name", voice["speaker"], "--consent", f"--expect-sha256={voice['consenso']['audio_sha256']}", "--by=Utente A", config=config)
+        check(f"   consenso di {voice['speaker']} registrato sulla registrazione vista", code == 0 and meta["consenso"]["stato"] == "registrato")
+
+    events = Path(root / "output" / run / "_eventi.jsonl")
+    proc = subprocess.Popen(
+        [PYTHON, str(PROJECT_ROOT / "tools" / "produce.py"), "--run-dir", run, "--events", "--config", str(config)],
+        stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, cwd=str(PROJECT_ROOT), env=clean_env(),
+    )
+    deadline = time.monotonic() + 60
+    while time.monotonic() < deadline and not any(r["evento"] == "battuta" and r["n"] >= 2 for r in read_events(events)):
+        time.sleep(0.1)
+    with_progress = tool("run_status.py", "--run-dir", run, config=config)[1]
+    import signal as _signal
+
+    proc.send_signal(_signal.SIGTERM)
+    stdout, _ = proc.communicate(timeout=60)
+    out = json.loads(stdout)
+    check("6. durante la produzione l'Archivio dice 'in corso'", with_progress["stato"] == "in_corso" and with_progress["operazione"] == "produzione", str(with_progress))
+    check("   interrotta: battute pronte e mancanti", proc.returncode == 1 and out["error_type"] == "ProductionInterrupted" and out["details"]["missing"], str(out)[:300])
+    missing = out["details"]["missing"]
+    check("   l'Archivio dice 'interrotta'", tool("run_status.py", "--run-dir", run, config=config)[1]["stato"] == "interrotta")
+    code, out, err = tool("produce.py", "--run-dir", run, "--events", config=config)
+    check("   ripresa: paga solo le mancanti, voci gia' clonate riusate", code == 0 and out["generated_turns"] == missing and sorted(out["voices"]["riusate"]) == sorted([PRESENTER, INTERVIEWER, GUEST]), err[-300:] + str(out)[:300])
+    check("   file dal titolo dell'episodio", out["file"] == "il-trimestre-finale.mp3", out.get("file"))
+
+    code, info, _ = tool("episode_info.py", "--run-dir", run, config=config)
+    check("7. episodio pronto: intro + parlato, 5 battute con i tempi", info["stato"] == "pronto" and [x["tipo"] for x in info["sezioni"]] == ["intro", "parlato"] and all(t["inizio_finale"] for t in info["trascrizione"]), str(info["motivi"]))
+    code, out, _ = tool("waveform.py", "--run-dir", run, "--points", "200", config=config)
+    check("   forma d'onda: 200 picchi", code == 0 and len(out["peaks"]) == 200)
+    code, out, _ = tool("retake.py", "--run-dir", run, "--turn", "3", "--takes", "2", "--direction=Più calmo", "--by=Utente A", config=config)
+    check("8. due take della battuta 3, piu' calmi", code == 0 and out["new_takes"] == [2, 3], str(out)[:300])
+    code, out, _ = tool("retake.py", "--run-dir", run, "--list", "3", config=config)
+    check("   tre take con l'anteprima in contesto", [t["label"] for t in out["take_list"]] == ["Take originale", "Take 1", "Take 2"])
+    tool("retake.py", "--run-dir", run, "--choose", "3=3", config=config)
+    check("   take scelto: da rimontare", tool("run_status.py", "--run-dir", run, config=config)[1]["stato"] == "da_aggiornare")
+    code, out, _ = tool("mix.py", "--run-dir", run, config=config)
+    check("   rimontato senza sintesi", code == 0 and out["tts_calls"] == 0)
+    code, out, _ = tool("runs_list.py", "--status", "pronti", config=config)
+    check("9. nell'Archivio, fra i pronti, con titolo e documento", [(r["titolo"], r["documento"], r["azione"]) for r in out["episodi"]] == [("Il trimestre, finale", "report.txt", "Ascolta")], str(out["episodi"]))
+    code, out, _ = tool("voices_list.py", config=config)
+    check("   le tre voci risultano usate in un episodio", all(v["usata_in"] == 1 for v in out["voices"] if v["name"] in (PRESENTER, INTERVIEWER, GUEST)))
+
+
+# ----------------------------------------------------------------------
 
 
 def main() -> None:
@@ -2562,6 +2642,7 @@ def main() -> None:
     test_c2()
     test_c3()
     test_c4()
+    test_full_flow()
 
     from tests.test_tools_cli import PASSED
 

@@ -11,6 +11,7 @@ resoconti accanto a questo file:
 - `C2.md`, `C2-sicurezza.md`
 - `C3.md`, `C3-sicurezza.md`
 - `C4.md`, `C4-sicurezza.md`
+- `C5.md` (con il riepilogo finale dell'integrazione web)
 
 ## 1. Commit
 
@@ -33,10 +34,11 @@ resoconti accanto a questo file:
 | `db8e47d` | sicurezza C3: medie e basse corrette |
 | `7b6b434` | **C4** Archivio, librerie, impostazioni; lock delle lezioni; doctor senza percorsi |
 | `e13ed9f` | rapporto di sicurezza C4 |
-| (questo) | sicurezza C4: medie e basse corrette |
+| `adbbab6` | sicurezza C4: medie e basse corrette |
+| (questo) | **C5** contratto completo, README, LEGENDA, verifica finale, riepilogo |
 
 Test all'ultimo commit, sempre con `.venv/bin/python`: smoke 68, tools_cli 183 (+2
-saltati, servono `ANTHROPIC_API_KEY`), music 73, lessons 80, web_integration 593.
+saltati, servono `ANTHROPIC_API_KEY`), music 73, lessons 80, web_integration 617.
 
 ## 2. Fasi
 
@@ -49,7 +51,7 @@ saltati, servono `ANTHROPIC_API_KEY`), music 73, lessons 80, web_integration 593
 | C2 | Produzione: passi 5 (stima e consenso) e 6 (generazione) | **fatta**; revisione: 1 alta, 4 medie, 5 basse, **tutte corrette** |
 | C3 | Episodio e correzioni: passo 7 | **fatta**; revisione (con le correzioni di C2): 0 alte, 2 medie, 6 basse, **tutte corrette** |
 | C4 | Archivio e librerie (Documenti, Voci, Musiche), Impostazioni, verifica di Lezioni e Diagnostica | **fatta**; revisione: 0 alte, 3 medie, 5 basse, **tutte corrette** |
-| C5 | Contratto completo + README/LEGENDA + riepilogo finale | da fare (il contratto è già aggiornato per C0–C1) |
+| C5 | Contratto completo + README/LEGENDA + riepilogo finale | **fatta** (verifica finale compresa); revisione di sicurezza da fare |
 | C6 | Allineamento di `run.py` a `src/music_context.py`, fase finale dedicata | da fare |
 
 A fine di **ogni** fase: revisione di sicurezza (`<fase>-sicurezza.md`), alte corrette
@@ -146,7 +148,7 @@ prima della fase successiva.
 senza cambiare il comportamento visibile.
 Inoltre `tools/lessons.py --propose` passa a `classify_api_error`.
 
-**Verifica finale**: un flusso completo da CLI su una run fittizia: documento → cast →
+**Verifica finale** (fatta in C5: `test_full_flow`): un flusso completo da CLI su una run fittizia: documento → cast →
 musiche → copione → modifica → approva → stima → consenso → produce interrotto e ripreso
 → info → forma d'onda → retake → scegli → mix → archivio.
 
@@ -273,8 +275,10 @@ musiche → copione → modifica → approva → stima → consenso → produce 
 
 ## 4. Richieste ricevute e non ancora completate
 
-1. **OK per C5** (contratto completo con la sezione "a carico dell'adattatore", README,
-   LEGENDA, riepilogo finale).
+1. **Revisione di sicurezza di C5** (`adbbab6..HEAD`: contratto e documentazione).
+2. **OK per C6** (`run.py` su `src/music_context.py`; `lessons --propose` con
+   `classify_api_error`).
+3. **Pulizia**: `.venv-vecchia-copia/` e i due `.DS_Store` tracciati.
 
 ## 5. Annotazioni per le fasi successive e per la fase finale
 
@@ -308,10 +312,7 @@ musiche → copione → modifica → approva → stima → consenso → produce 
 - **Fuori perimetro, da segnalare nel riepilogo finale**:
   - In modalità libera (`run.py`, `--trusted-paths`) un file senza estensione si legge
     ancora come testo: è uso locale.
-- **README e LEGENDA** non sono ancora aggiornati per C0–C1 (previsto in C5).
-  - Mancano i nuovi tool: `episode_config`, `script_show`, `script_edit`,
-    `script_versions`.
-  - Mancano i nuovi moduli `src/`, `--trusted-paths` e `python-docx` obbligatorio.
+- **README e LEGENDA**: aggiornati in C5.
 - **Pulizia da proporre all'utente**:
   - `.venv-vecchia-copia/` (venv copiata, da cancellare quando l'utente vuole);
   - i due `.DS_Store` ancora tracciati dal primo commit (`../.DS_Store`,
