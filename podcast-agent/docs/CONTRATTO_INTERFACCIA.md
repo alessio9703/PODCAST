@@ -1,14 +1,40 @@
 # Contratto d'interfaccia · podcast-agent per l'adattatore web
 
-> Versione completa (fase C5, 2026-10-07). Copre tutte le schermate del wireframe in
+> Versione completa (fase C5, 2026-10-07; aggiornata in C7 con le correzioni della
+> revisione finale, `docs/avanzamento/C7.md`). Copre tutte le schermate del wireframe in
 > `docs/wireframe/wireframe/`: per ogni azione il comando, gli argomenti, un esempio reale di JSON,
 > gli exit code, se è lunga e se costa. In fondo: cosa resta a carico dell'adattatore e
 > cosa non è supportato, con il motivo. Lo storico delle fasi è in `docs/avanzamento/`.
 >
-> Indice: §1 come si chiama un comando (modalità web compresa) · §2 i quattro esiti ·
+> Indice: §0 primo requisito (`PODCAST_AGENT_WEB=1`, `doctor.py --web`) · §1 come si chiama un comando (modalità web compresa) · §2 i quattro esiti ·
 > §3 gli `error_type` · §4 concorrenza · Azioni per schermata (indice delle azioni, passi
 > 1–7, Confronto, Archivio, librerie, Impostazioni, Lezioni, Diagnostica) · A carico
 > dell'adattatore · Non supportato.
+
+## 0. Primo requisito: `PODCAST_AGENT_WEB=1`
+
+L'adattatore lancia **ogni** comando con la variabile d'ambiente
+`PODCAST_AGENT_WEB=1`. È il requisito da cui dipendono tutti gli altri: senza, i
+comandi non rifiutano gli argomenti riservati all'uso locale (`--config`,
+`--trusted-paths`, `--no-approval-gate`, `--no-consent-gate`, i file passati per
+percorso; vedi "Modalità web" più sotto), e il riuso di una voce clonata non
+chiede il consenso registrato (C7, N1).
+
+All'avvio, prima di accettare richieste, l'adattatore lancia:
+
+```
+PODCAST_AGENT_WEB=1 <progetto>/.venv/bin/python tools/doctor.py --web
+```
+
+`--web` aggiunge il controllo **obbligatorio** `web_mode`: se la variabile non
+arriva al sottoprocesso (configurazione sbagliata del servizio, ambiente
+ripulito) il comando esce con `1` e `"ok": false`, e l'adattatore non deve
+partire. Il controllo è nel JSON di `doctor.py`:
+
+```json
+{"name": "web_mode", "ok": false, "required": true,
+ "detail": "PODCAST_AGENT_WEB NON impostata: l'adattatore deve lanciare ogni tool con PODCAST_AGENT_WEB=1, altrimenti --config, --trusted-paths, --no-approval-gate e simili restano accettati"}
+```
 
 ## 1. Come si chiama un comando
 
@@ -1119,7 +1145,8 @@ retake, valuta, lezioni, cartelle}}`. Sola lettura, solo una **whitelist** di ch
 `doctor.py` (nessun argomento) → `{"ok", "checks": [{"name", "ok", "required", "detail"}],
 "ffmpeg_path"}`. Fa eccezione al contratto degli exit code: 0 se tutti i controlli
 obbligatori passano, 1 altrimenti, sempre con il JSON. Percorsi relativi al progetto
-(`.`) o alla home (`~`), anche su stderr.
+(`.`) o alla home (`~`), anche su stderr. `doctor.py --web` aggiunge il controllo
+obbligatorio `web_mode` (§0): l'adattatore lo lancia all'avvio.
 
 ---
 
@@ -1244,20 +1271,22 @@ Nessun comando sa chi è l'utente: queste decisioni sono dell'adattatore.
 | `produce.py`, `retake.py --turn`, `script_write.py`, `script_revise.py`, `lessons.py --propose` | costano |
 | `--accept-changed-music` (`produce.py`, `mix.py`) | conferma di usare un brano sostituito dopo un montaggio |
 | `--accept-incomplete-name` (`voice_meta.py`), `--accetta-nome-incompleto` (`episode_config.py`, passo 2) | conferma un nome da pronunciare senza cognome |
+| Vedere le run degli altri | `runs_list.py` elenca tutte le run di `output/` |
 
 I **flag di conferma** (`--accept-changed-music`, `--accept-incomplete-name`,
 `--accetta-nome-incompleto`, `--confirm-clone-retry`) si passano **solo** dopo l'esito 3
 che li chiede e dopo che l'utente ha risposto, mai d'ufficio.
-| Vedere le run degli altri | `runs_list.py` elenca tutte le run di `output/` |
 
 ## Ambiente
 
+- `PODCAST_AGENT_WEB=1` in **ogni** sottoprocesso, verificato all'avvio con
+  `doctor.py --web` (§0).
 - Chiavi in `.env` del progetto (`FISH_AUDIO_API_KEY`, `ANTHROPIC_API_KEY`): mai passate
   sulla riga di comando.
 - `config.yaml` si modifica solo da chi amministra il progetto (`settings_show.py` è in
   sola lettura). Cambiare il provider o i parametri di sintesi rende "da generare" le
   battute già in cache.
-- `doctor.py` dopo ogni installazione o aggiornamento.
+- `doctor.py` dopo ogni installazione o aggiornamento; `doctor.py --web` a ogni avvio dell'adattatore.
 
 ---
 

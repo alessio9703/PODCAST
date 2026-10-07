@@ -3145,10 +3145,33 @@ def test_c7_music() -> None:
     check("music_set legge e scrive musiche.json sotto lock", proc.stdout.strip() == "True", proc.stdout + proc.stderr)
 
 
+def test_c7_doctor() -> None:
+    """§8.6: doctor.py --web fallisce se PODCAST_AGENT_WEB non e' impostata."""
+    print("\n[C7] §8.6 · doctor.py --web")
+    root, _ = c7_project()
+
+    def doctor(*args: str, web: bool) -> tuple[int, dict]:
+        env = clean_env()
+        env.pop("PODCAST_AGENT_WEB", None)
+        if web:
+            env["PODCAST_AGENT_WEB"] = "1"
+        proc = subprocess.run([PYTHON, str(root / "tools" / "doctor.py"), *args], capture_output=True, text=True, cwd=str(root), env=env)
+        return proc.returncode, json.loads(proc.stdout)
+
+    code, out = doctor("--web", web=False)
+    web_check = next((c for c in out["checks"] if c["name"] == "web_mode"), None)
+    check("--web senza PODCAST_AGENT_WEB: exit 1, controllo obbligatorio fallito", code == 1 and out["ok"] is False and web_check and web_check["required"] and not web_check["ok"], str(web_check))
+    code, out = doctor("--web", web=True)
+    check("--web con PODCAST_AGENT_WEB=1: exit 0", code == 0 and out["ok"] and any(c["name"] == "web_mode" and c["ok"] for c in out["checks"]), str(out)[:300])
+    code, out = doctor(web=False)
+    check("senza --web: nessun controllo della modalita' (uso locale invariato)", code == 0 and not any(c["name"] == "web_mode" for c in out["checks"]), str(out)[:300])
+
+
 def test_c7() -> None:
     test_c7_consent()
     test_c7_run_py()
     test_c7_music()
+    test_c7_doctor()
 
 
 def test_ffmpeg_input_confined() -> None:
