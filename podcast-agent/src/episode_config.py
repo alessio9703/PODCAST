@@ -402,7 +402,9 @@ def document_record(document: Any) -> dict[str, Any]:
     return {
         "nome": path.name,
         "percorso": str(path),
-        "sha256": file_hash(path),
+        # Lo sha256 dei byte estratti (src/pdf_reader.extract_text), non una
+        # rilettura del file: testo e sha256 vengono dallo stesso contenuto.
+        "sha256": getattr(document, "sha256", None) or file_hash(path),
         "tipo": document.kind,
         "pagine": document.pages,
         "parole": document.word_count,

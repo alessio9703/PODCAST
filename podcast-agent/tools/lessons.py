@@ -28,6 +28,7 @@ from pathlib import Path
 
 from _common import InvalidArguments, NeedsUserInput, PROJECT_ROOT, add_config_arg, bootstrap, emit, note, parse_args, run_tool, web_mode  # noqa: E402
 from src import lessons as lessons_mod  # noqa: E402
+from src.config import ConfigError  # noqa: E402
 from src.episode_signals import SIGNALS_FILENAME  # noqa: E402
 
 PROMPTS_DIR = PROJECT_ROOT / "prompts"
@@ -114,19 +115,27 @@ def _do_propose(config, lessons_config: dict, last: int | None, dry_run: bool) -
         emit({"dry_run": True, "evidenza": aggregated, "stima": stima})
         return
 
-    api_key_env = str(lessons_config.get("api_key_env") or config.script.get("api_key_env", "ANTHROPIC_API_KEY"))
-    api_key = os.environ.get(api_key_env, "").strip()
-    if not api_key:
-        raise ValueError(
-            f"Variabile d'ambiente {api_key_env} non impostata: serve per far proporre le lezioni a Claude.\n"
-            f"Aggiungila al file .env:\n    {api_key_env}=sk-ant-..."
-        )
+    # Stesso client della scrittura del copione (Config.anthropic_client): chiave
+    # da script.api_key_env (o lessons.api_key_env), client finto nei test, e
+    # gli errori dell'API classificati come per il copione.
+    api_key_env = lessons_config.get("api_key_env")
+    if api_key_env:
+        api_key = os.environ.get(str(api_key_env), "").strip()
+        if not api_key:
+            raise ConfigError(
+                f"Variabile d'ambiente {api_key_env} non impostata: serve per far proporre le lezioni a Claude."
+            )
+        import anthropic
+
+        client = anthropic.Anthropic(api_key=api_key)
+    else:
+        client = config.anthropic_client()
 
     result = lessons_mod.propose(
         prompts_dir=PROMPTS_DIR,
         copione_path=COPIONE_PATH,
         aggregated=aggregated,
-        api_key=api_key,
+        client=client,
         model=model,
         max_examples_per_pattern=thresholds["max_examples_per_pattern"],
         max_example_chars=thresholds["max_example_chars"],

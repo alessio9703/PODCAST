@@ -31,7 +31,6 @@ from _common import (  # noqa: E402
     run_tool,
 )
 from src.pdf_reader import extract_text  # noqa: E402
-from src.registry import file_hash  # noqa: E402
 
 
 def main() -> None:
@@ -68,7 +67,7 @@ def main() -> None:
             "name": document.path.name,
             "kind": document.kind,
             "size_bytes": document.path.stat().st_size,
-            "sha256": file_hash(document.path),
+            "sha256": document.sha256,
             "extractable": True,
             "pages": document.pages,
             "chars": document.char_count,

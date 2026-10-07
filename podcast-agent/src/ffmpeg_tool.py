@@ -40,6 +40,46 @@ class FfmpegNotFoundError(RuntimeError):
 FFMPEG_TIMEOUT_SECONDS = 900
 
 
+#: Formato (demuxer di ffmpeg) per estensione. Forzarlo vuol dire che un file
+#: "brano.mp3" si legge SOLO come mp3: se in realta' e' una playlist (HLS,
+#: ffconcat, ...) ffmpeg si rifiuta invece di aprire altri file o URL.
+_DEMUXERS = {
+    ".wav": "wav",
+    ".mp3": "mp3",
+    ".m4a": "mov",
+    ".mp4": "mov",
+    ".aac": "aac",
+    ".flac": "flac",
+    ".ogg": "ogg",
+    ".opus": "ogg",
+    ".webm": "matroska",
+}
+
+
+def input_args(path: str | Path) -> list[str]:
+    """Gli argomenti con cui ffmpeg apre un file in ingresso.
+
+    `-protocol_whitelist file`: solo file locali, mai rete o altri protocolli
+    (nemmeno se un file caricato contiene riferimenti esterni); `-f`: il
+    formato dall'estensione, quando e' noto. Revisioni di sicurezza C0+C1 e
+    C5 (BASSA-4), fase C6.
+    """
+    args = ["-protocol_whitelist", "file"]
+    demuxer = _DEMUXERS.get(Path(path).suffix.lower())
+    if demuxer:
+        args += ["-f", demuxer]
+    return [*args, "-i", str(path)]
+
+
+def probe_args(path: str | Path) -> list[str]:
+    """Come input_args(), per ffprobe (che prende il file senza `-i`)."""
+    args = ["-protocol_whitelist", "file"]
+    demuxer = _DEMUXERS.get(Path(path).suffix.lower())
+    if demuxer:
+        args += ["-f", demuxer]
+    return [*args, str(path)]
+
+
 def find_ffmpeg() -> str | None:
     """Percorso dell'eseguibile ffmpeg, o None se non trovato.
 
@@ -107,7 +147,7 @@ def media_duration_seconds(path: str | Path) -> float | None:
         try:
             result = subprocess.run(
                 [ffprobe, "-v", "error", "-show_entries", "format=duration",
-                 "-of", "default=noprint_wrappers=1:nokey=1", str(path)],
+                 "-of", "default=noprint_wrappers=1:nokey=1", *probe_args(path)],
                 capture_output=True, text=True, timeout=30,
             )
             if result.returncode == 0:
@@ -122,7 +162,7 @@ def media_duration_seconds(path: str | Path) -> float | None:
         # Senza output ffmpeg esce con errore ("At least one output file must
         # be specified"), ma la riga Duration l'ha gia' stampata: e' voluto.
         result = subprocess.run(
-            [ffmpeg, "-hide_banner", "-i", str(path)],
+            [ffmpeg, "-hide_banner", *input_args(path)],
             capture_output=True, text=True, timeout=30,
         )
     except (OSError, subprocess.TimeoutExpired):

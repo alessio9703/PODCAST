@@ -19,7 +19,7 @@ from pathlib import Path
 from typing import Any
 
 from .errors import DomainError
-from .ffmpeg_tool import FFMPEG_TIMEOUT_SECONDS, require_ffmpeg
+from .ffmpeg_tool import FFMPEG_TIMEOUT_SECONDS, input_args, require_ffmpeg
 from .fileio import write_json_atomic
 from .registry import file_hash
 
@@ -42,7 +42,7 @@ def cache_path(run_dir: Path, points: int) -> Path:
 def _decode(path: Path) -> array:
     command = [
         require_ffmpeg(), "-v", "error", "-nostdin",
-        "-i", str(path), "-ac", "1", "-ar", str(_DECODE_RATE), "-f", "s16le", "-",
+        *input_args(path), "-ac", "1", "-ar", str(_DECODE_RATE), "-f", "s16le", "-",
     ]
     try:
         result = subprocess.run(command, capture_output=True, timeout=FFMPEG_TIMEOUT_SECONDS)

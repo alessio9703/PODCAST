@@ -30,7 +30,15 @@ def _spoken_tracks(run_dir: Path, config: Any) -> list[tuple[str, Any]]:
         library.scan()
     except Exception:  # noqa: BLE001 - contesto facoltativo, vedi docstring del modulo
         return []
+    return spoken_tracks_for_choice(choice, library)
 
+
+def spoken_tracks_for_choice(choice: dict[str, Any], library: MusicLibrary) -> list[tuple[str, Any]]:
+    """(categoria, brano) di intro/outro scelti con `parlato: true`.
+
+    Separata dalla lettura di musiche.json perche' run.py ha la scelta in
+    memoria prima che la cartella della run esista.
+    """
     found = []
     for category in _SPOKEN_CATEGORIES:
         name = choice.get(category)
@@ -56,9 +64,14 @@ def capture_music_context(run_dir: Path, config: Any) -> dict[str, dict[str, str
 
 def prompt_music_context(run_dir: Path, config: Any) -> tuple[dict[str, dict[str, str]] | None, list[str]]:
     """({"intro": {"trascrizione"}, ...}, avvisi) per ScriptWriter.build_prompt()."""
+    return context_from_tracks(_spoken_tracks(run_dir, config))
+
+
+def context_from_tracks(tracks: list[tuple[str, Any]]) -> tuple[dict[str, dict[str, str]] | None, list[str]]:
+    """({"intro": {"trascrizione"}, ...}, avvisi) da (categoria, brano) con parlato."""
     context: dict[str, dict[str, str]] = {}
     warnings: list[str] = []
-    for category, track in _spoken_tracks(run_dir, config):
+    for category, track in tracks:
         if not track.metadata.trascrizione:
             warnings.append(
                 f"'{track.name}' ({category}) ha parlato ma nessuna trascrizione nei "
@@ -122,4 +135,10 @@ def music_durations(run_dir: Path, config: Any) -> dict[str, object]:
     return payload
 
 
-__all__ = ["capture_music_context", "music_durations", "prompt_music_context"]
+__all__ = [
+    "capture_music_context",
+    "context_from_tracks",
+    "music_durations",
+    "prompt_music_context",
+    "spoken_tracks_for_choice",
+]

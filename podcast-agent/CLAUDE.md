@@ -93,6 +93,5 @@ Sempre con la venv del progetto (il python di sistema non ha le dipendenze):
 ```
 
 Ogni suite stampa "N controlli superati" ed esce con 0. La `.venv` è stata ricreata il
-2026-10-06 in questa copia del progetto. Quella vecchia, copiata da un'altra cartella e
-con `pip` che puntava a `Documenti/LIL Podcast/podcast-agent/.venv`, è in
-`.venv-vecchia-copia/` e non va usata.
+2026-10-06 in questa copia del progetto; quella vecchia copiata da un'altra cartella
+(`.venv-vecchia-copia/`) è stata cancellata il 2026-10-07 ed è nel `.gitignore`.

@@ -24,6 +24,7 @@ from src.audio_assembler import (
 )
 from src.config import Config, ConfigError, PROJECT_ROOT, load_config, load_dotenv
 from src.cost_estimate import estimate
+from src.music_context import context_from_tracks, spoken_tracks_for_choice
 from src.music_library import CATEGORIES, MusicLibrary, MusicTrack, has_any_music, write_music_choice
 from src.music_mixer import MusicMixerError, mix_episode, preflight
 from src.pdf_reader import Document, DocumentError, extract_text
@@ -256,21 +257,20 @@ def step_choose_music(library: MusicLibrary) -> dict[str, str | None]:
 
 
 def _music_context(library: MusicLibrary, chosen: dict[str, str | None]) -> dict[str, dict] | None:
-    """Contesto per ScriptWriter: solo intro/outro con `parlato: true`."""
-    context: dict[str, dict] = {}
-    for category in ("intro", "outro"):
-        name = chosen.get(category)
-        if not name:
-            continue
-        track = next((t for t in library.tracks(category) if t.name == name), None)
-        if track and track.metadata.parlato:
-            if not track.metadata.trascrizione:
-                print(
-                    f"  ATTENZIONE: '{track.name}' ha parlato ma nessuna trascrizione "
-                    "nei metadati: il copione potrebbe ripetere quello che dice."
-                )
-            context[category] = {"trascrizione": track.metadata.trascrizione or ""}
-    return context or None
+    """Contesto per ScriptWriter: solo intro/outro con `parlato: true`.
+
+    La logica e' quella condivisa con i tool (src/music_context.py); qui resta
+    solo l'avviso stampato come prima.
+    """
+    tracks = spoken_tracks_for_choice(chosen, library)
+    for _category, track in tracks:
+        if not track.metadata.trascrizione:
+            print(
+                f"  ATTENZIONE: '{track.name}' ha parlato ma nessuna trascrizione "
+                "nei metadati: il copione potrebbe ripetere quello che dice."
+            )
+    context, _warnings = context_from_tracks(tracks)
+    return context
 
 
 # ----------------------------------------------------------------------

@@ -2567,13 +2567,61 @@ def test_c4() -> None:
 # ----------------------------------------------------------------------
 
 
-def test_full_flow() -> None:
-    print("\n[finale] documento -> cast -> musiche -> copione -> modifica -> approva -> stima -> consenso -> produce interrotto e ripreso -> episodio -> forma d'onda -> retake -> scegli -> rimonta -> archivio")
-    root = Path(tempfile.mkdtemp(prefix="podcast-web-finale-"))
-    setup(root)
-    config = write_c2_config(root, "config-finale.yaml", tts_delay_seconds=0.4)
-    responses = root / "anthropic_risposte.json"
+def web_project_copy() -> tuple[Path, Path]:
+    """Una copia del progetto (codice, tool, prompt, provider e client finti)
+    con un config.yaml di default che punta al provider e al client finti:
+    serve per lanciare i comandi in modalita' web, dove --config e' vietato.
+    Ritorna (radice della copia, config.yaml)."""
+    import shutil as _shutil
 
+    copy = Path(tempfile.mkdtemp(prefix="podcast-web-copia-"))
+    ignore = _shutil.ignore_patterns("__pycache__", "*.pyc")
+    for name in ("src", "tools", "prompts"):
+        _shutil.copytree(PROJECT_ROOT / name, copy / name, ignore=ignore)
+    (copy / "tests").mkdir()
+    for name in ("__init__.py", "fake_provider.py", "fake_anthropic.py"):
+        _shutil.copy2(PROJECT_ROOT / "tests" / name, copy / "tests" / name)
+    setup(copy)
+    config = write_c2_config(copy, "config.yaml", tts_delay_seconds=0.4)
+    return copy, config
+
+
+def test_full_flow(web: bool = False) -> None:
+    """Il flusso del piano dalla CLI. Con `web=True` gira su una copia del progetto,
+    con PODCAST_AGENT_WEB=1 e senza --config, come lo lancera' l'adattatore."""
+    mode = "modalita' web" if web else "locale"
+    print(f"\n[finale · {mode}] documento -> cast -> musiche -> copione -> modifica -> approva -> stima -> consenso -> produce interrotto e ripreso -> episodio -> forma d'onda -> retake -> scegli -> rimonta -> archivio")
+    if web:
+        root, config = web_project_copy()
+    else:
+        root = Path(tempfile.mkdtemp(prefix="podcast-web-finale-"))
+        setup(root)
+        config = write_c2_config(root, "config-finale.yaml", tts_delay_seconds=0.4)
+    responses = root / "anthropic_risposte.json"
+    project = root if web else PROJECT_ROOT
+
+    def command(name: str, *args: str) -> list[str]:
+        base = [PYTHON, str(project / "tools" / name), *args]
+        return base if web else [*base, "--config", str(config)]
+
+    def environment() -> dict[str, str]:
+        env = clean_env()
+        env.pop("PODCAST_AGENT_WEB", None)
+        if web:
+            env["PODCAST_AGENT_WEB"] = "1"
+        return env
+
+    def tool(name: str, *args: str, config: Path = config) -> tuple[int, dict, str]:  # noqa: ARG001 - stessa firma del tool() del modulo
+        proc = subprocess.run(command(name, *args), capture_output=True, text=True, cwd=str(project), env=environment())
+        try:
+            payload = json.loads(proc.stdout)
+        except json.JSONDecodeError:
+            payload = {"_raw_stdout": proc.stdout}
+        return proc.returncode, payload, proc.stderr
+
+    if web:
+        proc = subprocess.run([*command("music_list.py"), "--config", str(config)], capture_output=True, text=True, cwd=str(project), env=environment())
+        check("0. modalita' web attiva: --config rifiutato", proc.returncode == 1 and json.loads(proc.stdout)["error_type"] == "NotAllowedInWebMode", proc.stdout[-200:])
     code, out, _ = tool("documents_list.py", config=config)
     check("1. il documento e' nella libreria ed e' estraibile", code == 0 and out["documenti"][0]["nome"] == "report.txt" and out["documenti"][0]["estraibile"], str(out)[:200])
     code, out, _ = tool("run_init.py", "--title=Il trimestre, finale", "--document=report.txt", config=config)
@@ -2604,8 +2652,8 @@ def test_full_flow() -> None:
 
     events = Path(root / "output" / run / "_eventi.jsonl")
     proc = subprocess.Popen(
-        [PYTHON, str(PROJECT_ROOT / "tools" / "produce.py"), "--run-dir", run, "--events", "--config", str(config)],
-        stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, cwd=str(PROJECT_ROOT), env=clean_env(),
+        command("produce.py", "--run-dir", run, "--events"),
+        stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, cwd=str(project), env=environment(),
     )
     deadline = time.monotonic() + 60
     while time.monotonic() < deadline and not any(r["evento"] == "battuta" and r["n"] >= 2 for r in read_events(events)):
@@ -2640,6 +2688,108 @@ def test_full_flow() -> None:
     check("9. nell'Archivio, fra i pronti, con titolo e documento", [(r["titolo"], r["documento"], r["azione"]) for r in out["episodi"]] == [("Il trimestre, finale", "report.txt", "Ascolta")], str(out["episodi"]))
     code, out, _ = tool("voices_list.py", config=config)
     check("   le tre voci risultano usate in un episodio", all(v["usata_in"] == 1 for v in out["voices"] if v["name"] in (PRESENTER, INTERVIEWER, GUEST)))
+
+
+# ----------------------------------------------------------------------
+# C6
+# ----------------------------------------------------------------------
+
+
+def test_c6() -> None:
+    root = Path(tempfile.mkdtemp(prefix="podcast-web-c6-"))
+    setup(root)
+    config = write_c2_config(root, "config-c6.yaml")
+
+    print("\n[C6] run.py usa src/music_context.py")
+    (root / "musiche" / "intro" / "Piano calmo.json").write_text(json.dumps({"parlato": True, "trascrizione": "Benvenuti a LIL"}), encoding="utf-8")
+    (root / "musiche" / "intro" / "Piano forte.json").write_text(json.dumps({"parlato": True}), encoding="utf-8")
+    proc = run_python(
+        f"""
+        import io, contextlib, importlib.util
+        from src.config import load_config
+        from src.music_library import MusicLibrary
+        spec = importlib.util.spec_from_file_location("run_cli", "run.py")
+        run = importlib.util.module_from_spec(spec); spec.loader.exec_module(run)
+        config = load_config({str(config)!r})
+        lib = MusicLibrary(config.music_dir, config.accepted_extensions); lib.scan()
+        print(run._music_context(lib, {{"intro": "Piano calmo", "outro": None}}))
+        buffer = io.StringIO()
+        with contextlib.redirect_stdout(buffer):
+            context = run._music_context(lib, {{"intro": "Piano forte"}})
+        print(context, "ATTENZIONE" in buffer.getvalue())
+        print(run._music_context(lib, {{"intro": None}}))
+        import inspect
+        print("spoken_tracks_for_choice" in inspect.getsource(run._music_context))
+        """
+    )
+    lines = proc.stdout.strip().splitlines()
+    check("run.py: contesto dell'intro con parlato", lines[:1] == ["{'intro': {'trascrizione': 'Benvenuti a LIL'}}"], proc.stdout + proc.stderr)
+    check("run.py: parlato senza trascrizione -> avviso stampato come prima", lines[1:2] == ["{'intro': {'trascrizione': ''}} True"], proc.stdout)
+    check("run.py: nessuna musica -> None", lines[2:3] == ["None"], proc.stdout)
+    check("run.py usa la funzione condivisa", lines[3:4] == ["True"], proc.stdout)
+    proc = subprocess.run([PYTHON, str(PROJECT_ROOT / "run.py"), "--help"], capture_output=True, text=True, cwd=str(PROJECT_ROOT), env=clean_env())
+    check("run.py si avvia", proc.returncode == 0 and "usage" in proc.stdout)
+
+    print("\n[C6] lessons.py --propose: errori dell'API come per il copione")
+    proc = run_python(
+        f"""
+        import json
+        from pathlib import Path
+        from src.config import load_config
+        import src.lessons as lm
+        from tests.fake_anthropic import queue_responses
+        config = load_config({str(config)!r})
+        queue_responses(Path({str(root / "anthropic_risposte.json")!r}), {{"raise": "auth"}}, {{"raise": "rate_limit", "retry_after": 7}})
+        for _ in range(2):
+            try:
+                lm.call_model("prompt", model="m", client=config.anthropic_client())
+            except Exception as exc:
+                print(getattr(exc, "kind", type(exc).__name__), "sk-" in str(exc))
+        """
+    )
+    check("chiave rifiutata -> ModelAuthError; rate limit -> ModelRateLimited; nessuna chiave nel messaggio", proc.stdout.split() == ["ModelAuthError", "False", "ModelRateLimited", "False"], proc.stdout + proc.stderr)
+
+    print("\n[C6] ffmpeg: solo file locali, formato dall'estensione")
+    proc = run_python(
+        f"""
+        from src.ffmpeg_tool import input_args, probe_args, media_duration_seconds
+        print(input_args("a/brano.mp3"))
+        print(input_args("a/voce.m4a")[:4])
+        print(input_args("a/strano.xyz"))
+        print(probe_args("b.wav"))
+        from pathlib import Path
+        fake = Path({str(root / "musiche" / "intro" / "Finto.mp3")!r})
+        secret = Path({str(root / "segreto-c6.wav")!r})
+        fake.write_text("ffconcat version 1.0\\nfile '" + str(secret) + "'\\n")
+        print(media_duration_seconds(fake))
+        """
+    )
+    lines = proc.stdout.strip().splitlines()
+    check("input_args: whitelist file e -f dall'estensione", lines[:1] == ["['-protocol_whitelist', 'file', '-f', 'mp3', '-i', 'a/brano.mp3']"], proc.stdout + proc.stderr)
+    check("m4a -> mov; estensione ignota: solo la whitelist", lines[1:3] == ["['-protocol_whitelist', 'file', '-f', 'mov']", "['-protocol_whitelist', 'file', '-i', 'a/strano.xyz']"], proc.stdout)
+    check("ffprobe con gli stessi limiti", lines[3:4] == ["['-protocol_whitelist', 'file', '-f', 'wav', 'b.wav']"], proc.stdout)
+    check("un 'mp3' che e' un ffconcat non si legge come playlist", lines[4:5] == ["None"], proc.stdout)
+    (root / "musiche" / "intro" / "Finto.mp3").unlink()
+
+    print("\n[C6] sha256 del documento sugli stessi byte estratti")
+    proc = run_python(
+        f"""
+        from pathlib import Path
+        import src.pdf_reader as reader
+        from src.episode_config import document_record
+        doc = Path({str(root / "documenti" / "report.txt")!r})
+        original = reader._read_plain
+        def swap(path, data=None):
+            result = original(path, data)
+            path.write_text("Un altro testo, scritto mentre si estraeva.")
+            return result
+        reader._read_plain = swap
+        d = reader.extract_text(doc)
+        import hashlib
+        print(d.text[:20], document_record(d)["sha256"] == "sha256:" + hashlib.sha256(d.text.encode()).hexdigest())
+        """
+    )
+    check("file sostituito dopo la lettura: sha256 e testo restano dello stesso contenuto", proc.stdout.strip() == "I ricavi del trimest True", proc.stdout + proc.stderr)
 
 
 # ----------------------------------------------------------------------
@@ -2678,6 +2828,8 @@ def main() -> None:
     test_c3()
     test_c4()
     test_full_flow()
+    test_full_flow(web=True)
+    test_c6()
 
     from tests.test_tools_cli import PASSED
 

@@ -12,6 +12,7 @@ resoconti accanto a questo file:
 - `C3.md`, `C3-sicurezza.md`
 - `C4.md`, `C4-sicurezza.md`
 - `C5.md` (con il riepilogo finale dell'integrazione web), `C5-sicurezza.md`
+- `C6.md`
 
 ## 1. Commit
 
@@ -37,10 +38,11 @@ resoconti accanto a questo file:
 | `adbbab6` | sicurezza C4: medie e basse corrette |
 | `62abef2` | **C5** contratto completo, README, LEGENDA, verifica finale, riepilogo |
 | `93862d9` | rapporto di sicurezza C5 |
-| (questo) | sicurezza C5: medie e basse corrette |
+| `9212351` | sicurezza C5: medie e basse corrette |
+| (questo) | **C6** fase finale: run.py, lessons, ffmpeg, sha256 dei documenti, flusso in modalità web, pulizia |
 
 Test all'ultimo commit, sempre con `.venv/bin/python`: smoke 68, tools_cli 183 (+2
-saltati, servono `ANTHROPIC_API_KEY`), music 73, lessons 80, web_integration 625.
+saltati, servono `ANTHROPIC_API_KEY`), music 73, lessons 80, web_integration 661.
 
 ## 2. Fasi
 
@@ -54,7 +56,7 @@ saltati, servono `ANTHROPIC_API_KEY`), music 73, lessons 80, web_integration 625
 | C3 | Episodio e correzioni: passo 7 | **fatta**; revisione (con le correzioni di C2): 0 alte, 2 medie, 6 basse, **tutte corrette** |
 | C4 | Archivio e librerie (Documenti, Voci, Musiche), Impostazioni, verifica di Lezioni e Diagnostica | **fatta**; revisione: 0 alte, 3 medie, 5 basse, **tutte corrette** |
 | C5 | Contratto completo + README/LEGENDA + riepilogo finale | **fatta** (verifica finale compresa); revisione: 0 alte, 2 medie, 5 basse, **tutte corrette** |
-| C6 | Allineamento di `run.py` a `src/music_context.py`, fase finale dedicata | da fare |
+| C6 | Fase finale: `run.py` su `src/music_context.py`, `lessons --propose`, ffmpeg, sha256 dei documenti, flusso in modalità web, pulizia | **fatta**; revisione di sicurezza da fare |
 
 A fine di **ogni** fase: revisione di sicurezza (`<fase>-sicurezza.md`), alte corrette
 prima della fase successiva.
@@ -277,12 +279,9 @@ musiche → copione → modifica → approva → stima → consenso → produce 
 
 ## 4. Richieste ricevute e non ancora completate
 
-1. **C6** (OK dell'utente il 2026-10-07): `run.py` su `src/music_context.py`;
-   `lessons --propose` con `classify_api_error`; ffmpeg/ffprobe con `-protocol_whitelist
-   file` e `-f`; sha256 del documento sugli stessi byte estratti; `test_full_flow` anche in
-   modalità web; pulizia di `.venv-vecchia-copia/` e dei `.DS_Store`. Poi resoconto,
-   revisione e correzioni. **Dopo C6 questa sessione si ferma**: la revisione finale del
-   branch la fa una sessione nuova.
+1. **Revisione di sicurezza di C6** (`9212351..HEAD`) e correzioni come al solito.
+2. **Dopo C6 questa sessione si ferma** (richiesta dell'utente): la revisione finale
+   dell'intero branch la fa una sessione nuova.
 
 ## 5. Annotazioni per le fasi successive e per la fase finale
 
@@ -308,19 +307,13 @@ musiche → copione → modifica → approva → stima → consenso → produce 
   - `--no-approval-gate` e, quando ci sarà, `--no-consent-gate`.
   - Dal 2026-10-07 sono anche **rifiutati** dai tool in modalità web
     (`PODCAST_AGENT_WEB=1`, `NotAllowedInWebMode`). Il contratto lo documenta già.
-- **Fase finale (C6)**: `run.py` allineato a `src/music_context.py`.
-- **Fase finale (richiesta dell'utente, 2026-10-07)**: `tools/lessons.py --propose` deve
-  usare la stessa classificazione degli errori API del copione
-  (`src/script_writer.classify_api_error`): oggi i suoi errori escono con exit 1 e il nome
-  della classe della libreria.
+- **Fase finale (C6)**: fatta (`C6.md`).
 - **Fuori perimetro, da segnalare nel riepilogo finale**:
   - In modalità libera (`run.py`, `--trusted-paths`) un file senza estensione si legge
     ancora come testo: è uso locale.
 - **README e LEGENDA**: aggiornati in C5.
-- **Pulizia da proporre all'utente**:
-  - `.venv-vecchia-copia/` (venv copiata, da cancellare quando l'utente vuole);
-  - i due `.DS_Store` ancora tracciati dal primo commit (`../.DS_Store`,
-    `podcast-agent/.DS_Store`).
+- **Pulizia**: fatta in C6 (`.venv-vecchia-copia/` cancellata, `.DS_Store` non più
+  tracciati e nel `.gitignore`).
 - **`docs/wireframe/`**: la sottocartella annidata `docs/wireframe/wireframe/` è come
   l'ha fornita l'utente: non spostata.
 - **Il piano originale** era anche in `~/.claude/plans/typed-stargazing-hoare.md`, fuori

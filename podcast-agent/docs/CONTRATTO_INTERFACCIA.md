@@ -1110,8 +1110,9 @@ retake, valuta, lezioni, cartelle}}`. Sola lettura, solo una **whitelist** di ch
   `lezioni.md` al massimo 4000 caratteri (`LessonsError`, nulla scritto).
 - `--accept` può dare exit 3 `needs_user_input` (serve togliere una lezione: si richiama con
   `--remove-id`).
-- Da sistemare nella fase finale: gli errori dell'API in `--propose` non hanno ancora gli
-  `error_type` del copione (`ModelAuthError`, …).
+- Gli errori dell'API in `--propose` hanno gli stessi `error_type` della scrittura del
+  copione (§3, "Errori dell'API del modello"): chiave o credito → exit 2, rate limit,
+  sovraccarico e rete → exit 1 con `retry_after_seconds`.
 
 ## Diagnostica
 
@@ -1195,7 +1196,9 @@ Le tre librerie sono cartelle: un caricamento è la scrittura di un file lì den
 - **Contenuto**: oltre all'estensione si controlla la **firma** del file (i primi byte:
   `RIFF…WAVE`, `ID3`/frame MP3, `ftyp` per m4a, `fLaC`, `OggS`, `%PDF`, `PK` per DOCX).
   Sulle registrazioni e sui brani gira ffmpeg: un file "mp3" che in realtà è una playlist
-  o un `ffconcat` non deve entrare in libreria.
+  o un `ffconcat` non deve entrare in libreria. (I comandi aprono comunque ogni file con
+  `-protocol_whitelist file` e, per le estensioni note, con il formato forzato: un
+  `ffconcat` travestito da mp3 non viene letto come playlist.)
 - **Dimensione**: limite in streaming, prima di scrivere su disco. Per i documenti lo
   stesso `documents.max_bytes` di `config.yaml` (20 MB); per le registrazioni una soglia
   adatta a 10–30 secondi (es. 20 MB): la registrazione si legge per intero in memoria al
@@ -1269,5 +1272,4 @@ che li chiede e dopo che l'utente ha risposto, mai d'ufficio.
 | Rinominare il file dell'episodio cambiando il titolo | passo 7 | il nome resta quello del primo montaggio (G7), così i link non si rompono |
 | Cancellare episodi, documenti, voci, brani con un comando | menu "⋯" delle librerie | non c'è un comando: se l'adattatore lo fa, regole in "Caricamenti" |
 | Pronuncia diversa come retake | passo 7 | si corregge il testo ("Cosa dice"), con una nuova approvazione |
-| Errori dell'API in `lessons.py --propose` con gli `error_type` del copione | Lezioni | previsto nella fase finale (C6): oggi escono con exit 1 e il nome della classe della libreria |
 

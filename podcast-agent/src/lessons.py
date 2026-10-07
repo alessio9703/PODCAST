@@ -495,30 +495,42 @@ Regole:
 def call_model(
     prompt: str,
     *,
-    api_key: str,
+    api_key: str | None = None,
     model: str,
     caller: Callable[..., str] | None = None,
+    client: Any = None,
 ) -> dict[str, Any]:
     """`caller(prompt=..., model=...) -> str` e' iniettabile per i test: senza,
-    chiama davvero l'API Anthropic con temperature 0 (proposta ripetibile,
-    non creativa) e output strutturato secondo _PROPOSE_SCHEMA.
+    chiama l'API Anthropic con temperature 0 (proposta ripetibile, non
+    creativa) e output strutturato secondo _PROPOSE_SCHEMA.
+
+    `client`: quello di Config.anthropic_client() (lo stesso della scrittura
+    del copione, quindi anche il client finto dei test). Gli errori dell'API
+    passano da classify_api_error: stessi `error_type` del copione
+    (ModelAuthError, ModelCreditExhausted, ModelRateLimited, ...), senza
+    header ne' richiesta nel messaggio.
     """
     if caller is not None:
         text = caller(prompt=prompt, model=model)
     else:
         import anthropic
 
-        client = anthropic.Anthropic(api_key=api_key)
-        response = client.messages.create(
-            model=model,
-            max_tokens=2000,
-            temperature=0,
-            messages=[{"role": "user", "content": prompt}],
-            output_config={
-                "effort": "medium",
-                "format": {"type": "json_schema", "schema": _PROPOSE_SCHEMA},
-            },
-        )
+        from .script_writer import classify_api_error
+
+        client = client if client is not None else anthropic.Anthropic(api_key=api_key)
+        try:
+            response = client.messages.create(
+                model=model,
+                max_tokens=2000,
+                temperature=0,
+                messages=[{"role": "user", "content": prompt}],
+                output_config={
+                    "effort": "medium",
+                    "format": {"type": "json_schema", "schema": _PROPOSE_SCHEMA},
+                },
+            )
+        except anthropic.APIError as exc:
+            raise classify_api_error(exc) from None
         if response.stop_reason == "refusal":
             raise LessonsError("Il modello ha rifiutato di generare la proposta.")
         text = next((b.text for b in response.content if b.type == "text"), "")
@@ -536,11 +548,12 @@ def propose(
     prompts_dir: Path,
     copione_path: Path,
     aggregated: dict[str, Any],
-    api_key: str,
+    api_key: str | None = None,
     model: str,
     max_examples_per_pattern: int,
     max_example_chars: int,
     caller: Callable[..., str] | None = None,
+    client: Any = None,
 ) -> dict[str, Any]:
     if not aggregated["schemi"]:
         return {"proposte": [], "scartate": [], "motivo_se_vuoto": "nessuno schema sopra soglia: niente da proporre."}
@@ -558,7 +571,7 @@ def propose(
         max_examples_per_pattern=max_examples_per_pattern,
         max_example_chars=max_example_chars,
     )
-    raw = call_model(prompt, api_key=api_key, model=model, caller=caller)
+    raw = call_model(prompt, api_key=api_key, model=model, caller=caller, client=client)
 
     # La chiamata al modello sta FUORI dal lock (dura secondi); il registro si
     # rilegge dentro, cosi' gli id non si scontrano con quelli scritti intanto.

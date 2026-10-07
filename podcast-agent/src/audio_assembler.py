@@ -35,7 +35,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable, Iterable
 
-from .ffmpeg_tool import FFMPEG_TIMEOUT_SECONDS, find_ffmpeg
+from .ffmpeg_tool import FFMPEG_TIMEOUT_SECONDS, find_ffmpeg, input_args
 from .fileio import atomic_output, write_bytes_atomic
 from .script_writer import PodcastScript, spoken_text
 from .voice_provider import VoiceProvider, VoiceProviderError
@@ -718,7 +718,7 @@ class AudioAssembler:
                 with atomic_output(target_mp3) as partial:
                     command = [
                         ffmpeg, "-y", "-loglevel", "error",
-                        "-i", str(source_wav),
+                        *input_args(source_wav),
                         "-codec:a", "libmp3lame",
                         "-b:a", f"{self.output_mp3_bitrate}k",
                         str(partial),

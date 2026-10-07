@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import hashlib
+import io
 import time
 import zipfile
 from dataclasses import dataclass
@@ -128,6 +130,10 @@ class Document:
     text: str
     kind: str
     pages: int | None = None
+    #: sha256 dei byte da cui e' stato estratto il testo ("sha256:<hex>").
+    #: Calcolato sugli stessi byte, non rileggendo il file dopo: un file
+    #: sostituito nel frattempo non da' sha256 e testo che non corrispondono.
+    sha256: str | None = None
 
     @property
     def char_count(self) -> int:
@@ -227,14 +233,27 @@ def extract_text(
     if size > limits.max_bytes:
         raise _too_large(doc_path, "byte", limits.max_bytes, size, "dimensione in byte")
     suffix = doc_path.suffix.lower()
+    if suffix not in (".pdf", ".docx") and suffix not in TEXT_EXTENSIONS and suffix != "":
+        raise UnsupportedDocument(
+            f"Estensione '{suffix}' non supportata. Formati gestiti: PDF, DOCX, "
+            f"{', '.join(sorted(TEXT_EXTENSIONS))}.",
+            extension=suffix,
+            supported=SUPPORTED_EXTENSIONS,
+        )
+    # I byte si leggono UNA volta (con il limite: il file puo' essere
+    # cresciuto dopo il controllo), e da li' si estrae e si calcola lo sha256.
+    with doc_path.open("rb") as handle:
+        data = handle.read(limits.max_bytes + 1)
+    if len(data) > limits.max_bytes:
+        raise _too_large(doc_path, "byte", limits.max_bytes, len(data), "dimensione in byte")
+    digest = "sha256:" + hashlib.sha256(data).hexdigest()
     if suffix == ".pdf":
-        document = _read_pdf(doc_path, limits)
+        document = _read_pdf(doc_path, limits, data)
     elif suffix == ".docx":
-        document = _read_docx(doc_path, limits)
-    elif suffix in TEXT_EXTENSIONS or suffix == "":
-        document = _read_plain(doc_path)
+        document = _read_docx(doc_path, limits, data)
     else:
-        document = None
+        document = _read_plain(doc_path, data)
+    document.sha256 = digest
     if document is not None:
         if document.char_count > limits.max_chars:
             raise _too_large(doc_path, "caratteri", limits.max_chars, document.char_count, "caratteri del testo")
@@ -247,7 +266,7 @@ def extract_text(
     )
 
 
-def _read_pdf(path: Path, limits: DocumentLimits) -> Document:
+def _read_pdf(path: Path, limits: DocumentLimits, data: bytes | None = None) -> Document:
     try:
         from pypdf import PdfReader
     except ImportError as exc:  # pragma: no cover
@@ -256,7 +275,7 @@ def _read_pdf(path: Path, limits: DocumentLimits) -> Document:
         ) from exc
 
     try:
-        reader = PdfReader(str(path))
+        reader = PdfReader(io.BytesIO(data) if data is not None else str(path))
     except Exception as exc:
         raise DocumentNotExtractable(
             f"Impossibile aprire il PDF {path.name}: {exc}", motivo="illeggibile", file=path
@@ -336,7 +355,7 @@ def _page_content_bytes(page: Any) -> int:
         return 0
 
 
-def _check_docx_unpacked(path: Path, limits: DocumentLimits) -> None:
+def _check_docx_unpacked(path: Path, limits: DocumentLimits, data: bytes | None = None) -> None:
     """Somma le dimensioni scompattate dichiarate nello zip, PRIMA di aprirlo.
 
     python-docx carica in memoria tutte le parti del pacchetto: un DOCX di
@@ -346,7 +365,7 @@ def _check_docx_unpacked(path: Path, limits: DocumentLimits) -> None:
     la dimensione dichiarata da' errore).
     """
     try:
-        with zipfile.ZipFile(path) as archive:
+        with zipfile.ZipFile(io.BytesIO(data) if data is not None else path) as archive:
             entries = archive.infolist()
             unpacked = sum(info.file_size for info in entries)
             xml = sum(
@@ -368,7 +387,7 @@ def _check_docx_unpacked(path: Path, limits: DocumentLimits) -> None:
         raise _too_large(path, "byte_xml", limits.max_xml_bytes, xml, "dimensione delle parti XML")
 
 
-def _read_docx(path: Path, limits: DocumentLimits) -> Document:
+def _read_docx(path: Path, limits: DocumentLimits, data: bytes | None = None) -> Document:
     try:
         import docx  # type: ignore
     except ImportError as exc:
@@ -378,9 +397,9 @@ def _read_docx(path: Path, limits: DocumentLimits) -> Document:
             "(tools/doctor.py dice cosa manca)."
         ) from exc
 
-    _check_docx_unpacked(path, limits)
+    _check_docx_unpacked(path, limits, data)
     try:
-        document = docx.Document(str(path))
+        document = docx.Document(io.BytesIO(data) if data is not None else str(path))
     except Exception as exc:
         raise DocumentNotExtractable(
             f"Impossibile aprire il DOCX {path.name}: {exc}", motivo="illeggibile", file=path
@@ -393,10 +412,11 @@ def _read_docx(path: Path, limits: DocumentLimits) -> Document:
     return Document(path=path, text=text, kind="docx")
 
 
-def _read_plain(path: Path) -> Document:
+def _read_plain(path: Path, data: bytes | None = None) -> Document:
+    raw = data if data is not None else path.read_bytes()
     for encoding in ("utf-8", "utf-8-sig", "latin-1"):
         try:
-            text = path.read_text(encoding=encoding).strip()
+            text = raw.decode(encoding).replace("\r\n", "\n").replace("\r", "\n").strip()
         except UnicodeDecodeError:
             continue
         if not text:
