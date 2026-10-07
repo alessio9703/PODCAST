@@ -265,6 +265,28 @@ script:
   max_document_chars: 120000
 
 # ---------------------------------------------------------------------------
+# Retake: "Come deve cambiare?" al passo 7 (decisione D1).
+# Ogni indicazione aggiunge la sua tag SOLO al testo inviato per quel take:
+# il copione approvato e il suo sha256 non cambiano. E' una whitelist: nessun
+# testo libero arriva al sintetizzatore fuori dal copione approvato. Le tag si
+# pagano come il resto del testo (la stima le conta).
+# "Pronuncia diversa" non c'e' di proposito: una pronuncia si corregge
+# cambiando il testo (passo "Cosa dice"), con una nuova approvazione.
+# Le tag sono punti di partenza da tarare a orecchio, come in prompts/copione.md.
+# `opposto`: le due indicazioni non si chiedono insieme.
+# ---------------------------------------------------------------------------
+retake:
+  max_takes: 3
+  indicazioni:
+    "Più lento": {tag: "[lentamente]", opposto: "Più veloce"}
+    "Più veloce": {tag: "[rapidamente]", opposto: "Più lento"}
+    "Più energico": {tag: "[entusiasta]", opposto: "Più calmo"}
+    "Più calmo": {tag: "[calmo]", opposto: "Più energico"}
+    "Più serio": {tag: "[serio]", opposto: "Più sorridente"}
+    "Più sorridente": {tag: "[sorride]", opposto: "Più serio"}
+    "Più pause": {tag: "[con pause]"}
+
+# ---------------------------------------------------------------------------
 # Intro, outro e sottofondo (tutti opzionali e indipendenti).
 # Richiede ffmpeg SOLO se almeno una musica e' scelta per l'episodio (vedi
 # paths.music_dir e tools/music_set.py). Un episodio senza musiche non tocca

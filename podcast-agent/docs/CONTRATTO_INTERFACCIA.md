@@ -2,9 +2,9 @@
 
 > Documento in costruzione: si completa fase per fase (vedi `docs/avanzamento/`).
 > Coperti finora: contratto generale (C0), passi 1–4 + Confronto (C1), correzioni
-> della revisione di sicurezza C0+C1 e modalità web, passi 5–6 (C2).
-> Le azioni del passo 7, Archivio e Librerie arrivano con le fasi C3–C4; la
-> versione completa con la sezione "a carico dell'adattatore" chiude la C5.
+> della revisione di sicurezza C0+C1 e modalità web, passi 5–6 (C2), passo 7 (C3).
+> Archivio e Librerie arrivano con la fase C4; la versione completa con la
+> sezione "a carico dell'adattatore" chiude la C5.
 
 ## 1. Come si chiama un comando
 
@@ -280,6 +280,18 @@ richiama `produce.py`. `CloneOutcomeUnknown` chiede all'utente di controllare le
 sul provider (una voce duplicata va cancellata lì) e di confermare con
 `voice_meta.py --name VOCE --confirm-clone-retry --by U`; poi si richiama `produce.py`. `stato` dice perché: `mancante`, `superato` (la registrazione è
 stata sostituita dopo il consenso) o `revocato` (vale anche per una voce già clonata).
+
+### Introdotti in C3
+
+| error_type | exit | Quando | `details` |
+|---|---|---|---|
+| `UnknownDirection` | 1 | Retake con un'indicazione di resa che non è in `config.yaml` | `indicazione`, `ammesse` |
+| `DirectionNeedsTextEdit` | 1 | Retake con "Pronuncia diversa": va corretto il testo | `indicazione` |
+| `ConflictingDirections` | 1 | Due indicazioni opposte insieme (es. più lento e più veloce) | `indicazioni` |
+| `TooManyTakes` | 1 | Più take di `retake.max_takes` | `massimo`, `richiesti` |
+| `SegmentsMissing` | 1 | `mix.py` senza tutti i segmenti in cache (copione cambiato o episodio vecchio): serve `produce.py` | `missing` |
+| `WaveformError` | 1 | Numero di punti fuori scala, file non decodificabile | `campo`, `minimo`, `massimo` |
+| `EpisodeNotProduced` | 1 | Forma d'onda di un episodio senza file finale | — |
 
 ### `LockTimeout` · exit 1
 
@@ -786,4 +798,104 @@ episodio troncato. Ogni esecuzione di ffmpeg ha un limite di 15 minuti.
 | 1 | `ApprovalRequired`, `ScriptMissing`, `RunBusy`, `ProductionInterrupted`, `Interrupted`, `PathNotAllowed` (`_eventi.jsonl` link simbolico), errori delle musiche (anche ffmpeg oltre il limite di tempo), errore di sintesi di una battuta (`AssemblyError`: si può rilanciare, si pagano solo le mancanti) |
 | 2 | errore del provider durante la **clonazione** (`ProviderQuotaError`, `ProviderAuthError`, …): blocco, nessun "Riprova" |
 | 3 | `ConsentRequired`, `CloneOutcomeUnknown`, `MusicChangedError` (brano sostituito: si conferma con `--accept-changed-music`) |
+
+## Passo 7 · Episodio e correzioni
+
+| Azione | Comando | Lunga | Costa |
+|---|---|---|---|
+| Intestazione, sezioni, trascrizione, file | `episode_info.py --run-dir R` | no | no |
+| Forma d'onda | `waveform.py --run-dir R --points N` (10–4000) | no (la prima volta qualche secondo) | no |
+| Scarica mp3 | *adattatore*: il file in `file_finale.percorso` | — | — |
+| Clic su un punto → battuta | dalla `trascrizione` (`inizio_finale`/`fine_finale`), oppure `turn_at.py --run-dir R --at 4:12` | no | no |
+| "Come è detta": stima | `retake.py --run-dir R --turn N --takes K [--direction "Più calmo" …] --dry-run` | no | no |
+| Genera K take | `retake.py --run-dir R --turn N --takes K [--direction …] --by U` | **sì** | **sì** |
+| Ascolta in contesto (tutti i take, originale compreso) | `retake.py --run-dir R --list N [--with-music]` | no | no |
+| Usa il take e rimonta | `retake.py --run-dir R --choose N=K`, poi `mix.py --run-dir R` | no | no |
+| "Cosa dice": correggi il testo | `script_edit.py --run-dir R --turn N --text=… --expected-version V`, poi `script_approve.py --version V+1`, poi `produce.py --run-dir R --events` (paga solo la battuta cambiata) | sì (produce) | sì (una battuta) |
+| Cambia musiche | `music_set.py --run-dir R …`, poi `mix.py --run-dir R` | no | no |
+
+**`episode_info.py`** (esempio reale, trascrizione e file accorciati):
+
+```json
+{
+  "ok": true,
+  "run": "2026-10-07_12-22_episodio-c3",
+  "titolo": "Un altro titolo",
+  "stato": "pronto", "motivi": [], "verificabile": true, "in_corso": null,
+  "copione_approvato": true, "formato": "conversazione",
+  "durata_seconds": 8.9, "durata_label": "0:09",
+  "voci": [{"speaker": "Mario Rossi", "ruolo": "voce", "nome_pronunciato": null}, "…"],
+  "numero_voci": 2, "montato_il": "2026-10-07T12:22:44",
+  "file_finale": {"nome": "episodio-c3.mp3", "percorso": "output/2026-10-07_12-22_episodio-c3/episodio-c3.mp3",
+                  "formato": "mp3", "dimensione_bytes": 215083},
+  "sezioni": [{"tipo": "intro", "inizio": 0.0, "fine": 0.5}, {"tipo": "parlato", "inizio": 1.3, "fine": 8.9, "battute": 6}],
+  "trascrizione": [
+    {"n": 1, "speaker": "Mario Rossi", "ruolo": "voce", "presentatore": false, "nome_pronunciato": null,
+     "testo": "Ciao a tutti, oggi parliamo di ricavi.", "testo_parlato": "Ciao a tutti, oggi parliamo di ricavi.",
+     "tag": [], "inizio_finale": 1.5, "fine_finale": 2.26, "inizio_label": "0:02"},
+    "…"
+  ],
+  "tempi_non_disponibili": null,
+  "file": [{"nome": "_audio_paths.json", "percorso": "output/<run>/_audio_paths.json", "dimensione_bytes": 253,
+            "modificato_il": "2026-10-07T12:22:38", "interno": true}, "…"]
+}
+```
+
+- **`stato`** è derivato: `pronto`, `da_aggiornare` (con `motivi`: `copione`, `take`,
+  `musiche`, cioè cosa è cambiato dopo il montaggio), `in_corso` (un'operazione lunga sulla
+  run: `in_corso.operazione`), `non_prodotto`. `verificabile: false` per le run montate
+  prima di C3 (senza `_montaggio.json`): se il file c'è risultano `pronto`.
+- **Intestazione** "Intervista · [mm:ss] · 3 voci · montato il [gg/mm]": `formato`,
+  `durata_label`, `numero_voci`, `montato_il`.
+- **Barra delle sezioni**: `sezioni[]`, in secondi nel file finale; `parlato.battute` è il
+  numero di battute.
+- **Trascrizione**: `inizio_finale`/`fine_finale` sono i secondi **nel file finale**
+  (intro compresa): sono quelli del player. `null` se l'episodio non è prodotto o se i
+  tempi non sono disponibili (`tempi_non_disponibili` dice perché).
+- **File**: `file[]` senza file nascosti, lock e `_lavoro.json`; `interno: true` per i file
+  di lavoro (nome con `_` davanti).
+- Il **nome del file finale** viene dal titolo dell'episodio (`episodio.json`) per le run
+  nuove, e resta quello anche se il titolo cambia dopo (G7).
+
+**`waveform.py`** (esempio reale con `--points 20`):
+
+```json
+{"ok": true, "run": "2026-10-07_12-41_episodio-c3", "file": "episodio-c3.mp3",
+ "sha256": "sha256:64b1…95df", "points": 20, "duration_seconds": 8.9,
+ "peaks": [0.235, 0.235, 0.0, 0.292, 0.292, 0.296, "…"], "cached": false}
+```
+
+I picchi (0–1) coprono l'intero file finale. Sono in cache in `_forma_onda_<N>.json`,
+legata allo sha256 del file: dopo un rimontaggio si ricalcolano da soli (`cached: false`).
+
+**Retake** ("Come è detta"): il testo resta quello approvato.
+- **"Come deve cambiare?"** → `--direction` (ripetibile) con le etichette di
+  `config.yaml` (`retake.indicazioni`; di base: Più lento, Più veloce, Più energico, Più
+  calmo, Più serio, Più sorridente, Più pause). Ogni indicazione aggiunge la sua tag
+  **solo** al testo inviato per quei take: copione e approvazione non cambiano. Due
+  opposte insieme danno `ConflictingDirections`. "Pronuncia diversa" dà
+  `DirectionNeedsTextEdit`: la UI porta su "Cosa dice".
+- **"Altre indicazioni, con parole tue"**: **non supportato**. Nessun testo libero arriva
+  al sintetizzatore fuori dal copione approvato (decisione D1). L'adattatore non lo passa.
+- **Nuovi take**: `--takes K`, al massimo `retake.max_takes` (3). La stima (`--dry-run`)
+  conta anche le tag (`chars`, `cost_usd`, `cost_eur`).
+- **Ascolta in contesto**: `--list N` restituisce `take_list[]` con, per ogni take
+  (originale compreso), `label` ("Take originale", "Take 1", …), `scelto`,
+  `indicazioni`, `preview_ui` (battuta prima + take + battuta dopo) e, con
+  `--with-music`, `preview_with_music_ui` se la run ha un sottofondo. Nessuna sintesi.
+- **Usa il take e rimonta**: `--choose N=K` poi `mix.py`. Lo stato passa da
+  `da_aggiornare` (`motivi: ["take"]`) a `pronto`.
+- Generazione e scelta tengono il lock di lavoro della run. Una voce con il consenso
+  revocato non si usa nemmeno per un retake (exit 3 `ConsentRequired`).
+
+**`mix.py`** rimonta dalla cache, con le musiche scelte o la sola voce (G1); zero sintesi,
+tiene il lock di lavoro (operazione `montaggio`). Se mancano segmenti (copione cambiato
+dopo l'ultima produzione) esce con `SegmentsMissing`: serve `produce.py`.
+
+| exit | Comandi del passo 7 |
+|---|---|
+| 0 | fatto |
+| 1 | `WaveformError`, `EpisodeNotProduced`, `UnknownDirection`, `DirectionNeedsTextEdit`, `ConflictingDirections`, `TooManyTakes`, `SegmentsMissing`, `RunBusy`, gate di approvazione (`retake.py`/`mix.py` su un copione non approvato), `ScriptMissing` |
+| 2 | errore del provider durante la sintesi di un take |
+| 3 | `ConsentRequired` (retake con voce revocata), `MusicChangedError` |
 

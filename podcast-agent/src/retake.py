@@ -18,7 +18,12 @@ segnala gli sbalzi di livello; non decide quale sia il take buono, perche'
 
 from __future__ import annotations
 
+import json
 import math
+import re
+from datetime import datetime
+from pathlib import Path
+from typing import Any
 
 from .audio_assembler import (
     PREVIEWS_DIRNAME,
@@ -32,6 +37,8 @@ from .audio_assembler import (
     synthesize_segment,
     _write_atomic,
 )
+from .errors import DomainError
+from .fileio import write_json_atomic
 from .segment_cache import (
     SCRIPT_FILENAME,
     VOICES_FILENAME,
@@ -50,12 +57,128 @@ class RetakeError(SegmentCacheError):
     """La run non contiene quello che serve per rifare una battuta."""
 
 
+#: Metadati dei take (indicazioni di resa, quando), accanto ai segmenti.
+TAKE_INFO_FILENAME = "take_info.json"
+
+#: Etichetta del wireframe che NON e' un'indicazione di resa: una pronuncia
+#: si corregge cambiando il testo, con una nuova approvazione.
+TEXT_EDIT_DIRECTION = "Pronuncia diversa"
+
+_TAG = re.compile(r"^\[[^\[\]\n]{1,40}\]$")
+
+
+# ----------------------------------------------------------------------
+# Indicazioni di resa ("Come deve cambiare?", decisione D1)
+# ----------------------------------------------------------------------
+
+
+#: Le indicazioni di partenza, uguali a quelle di config.yaml: valgono per i
+#: config.yaml creati prima della sezione `retake:`.
+DEFAULT_DIRECTIONS: dict[str, dict[str, str]] = {
+    "Più lento": {"tag": "[lentamente]", "opposto": "Più veloce"},
+    "Più veloce": {"tag": "[rapidamente]", "opposto": "Più lento"},
+    "Più energico": {"tag": "[entusiasta]", "opposto": "Più calmo"},
+    "Più calmo": {"tag": "[calmo]", "opposto": "Più energico"},
+    "Più serio": {"tag": "[serio]", "opposto": "Più sorridente"},
+    "Più sorridente": {"tag": "[sorride]", "opposto": "Più serio"},
+    "Più pause": {"tag": "[con pause]"},
+}
+
+
+def directions_config(config: Any) -> dict[str, dict[str, str]]:
+    """La whitelist di config.yaml (retake.indicazioni), validata."""
+    section = (getattr(config, "raw", {}) or {}).get("retake") or {}
+    raw = section.get("indicazioni") if "indicazioni" in section else DEFAULT_DIRECTIONS
+    raw = raw or {}
+    out: dict[str, dict[str, str]] = {}
+    for label, spec in raw.items():
+        tag = str((spec or {}).get("tag", ""))
+        if not _TAG.match(tag):
+            raise DomainError(
+                f"retake.indicazioni['{label}'] in config.yaml non ha una tag valida (es. \"[calmo]\").",
+                error_type="ConfigError",
+            )
+        out[str(label)] = {"tag": tag, "opposto": str((spec or {}).get("opposto") or "") or None}
+    return out
+
+
+def max_takes(config: Any) -> int:
+    raw = ((getattr(config, "raw", {}) or {}).get("retake") or {}).get("max_takes", 3)
+    return max(1, int(raw))
+
+
+def resolve_directions(config: Any, labels: list[str]) -> list[dict[str, str]]:
+    """[{"indicazione", "tag"}] per le etichette scelte, solo dalla whitelist.
+
+    Nessun testo libero arriva al sintetizzatore: un'etichetta che non e' in
+    config.yaml e' un errore, non una tag inventata.
+    """
+    allowed = directions_config(config)
+    chosen: list[str] = []
+    for label in labels:
+        clean = " ".join(str(label).split())
+        if clean == TEXT_EDIT_DIRECTION:
+            raise DomainError(
+                "Una pronuncia diversa non si ottiene con un nuovo take: va corretto il testo "
+                "della battuta (\"Cosa dice\"), che poi va riapprovato.",
+                error_type="DirectionNeedsTextEdit",
+                details={"indicazione": clean},
+            )
+        if clean not in allowed:
+            raise DomainError(
+                f"Indicazione non prevista: '{clean}'.",
+                error_type="UnknownDirection",
+                details={"indicazione": clean, "ammesse": sorted(allowed)},
+            )
+        if clean not in chosen:
+            chosen.append(clean)
+    for label in chosen:
+        opposite = allowed[label]["opposto"]
+        if opposite and opposite in chosen:
+            raise DomainError(
+                f"'{label}' e '{opposite}' sono opposte: scegline una.",
+                error_type="ConflictingDirections",
+                details={"indicazioni": [label, opposite]},
+            )
+    return [{"indicazione": label, "tag": allowed[label]["tag"]} for label in chosen]
+
+
+def directed_text(text: str, directions: list[dict[str, str]]) -> str:
+    """Il testo inviato per il take: le tag della whitelist davanti al testo approvato."""
+    tags = " ".join(d["tag"] for d in directions)
+    return f"{tags} {text}" if tags else text
+
+
+def load_take_info(segments_dir: Path) -> dict[str, Any]:
+    target = Path(segments_dir) / TAKE_INFO_FILENAME
+    if not target.is_file():
+        return {}
+    try:
+        raw = json.loads(target.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return {}
+    return raw if isinstance(raw, dict) else {}
+
+
+def _record_take_info(segments_dir: Path, key: str, take: int, directions: list[dict[str, str]], by: str | None) -> None:
+    info = load_take_info(segments_dir)
+    info.setdefault(key, {})[str(take)] = {
+        "indicazioni": [d["indicazione"] for d in directions],
+        "tag": [d["tag"] for d in directions],
+        "il": datetime.now().replace(microsecond=0).isoformat(),
+        "da": by,
+    }
+    write_json_atomic(Path(segments_dir) / TAKE_INFO_FILENAME, info)
+
+
 # ----------------------------------------------------------------------
 # Stima — sempre prima di spendere
 # ----------------------------------------------------------------------
 
 
-def estimate_retake(cache: RunCache, numero: int, takes: int) -> dict[str, object]:
+def estimate_retake(
+    cache: RunCache, numero: int, takes: int, directions: list[dict[str, str]] | None = None
+) -> dict[str, object]:
     """Quanto costa rifare quella battuta, senza chiamare il provider.
 
     I caratteri sono quelli GREZZI: le inline tag [fra quadre] vengono inviate
@@ -63,7 +186,7 @@ def estimate_retake(cache: RunCache, numero: int, takes: int) -> dict[str, objec
     cost_estimate.py).
     """
     turn = cache.turn(numero)
-    chars = len(turn["testo"]) * takes
+    chars = len(directed_text(turn["testo"], directions or [])) * takes
     pricing = cache.provider.pricing()
     cost = None
     basis = None
@@ -76,6 +199,7 @@ def estimate_retake(cache: RunCache, numero: int, takes: int) -> dict[str, objec
         "speaker": turn["speaker"],
         "takes": takes,
         "chars": chars,
+        "indicazioni": [d["indicazione"] for d in directions or []],
         "cost_usd": round(cost, 4) if cost is not None else None,
         "cost_basis": basis,
     }
@@ -114,12 +238,18 @@ def generate_takes(
     numero: int,
     count: int,
     note=None,
+    directions: list[dict[str, str]] | None = None,
+    by: str | None = None,
 ) -> list[dict[str, object]]:
     """Genera `count` take nuovi per il turno, senza toccare quelli esistenti.
 
     I numeri dei take partono dal primo libero: i take vecchi restano al loro
     posto, perche' l'utente deve poter tornare su uno di quelli dopo averli
     riascoltati.
+
+    `directions`: indicazioni di resa gia' risolte dalla whitelist
+    (resolve_directions): le loro tag vanno SOLO nel testo inviato per questi
+    take. La chiave del segmento resta quella del testo approvato.
     """
     if count < 1:
         raise RetakeError("Servono almeno 1 take da generare.")
@@ -143,7 +273,7 @@ def generate_takes(
             note(f"  take {take}: sintesi del turno {numero} ({turn['speaker']})...")
         audio, defect = synthesize_segment(
             cache.provider,
-            turn["testo"],
+            directed_text(turn["testo"], directions or []),
             voice_id,
             dropout_detection=assembler.dropout_detection,
             dropout_min_ratio=assembler.dropout_min_ratio,
@@ -154,6 +284,7 @@ def generate_takes(
             dropout_min_peak_db=assembler.dropout_min_peak_db,
         )
         _write_atomic(target, audio)
+        _record_take_info(segments_dir, key, take, directions or [], by)
 
         warnings: list[str] = []
         if defect is not None:
@@ -179,6 +310,7 @@ def generate_takes(
         results.append(
             {
                 "take": take,
+                "indicazioni": [d["indicazione"] for d in directions or []],
                 "file": str(target),
                 "preview": str(preview) if preview else None,
                 "rms_delta_db": round(delta, 1) if delta is not None else None,
@@ -240,6 +372,35 @@ def _build_preview(
         return None
 
 
+def list_takes(cache: RunCache, assembler: AudioAssembler, numero: int) -> list[dict[str, Any]]:
+    """Ogni take del turno, originale compreso, con l'anteprima in contesto.
+
+    G5: l'anteprima (battuta prima, take, battuta dopo) si monta dai segmenti
+    gia' in cache, senza nessuna chiamata al provider; se c'e' gia' non si
+    rifa'. Il take 1 e' quello della produzione ("Take originale").
+    """
+    chosen = cache.chosen(numero)
+    info = load_take_info(cache.segments_dir).get(cache.key(numero), {})
+    out = []
+    for take in cache.takes(numero):
+        preview = cache.segments_dir / PREVIEWS_DIRNAME / f"turno-{numero:03d}_t{take}.wav"
+        if not preview.is_file():
+            preview = _build_preview(cache, assembler, numero, take)
+        meta = info.get(str(take)) or {}
+        out.append(
+            {
+                "take": take,
+                "label": "Take originale" if take == 1 else f"Take {take - 1}",
+                "scelto": take == chosen,
+                "file": str(cache.path(numero, take)),
+                "preview": str(preview) if preview else None,
+                "indicazioni": meta.get("indicazioni", []),
+                "generato_il": meta.get("il"),
+            }
+        )
+    return out
+
+
 # ----------------------------------------------------------------------
 # Scelta
 # ----------------------------------------------------------------------
@@ -266,7 +427,15 @@ __all__ = [
     "RMS_WARNING_DB",
     "SCRIPT_FILENAME",
     "VOICES_FILENAME",
+    "TAKE_INFO_FILENAME",
+    "TEXT_EDIT_DIRECTION",
+    "directed_text",
+    "directions_config",
     "estimate_retake",
+    "list_takes",
+    "load_take_info",
+    "max_takes",
+    "resolve_directions",
     "generate_takes",
     "verify_voice",
     "choose_take",

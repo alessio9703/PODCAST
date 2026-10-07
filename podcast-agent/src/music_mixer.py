@@ -223,6 +223,7 @@ def mix_episode(
     accept_changed_music: bool = False,
     choice: ChosenMusic | None = None,
     on_mix_start: Callable[[], None] | None = None,
+    output_basename: str | None = None,
 ) -> MixResult:
     """Rimonta la voce dai segmenti e ci sovrappone intro/outro/sottofondo.
 
@@ -345,7 +346,7 @@ def mix_episode(
             run_dir, choice, dict(music_cfg), voice_offset, voice_duration
         )
 
-        final_mp3 = run_dir / f"{slugify(script.titolo)}.mp3"
+        final_mp3 = run_dir / f"{output_basename or slugify(script.titolo)}.mp3"
         bitrate = int(config.audio.get("output_mp3_bitrate", 192))
         _encode_mp3(final_wav, final_mp3, bitrate)
 

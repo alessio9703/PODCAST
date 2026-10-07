@@ -47,6 +47,7 @@ class FakeProvider(VoiceProvider):
         tts_delay_seconds: float = 0.0,
         clone_delay_seconds: float = 0.0,
         clone_log_file: str | None = None,
+        tts_log_file: str | None = None,
     ) -> None:
         self._fail_clone = fail_clone
         # Le voci clonate vivono sul provider, non nel processo: con
@@ -71,6 +72,9 @@ class FakeProvider(VoiceProvider):
         #: Una riga per OGNI tentativo di clonazione, riuscito o no, anche fra
         #: processi diversi: e' cosi' che i test contano i tentativi (nessun retry).
         self._clone_log = Path(clone_log_file) if clone_log_file else None
+        #: Una riga JSON per ogni testo inviato alla sintesi, anche fra processi:
+        #: e' cosi' che i test vedono cosa arriva davvero al TTS.
+        self._tts_log = Path(tts_log_file) if tts_log_file else None
 
     def list_cloned_voices(self) -> list[VoiceInfo]:
         return list(self._voices.values())
@@ -126,6 +130,9 @@ class FakeProvider(VoiceProvider):
         # orecchio; e diversa a ogni chiamata, perche' il TTS vero NON e'
         # deterministico. Senza questa variazione due take dello stesso testo
         # uscirebbero identici e un retake sarebbe indistinguibile da un no-op.
+        if self._tts_log is not None:
+            with self._tts_log.open("a", encoding="utf-8") as log:
+                log.write(json.dumps({"voice_id": voice_id, "text": text}, ensure_ascii=False) + "\n")
         if self._tts_delay:
             time.sleep(self._tts_delay)
         freq = 180 + 40 * (int(voice_id.split("-")[-1]) % 6) + len(self.tts_calls)

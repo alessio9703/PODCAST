@@ -1,21 +1,21 @@
 #!/usr/bin/env python3
-"""Rimonta la voce dai segmenti in cache e rifa' il mix con le musiche scelte.
+"""Rimonta l'episodio dai segmenti in cache, con le musiche scelte (se ci sono).
 
     python tools/mix.py --run-dir output/<run>
     python tools/mix.py --run-dir output/<run> --accept-changed-music
 
-Zero chiamate TTS: e' il comando da usare dopo tools/music_set.py, o dopo
-tools/retake.py --choose se si vuole rimontare senza toccare le musiche. Non
-spende, ma passa comunque dal gate di approvazione (come tools/retake.py):
-verifica che l'episodio sia stato approvato ALMENO una volta, non che
-QUESTO mix lo sia — produce l'audio finale ascoltabile, quindi non deve
-essere raggiungibile su una run mai approvata.
+Zero chiamate TTS: e' il comando da usare dopo tools/music_set.py ("Cambia
+musiche") e dopo tools/retake.py --choose ("Usa il take e rimonta"). Senza
+musiche scelte rimonta la sola voce (G1). Non spende, ma passa comunque dal
+gate di approvazione: produce l'audio finale ascoltabile, quindi non deve
+essere raggiungibile su una run il cui copione attuale non e' approvato.
+Tiene il lock di lavoro della run mentre rimonta (operazione "montaggio").
 
 Se i segmenti non sono in cache si ferma con un errore di dominio che
 distingue due cause diverse: cartella segmenti/ vuota o assente (episodio
 vecchio, o --purge-segments) da segmenti presenti ma che non combaciano con
-le chiavi attuali (l'impronta di sintesi e' cambiata in config.yaml dopo
-l'ultima sintesi). In entrambi i casi serve una nuova sintesi.
+le chiavi attuali (copione cambiato, o impronta di sintesi cambiata in
+config.yaml). In entrambi i casi serve una nuova produzione.
 """
 
 from __future__ import annotations
@@ -25,7 +25,10 @@ import argparse
 from _approval import add_gate_args, enforce  # noqa: E402
 from _common import add_config_arg, bootstrap, emit, note, parse_args, run_dir_arg, run_tool  # noqa: E402
 from src.audio_assembler import AudioAssembler  # noqa: E402
-from src.music_mixer import mix_episode, preflight  # noqa: E402
+from src.errors import DomainError  # noqa: E402
+from src.music_mixer import preflight  # noqa: E402
+from src.production import assemble_episode, duration_label, ui_path  # noqa: E402
+from src.run_lock import work_lock  # noqa: E402
 from src.segment_cache import RunCache  # noqa: E402
 
 
@@ -48,63 +51,61 @@ def main() -> None:
     # Non spende, ma produce l'output finale: passa comunque dal gate.
     gate = enforce(args)
 
-    choice, drift_warnings = preflight(
-        run_dir, config, accept_changed_music=args.accept_changed_music
-    )
-    if choice is None or not choice.any():
-        raise ValueError(
-            "Nessuna musica scelta per questa run (musiche.json assente o "
-            "vuoto): tools/mix.py serve a rimontare CON le musiche. Scegline "
-            "una con tools/music_set.py, oppure per un episodio senza musiche "
-            "il montaggio si fa con tools/synthesize.py."
+    with work_lock(run_dir, "montaggio"):
+        choice, drift_warnings = preflight(
+            run_dir, config, accept_changed_music=args.accept_changed_music
         )
+        provider = config.build_provider()
+        cache = RunCache.load(run_dir, provider)
 
-    provider = config.build_provider()
-    cache = RunCache.load(run_dir, provider)
-
-    missing = cache.missing_turns()
-    if missing:
-        if not cache.any_segment_on_disk():
-            raise ValueError(
-                f"Nessun segmento audio in {cache.segments_dir}: episodio "
-                "vecchio, oppure e' stato usato --purge-segments. Serve una "
-                "nuova sintesi: tools/synthesize.py."
+        missing = cache.missing_turns()
+        if missing:
+            if not cache.any_segment_on_disk():
+                raise DomainError(
+                    f"Nessun segmento audio in {cache.segments_dir.name}/: episodio vecchio, oppure e' "
+                    "stato usato --purge-segments. Serve una nuova produzione.",
+                    error_type="SegmentsMissing",
+                    details={"missing": missing},
+                )
+            raise DomainError(
+                f"{len(missing)} battute su {len(cache.script.turni)} non hanno un segmento pronto "
+                f"(battute: {missing}): il copione e' cambiato dopo l'ultima produzione, oppure "
+                "l'impronta di sintesi (modello o parametri in config.yaml). Serve una nuova "
+                "produzione, che paga solo queste battute.",
+                error_type="SegmentsMissing",
+                details={"missing": missing},
             )
-        raise ValueError(
-            f"{len(missing)} turni su {len(cache.script.turni)} non hanno un "
-            f"segmento che combaci con le chiavi attuali (turni: {missing}). "
-            "Probabile causa: l'impronta di sintesi (modello TTS o parametri "
-            "in config.yaml) e' cambiata dopo l'ultima sintesi. Serve una "
-            "nuova sintesi: tools/synthesize.py."
+
+        assembler = AudioAssembler.from_config(provider, config.audio)
+        note("Rimonto dalla cache (zero chiamate TTS)...")
+        result = assemble_episode(
+            run_dir,
+            config,
+            cache.script,
+            cache.ordered_segments(),
+            assembler=assembler,
+            music_choice=choice,
+            music_warnings=drift_warnings,
+            accept_changed_music=args.accept_changed_music,
+            note=note,
         )
 
-    assembler = AudioAssembler.from_config(provider, config.audio)
-    segments = cache.ordered_segments()
-
-    note("Rimonto la voce dalla cache e rifaccio il mix (zero chiamate TTS)...")
-    result = mix_episode(
-        assembler=assembler,
-        segments=segments,
-        script=cache.script,
-        run_dir=run_dir,
-        config=config,
-        accept_changed_music=args.accept_changed_music,
-        choice=choice,
-    )
-
-    warnings = [*drift_warnings, *result.warnings]
-    for warning in warnings:
+    for warning in result.warnings:
         note(f"ATTENZIONE: {warning}")
 
     emit(
         {
-            "output": str(result.path),
-            "duration_seconds": round(result.duration_seconds, 1),
-            "voice_offset_seconds": result.voice_offset_seconds,
-            "voice_duration_seconds": result.voice_duration_seconds,
-            "musiche_usate_file": str(result.musiche_usate_path),
+            "run": run_dir.name,
+            "output": str(result.output_path),
+            "file": result.output_path.name,
+            "file_ui": ui_path(result.output_path, config),
+            "format": result.output_format,
+            "duration_seconds": round(result.duration_seconds, 1) if result.duration_seconds else None,
+            "duration_label": duration_label(result.duration_seconds),
+            "with_music": bool(choice is not None and choice.any()),
             "tts_calls": 0,
-            "warnings": warnings,
+            "warnings": result.warnings,
+            **result.music_payload,
             **gate,
         }
     )

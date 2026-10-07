@@ -644,13 +644,12 @@ class AudioAssembler:
             )
         params, frames, _ = self._concat_wav(segments)
         target.parent.mkdir(parents=True, exist_ok=True)
-        tmp = target.with_suffix(target.suffix + ".tmp")
-        with wave.open(str(tmp), "wb") as out:
-            out.setnchannels(params.nchannels)
-            out.setsampwidth(params.sampwidth)
-            out.setframerate(params.framerate)
-            out.writeframes(b"".join(frames))
-        tmp.replace(target)
+        with atomic_output(target) as partial:
+            with wave.open(str(partial), "wb") as out:
+                out.setnchannels(params.nchannels)
+                out.setsampwidth(params.sampwidth)
+                out.setframerate(params.framerate)
+                out.writeframes(b"".join(frames))
         return target
 
     def _assemble_from_wav(

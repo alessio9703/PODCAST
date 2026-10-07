@@ -2,19 +2,25 @@
 """Rifa' una battuta a parita' di testo, e lascia scegliere il take all'utente.
 
     # quanto costa (nessuna chiamata al provider)
-    python tools/retake.py --run-dir output/<run> --turn 17 --takes 3 --dry-run
+    python tools/retake.py --run-dir output/<run> --turn 17 --takes 3 --direction "Più calmo" --dry-run
     # genera i take e le anteprime
-    python tools/retake.py --run-dir output/<run> --turn 17 --takes 3
-    # cosa c'e' gia'
-    python tools/retake.py --run-dir output/<run> --list 17
-    # quale usare nel montaggio
+    python tools/retake.py --run-dir output/<run> --turn 17 --takes 3 --direction "Più calmo"
+    # i take che ci sono, con l'anteprima in contesto (nessuna chiamata)
+    python tools/retake.py --run-dir output/<run> --list 17 [--with-music]
+    # quale usare nel montaggio (poi tools/mix.py rimonta)
     python tools/retake.py --run-dir output/<run> --choose 17=3
 
-E' il percorso per quando il TESTO va bene e la RESA no. Se il testo va
-cambiato non si passa di qui: si corregge la bozza, si risalva con
-script_save.py e si rifa' approvare.
+E' il percorso per quando il TESTO va bene e la RESA no ("Come e' detta").
+Se il testo va cambiato non si passa di qui: script_edit.py, nuova
+approvazione, produce.py (che paga solo la battuta cambiata).
 
-Dopo `--choose`, synthesize.py rimonta l'episodio con zero chiamate TTS.
+`--direction` (ripetibile) sono le indicazioni "Come deve cambiare?": solo
+quelle di config.yaml (retake.indicazioni), mai testo libero. Le loro tag
+vanno SOLO nel testo inviato per i take nuovi: il copione approvato non
+cambia. "Pronuncia diversa" da' DirectionNeedsTextEdit: si corregge il testo.
+
+Generazione e scelta tengono il lock di lavoro della run. Una voce il cui
+consenso e' stato revocato non si usa nemmeno per un retake.
 """
 
 from __future__ import annotations
@@ -28,13 +34,20 @@ from pathlib import Path
 from _approval import add_gate_args, enforce  # noqa: E402
 from _common import add_config_arg, bootstrap, emit, note, parse_args, run_dir_arg, run_tool  # noqa: E402
 from src.audio_assembler import AudioAssembler  # noqa: E402
+from src.errors import DomainError  # noqa: E402
 from src.music_mixer import preflight, render_bed_under  # noqa: E402
-from src.segment_cache import RunCache  # noqa: E402
+from src.production import ui_path  # noqa: E402
 from src.retake import (  # noqa: E402
     choose_take,
     estimate_retake,
     generate_takes,
+    list_takes,
+    max_takes,
+    resolve_directions,
 )
+from src.run_lock import work_lock  # noqa: E402
+from src.segment_cache import RunCache  # noqa: E402
+from src.voice_prep import check_consent, plan_voices  # noqa: E402
 
 
 def main() -> None:
@@ -42,8 +55,13 @@ def main() -> None:
     parser.add_argument("--run-dir", required=True, help="Cartella dell'episodio")
     parser.add_argument("--turn", type=int, default=None, help="Numero del turno (da 1)")
     parser.add_argument("--takes", type=int, default=1, help="Quanti take generare")
+    parser.add_argument(
+        "--direction", action="append", default=[], metavar="INDICAZIONE",
+        help="Come deve cambiare (ripetibile), es. \"Più calmo\": solo quelle di config.yaml",
+    )
     parser.add_argument("--list", type=int, default=None, help="Elenca i take di un turno")
     parser.add_argument("--choose", default=None, help="TURNO=TAKE, es. 17=3")
+    parser.add_argument("--by", default=None, help="Chi chiede i take (registrato nei metadati)")
     parser.add_argument(
         "--dry-run",
         action="store_true",
@@ -73,10 +91,11 @@ def main() -> None:
     cache = RunCache.load(run_dir, provider)
 
     if args.list is not None:
-        _do_list(cache, args.list)
+        _do_list(cache, config, args)
         return
     if args.choose is not None:
-        _do_choose(cache, args.choose)
+        with work_lock(run_dir, "scelta_take"):
+            _do_choose(cache, args.choose)
         return
     _do_generate(cache, config, args)
 
@@ -84,20 +103,30 @@ def main() -> None:
 # ----------------------------------------------------------------------
 
 
-def _do_list(cache: RunCache, numero: int) -> None:
+def _do_list(cache: RunCache, config, args: argparse.Namespace) -> None:
+    numero = args.list
     turn = cache.turn(numero)
-    takes = cache.takes(numero)
-    chosen = cache.chosen(numero)
-    note(f"Turno {numero} ({turn['speaker']}): take {takes or 'nessuno'}, scelto {chosen}")
-    note(f"  {turn['testo']}")
+    assembler = AudioAssembler.from_config(cache.provider, config.audio)
+    takes = list_takes(cache, assembler, numero)
+    warnings: list[str] = []
+    if args.with_music:
+        _add_previews_with_music(cache, config, takes, warnings)
+    for take in takes:
+        take["preview_ui"] = ui_path(Path(take["preview"]), config) if take["preview"] else None
+        if take.get("preview_with_music"):
+            take["preview_with_music_ui"] = ui_path(Path(take["preview_with_music"]), config)
+    note(f"Turno {numero} ({turn['speaker']}): take {[t['take'] for t in takes] or 'nessuno'}, scelto {cache.chosen(numero)}")
     emit(
         {
             "turn": numero,
             "speaker": turn["speaker"],
             "testo": turn["testo"],
-            "takes": takes,
-            "chosen_take": chosen,
-            "files": {str(t): str(cache.path(numero, t)) for t in takes},
+            "takes": [t["take"] for t in takes],
+            "chosen_take": cache.chosen(numero),
+            "files": {str(t["take"]): t["file"] for t in takes},
+            "take_list": takes,
+            "warnings": warnings,
+            "tts_calls": 0,
         }
     )
 
@@ -114,7 +143,7 @@ def _do_choose(cache: RunCache, spec: str) -> None:
     result = choose_take(cache, numero, take)
     note(
         f"Turno {numero}: uso il take {take} nel montaggio. "
-        "Rimonta con synthesize.py: nessuna chiamata al provider."
+        "Rimonta con tools/mix.py: nessuna chiamata al provider."
     )
     emit({**result, "speaker": cache.turn(numero)["speaker"], "tts_calls": 0})
 
@@ -123,8 +152,19 @@ def _do_generate(cache: RunCache, config, args: argparse.Namespace) -> None:
     numero, count = args.turn, args.takes
     if count < 1:
         raise ValueError("--takes vuole almeno 1.")
-
-    prediction = estimate_retake(cache, numero, count)
+    limit = max_takes(config)
+    if count > limit:
+        raise DomainError(
+            f"Al massimo {limit} take per volta (retake.max_takes in config.yaml).",
+            error_type="TooManyTakes",
+            details={"massimo": limit, "richiesti": count},
+        )
+    directions = resolve_directions(config, args.direction)
+    prediction = estimate_retake(cache, numero, count, directions)
+    rate = config.eur_rate
+    prediction["cost_eur"] = (
+        round(prediction["cost_usd"] * rate[0], 4) if (rate and prediction["cost_usd"] is not None) else None
+    )
 
     # Il dry-run non spende, quindi non ha bisogno dell'approvazione: stessa
     # regola di voices_prepare.py.
@@ -144,18 +184,27 @@ def _do_generate(cache: RunCache, config, args: argparse.Namespace) -> None:
     # valida — ma il gate si attraversa lo stesso: e' un passo che spende.
     gate = enforce(args)
 
-    assembler = AudioAssembler.from_config(cache.provider, config.audio)
-    note(f"Turno {numero} ({cache.turn(numero)['speaker']}): genero {count} take...")
-    takes = generate_takes(cache, assembler, numero, count, note=note)
+    with work_lock(cache.run_dir, "retake", turno=numero):
+        # Una voce con il consenso revocato non si usa, nemmeno per un take.
+        speaker = cache.turn(numero)["speaker"]
+        plan = plan_voices(config, [speaker])[0]
+        if plan.consent["stato"] == "revocato":
+            check_consent([plan])
 
-    warnings = [w for t in takes for w in t["warnings"]]
-    for warning in warnings:
-        note(f"ATTENZIONE: {warning}")
+        assembler = AudioAssembler.from_config(cache.provider, config.audio)
+        note(f"Turno {numero} ({speaker}): genero {count} take...")
+        takes = generate_takes(cache, assembler, numero, count, note=note, directions=directions, by=args.by)
 
-    if args.with_music:
-        _add_previews_with_music(cache, config, takes, warnings)
+        warnings = [w for t in takes for w in t["warnings"]]
+        for warning in warnings:
+            note(f"ATTENZIONE: {warning}")
+
+        if args.with_music:
+            _add_previews_with_music(cache, config, takes, warnings)
 
     previews = [t["preview"] for t in takes if t["preview"]]
+    for take in takes:
+        take["preview_ui"] = ui_path(Path(take["preview"]), config) if take["preview"] else None
     if previews:
         note("Anteprime da far ascoltare all'utente (turno precedente, take, successivo):")
         for path in previews:
@@ -170,6 +219,7 @@ def _do_generate(cache: RunCache, config, args: argparse.Namespace) -> None:
             "turn": numero,
             "speaker": cache.turn(numero)["speaker"],
             "testo": cache.turn(numero)["testo"],
+            "indicazioni": prediction["indicazioni"],
             "new_takes": [t["take"] for t in takes],
             "takes": takes,
             "all_takes": cache.takes(numero),
@@ -179,6 +229,7 @@ def _do_generate(cache: RunCache, config, args: argparse.Namespace) -> None:
             "tts_calls": len(takes),
             "chars": prediction["chars"],
             "cost_usd": prediction["cost_usd"],
+            "cost_eur": prediction["cost_eur"],
             "cost_basis": prediction["cost_basis"],
             "warnings": warnings,
             **gate,

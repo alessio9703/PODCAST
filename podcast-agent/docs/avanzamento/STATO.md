@@ -9,6 +9,7 @@ resoconti accanto a questo file:
 - `C0+C1-sicurezza.md`
 - `C0+C1-correzioni.md`, `C0+C1-correzioni-sicurezza.md`
 - `C2.md`, `C2-sicurezza.md`
+- `C3.md`
 
 ## 1. Commit
 
@@ -25,10 +26,11 @@ resoconti accanto a questo file:
 | `b3c6ed8` | correzioni della revisione del diff: limiti di lavoro e tempo, `InvalidArguments`, `_redact`, divieti web |
 | `dde378c` | **C2** produzione: consenso, stima per la run, `produce.py` con eventi e interruzione |
 | `4d8ede8` | sicurezza C2: ALTA-1 corretta (consenso ricontrollato sui byte clonati) |
-| (questo) | sicurezza C2: medie e basse corrette |
+| `9006245` | sicurezza C2: medie e basse corrette |
+| (questo) | **C3** episodio: `_montaggio.json`, `episode_info`, `waveform`, retake con indicazioni, `mix` senza musiche |
 
 Test all'ultimo commit, sempre con `.venv/bin/python`: smoke 68, tools_cli 183 (+2
-saltati, servono `ANTHROPIC_API_KEY`), music 73, lessons 80, web_integration 430.
+saltati, servono `ANTHROPIC_API_KEY`), music 73, lessons 80, web_integration 488.
 
 ## 2. Fasi
 
@@ -39,7 +41,7 @@ saltati, servono `ANTHROPIC_API_KEY`), music 73, lessons 80, web_integration 430
 | Sicurezza C0+C1 | Revisione, rapporto, correzione delle alte | **fatta**: alte, medie e basse corrette |
 | Correzioni + modalità web | MEDIA-1, BASSA-1/2/3, `PODCAST_AGENT_WEB=1` | **fatta**; revisione del diff: 0 alte, 2 medie e 4 basse, **tutte corrette** |
 | C2 | Produzione: passi 5 (stima e consenso) e 6 (generazione) | **fatta**; revisione: 1 alta, 4 medie, 5 basse, **tutte corrette** |
-| C3 | Episodio e correzioni: passo 7 | da fare |
+| C3 | Episodio e correzioni: passo 7 | **fatta**; revisione di sicurezza da fare (comprende le correzioni di C2 da `4d8ede8`) |
 | C4 | Archivio e librerie (Documenti, Voci, Musiche), Impostazioni, verifica di Lezioni e Diagnostica | da fare |
 | C5 | Contratto completo + README/LEGENDA + riepilogo finale | da fare (il contratto è già aggiornato per C0–C1) |
 | C6 | Allineamento di `run.py` a `src/music_context.py`, fase finale dedicata | da fare |
@@ -156,6 +158,8 @@ musiche → copione → modifica → approva → stima → consenso → produce 
   essere una **whitelist** da configurazione. Nessun testo libero arriva al TTS fuori dal
   copione approvato. Da verificare nella revisione di C3.
 - **Confermato (2026-10-07)**: solo la whitelist, nessun'altra condizione.
+- **Attuata in C3**: `retake.indicazioni` in `config.yaml`; il campo libero "Altre
+  indicazioni" del wireframe non è supportato.
 
 ### D2 · Metadati delle voci accanto all'audio (2026-10-06)
 - **Decisione**: `voci_disponibili/<nome>.json` accanto alla registrazione, con nome
@@ -263,7 +267,9 @@ musiche → copione → modifica → approva → stima → consenso → produce 
 
 ## 4. Richieste ricevute e non ancora completate
 
-1. **OK per C3.**
+1. **Revisione di sicurezza di C3**, sull'intervallo `4d8ede8..HEAD` (così copre anche le
+   correzioni di C2 non riviste), con le alte corrette prima di C4.
+2. **OK per C4.**
 
 ## 5. Annotazioni per le fasi successive e per la fase finale
 

@@ -105,10 +105,11 @@ stderr. Leggi il JSON, non il testo.
 | `tools/estimate.py --script S` | stima | `chars`, `duration_label`, `cost_usd`, `rendered`, `duration_with_music_seconds` se ci sono musiche |
 | `tools/estimate.py --script S --run-dir D` | stima **incrementale**: conta solo i turni non in cache | `turns_to_generate`, `chars_to_generate`, `cost_to_generate_usd` |
 | `tools/synthesize.py --script S --voices V --run-dir D` | sintesi + montaggio (+ mix, se ci sono musiche) | `output`, `duration_seconds`, `segments`, `generated_turns[]`, `reused_turns[]`, `tts_calls`, `warnings[]`, `voice_offset_seconds` se ci sono musiche |
-| `tools/mix.py --run-dir D [--accept-changed-music]` | rifa' SOLO il mix dalla cache — **zero chiamate TTS** | `output`, `duration_seconds`, `voice_offset_seconds`, `musiche_usate_file`, `tts_calls` (sempre 0) |
+| `tools/mix.py --run-dir D [--accept-changed-music]` | rimonta dalla cache (con le musiche scelte, o la sola voce se non ce ne sono) — **zero chiamate TTS** | `output`, `file`, `duration_seconds`, `with_music`, `voice_offset_seconds`, `musiche_usate_file`, `tts_calls` (sempre 0) |
+| `tools/episode_info.py --run-dir D` | stato dell'episodio (pronto / da aggiornare e perché), sezioni, trascrizione con i tempi nel file finale | `stato`, `motivi[]`, `sezioni[]`, `trascrizione[]` con `inizio_finale`/`fine_finale`, `file_finale` |
 | `tools/turn_at.py --run-dir D --at 3:42` | dal minutaggio **del file finale** alla battuta | `turn`, `speaker`, `testo`, `inizio`/`fine` (master voce), `inizio_finale`/`fine_finale` (file finale), `in_pausa`, oppure `in: "intro"`/`"outro"` |
-| `tools/retake.py --run-dir D --turn N --takes K [--dry-run] [--with-music]` | rifa' una battuta a parita' di testo | `new_takes[]`, `previews[]`, `previews_with_music[]` (se `--with-music` e c'e' un sottofondo), `tts_calls`, `cost_usd`, `warnings[]` |
-| `tools/retake.py --run-dir D --list N` | i take esistenti di un turno | `takes[]`, `chosen_take` |
+| `tools/retake.py --run-dir D --turn N --takes K [--direction "Più calmo" ...] [--dry-run] [--with-music]` | rifa' una battuta a parita' di testo; `--direction` solo fra quelle di `config.yaml` (`retake.indicazioni`) | `new_takes[]`, `indicazioni[]`, `previews[]`, `previews_with_music[]`, `tts_calls`, `cost_usd`, `warnings[]` |
+| `tools/retake.py --run-dir D --list N [--with-music]` | i take esistenti di un turno, ognuno con l'anteprima in contesto (senza sintesi) | `takes[]`, `chosen_take`, `take_list[]` con `label`, `preview`, `indicazioni` |
 | `tools/retake.py --run-dir D --choose N=K` | registra quale take montare | `chosen_take`, `tts_calls` (sempre 0) |
 | `tools/run_finalize.py --run-dir D --document DOC --voices V --audio-paths A --trusted-paths` | chiude la run | `voci_usate`, `documento`, `files[]` |
 
@@ -514,7 +515,10 @@ in cache non costa niente).
 ### Percorso B — la resa va cambiata
 
 1. `turn_at.py`, se l'utente ha dato un minutaggio;
-2. `retake.py --turn N --takes K --dry-run` → **dichiara il costo**;
+2. `retake.py --turn N --takes K --dry-run` → **dichiara il costo**. Se l'utente ha
+   detto *come* deve cambiare ("più calmo", "più lento"), aggiungi le `--direction`
+   corrispondenti: solo quelle di `config.yaml`, mai una tag inventata. "Pronuncia
+   diversa" non è un retake: è il Percorso A (si corregge il testo);
 3. chiedi conferma all'utente con `AskUserQuestion`;
 4. `retake.py --turn N --takes K`. Genera take nuovi con numeri liberi: quelli vecchi
    restano dove sono, si può sempre tornare indietro;
@@ -523,7 +527,8 @@ in cache non costa niente).
    un take giudicato da solo inganna. Riporta i `warnings[]`, per esempio uno sbalzo
    di livello oltre i 3 dB;
 6. `retake.py --choose N=K` con il take che **l'utente** ha scelto;
-7. `synthesize.py` per rimontare: `tts_calls` sarà `0`.
+7. `mix.py` per rimontare: `tts_calls` sarà `0`. Per farle risentire un take già
+   generato, `retake.py --list N` dà l'anteprima di ogni take, originale compreso.
 
 Il copione non cambia in questo percorso, quindi l'approvazione resta valida — ma
 `retake.py` passa comunque dal gate, perché è un passo che spende. Se ti risponde che

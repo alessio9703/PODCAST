@@ -54,13 +54,15 @@ from .registry import VoiceRegistry
 from .run_layout import archive_source_document, write_voices_used
 from .run_lock import work_lock
 from .script_session import FILENAME as SESSION_FILENAME
-from .script_session import ScriptSession
+from .script_session import ScriptSession, script_hash
 from .script_writer import PodcastScript, spoken_text
 from .segment_cache import SCRIPT_FILENAME, VOICES_FILENAME
 from .voice_meta import consent_revoked
 from .voice_prep import ACTION_CLONE, ConsentRequired, plan_voices, prepare_voices
 
 AUDIO_PATHS_FILENAME = "_audio_paths.json"
+#: Descrizione del file finale, scritta dal montaggio (vedi write_montage).
+MONTAGE_FILENAME = "_montaggio.json"
 #: Il file degli eventi di produce.py: nome fisso, dentro la run.
 EVENTS_FILENAME = "_eventi.jsonl"
 TIMINGS_FILENAME = "_tempi_turni.json"
@@ -155,7 +157,8 @@ class RenderResult:
     output_path: Path
     output_format: str
     duration_seconds: float | None
-    synthesis: SynthesisResult
+    #: None quando il montaggio e' partito da segmenti gia' pronti (mix.py).
+    synthesis: SynthesisResult | None
     warnings: list[str]
     music_payload: dict[str, Any] = field(default_factory=dict)
     timings_file: Path | None = None
@@ -202,13 +205,82 @@ def render_episode(
     phase("sintesi", "iniziata")
     synthesis = assembler.synthesize(script, voice_map, run_dir / "segmenti", progress, should_stop=should_stop)
     phase("sintesi", "finita")
-    segments = synthesis.paths
     if synthesis.reused_turns:
         note(
             f"{len(synthesis.reused_turns)} turni ripresi dalla cache, "
             f"{len(synthesis.generated_turns)} sintetizzati ora."
         )
 
+    assembled = assemble_episode(
+        run_dir,
+        config,
+        script,
+        synthesis.paths,
+        assembler=assembler,
+        music_choice=music_choice,
+        music_warnings=music_warnings,
+        accept_changed_music=accept_changed_music,
+        on_phase=on_phase,
+        note=note,
+    )
+
+    # Segnali per le lezioni (src/episode_signals.py). Mai bloccante: la
+    # sintesi e' gia' andata a buon fine a questo punto.
+    try:
+        record_synthesis_event(run_dir, script)
+        collect_and_write(run_dir, provider=provider)
+    except Exception as exc:  # noqa: BLE001 - raccolta dati, non deve mai far fallire la sintesi
+        note(f"Raccolta segnali non riuscita (non blocca l'episodio): {exc}")
+
+    assembled.synthesis = synthesis
+    assembled.warnings = [*synthesis.warnings, *assembled.warnings]
+    return assembled
+
+
+def final_basename(run_dir: Path, script: PodcastScript) -> str:
+    """Il nome (senza estensione) del file finale dell'episodio.
+
+    G7: per le run nuove e' il titolo dell'episodio (episodio.json), non
+    quello che il modello ha scritto nel copione. Una volta montato, il nome
+    resta quello (registrato in _montaggio.json) anche se il titolo cambia:
+    l'Archivio e i link al file non devono rompersi. Le run di prima, gia'
+    montate con il titolo del copione, tengono il loro nome.
+    """
+    run_dir = Path(run_dir)
+    record = load_montage(run_dir)
+    if record and record.get("file"):
+        return Path(str(record["file"])).stem
+    legacy = slugify(script.titolo)
+    if any((run_dir / f"{legacy}{ext}").is_file() for ext in (".mp3", ".wav")):
+        return legacy
+    episode = EpisodeConfig.load(run_dir)
+    if episode is not None and episode.titolo:
+        return slugify(episode.titolo)
+    return legacy
+
+
+def assemble_episode(
+    run_dir: Path,
+    config: Any,
+    script: PodcastScript,
+    segments: list[Path],
+    *,
+    assembler: AudioAssembler,
+    music_choice: Any,
+    music_warnings: list[str],
+    accept_changed_music: bool = False,
+    on_phase: Callable[[str, str], None] | None = None,
+    note: Note = _noop,
+) -> RenderResult:
+    """Montaggio (e mix, se ci sono musiche) da segmenti GIA' pronti. Zero TTS.
+
+    Usato da render_episode() dopo la sintesi e da tools/mix.py per rimontare
+    dalla cache (G1: anche senza musiche). Scrive _tempi_turni.json e
+    _montaggio.json.
+    """
+    run_dir = Path(run_dir)
+    phase = on_phase or (lambda _name, _state: None)
+    basename = final_basename(run_dir, script)
     music_payload: dict[str, Any] = {}
     phase("montaggio", "iniziata")
     if music_choice is not None and music_choice.any():
@@ -221,14 +293,16 @@ def render_episode(
         mix_result = mix_episode(
             assembler=assembler, segments=segments, script=script, run_dir=run_dir,
             config=config, accept_changed_music=accept_changed_music,
-            choice=music_choice, on_mix_start=mix_started,
+            choice=music_choice, on_mix_start=mix_started, output_basename=basename,
         )
         phase("mix", "finita")
         voice_result = mix_result.voice_assembly
         output_path = mix_result.path
         output_format = "mp3"
         duration_seconds = mix_result.duration_seconds
-        warnings = [*synthesis.warnings, *music_warnings, *mix_result.warnings]
+        warnings = [*music_warnings, *mix_result.warnings]
+        voice_offset = mix_result.voice_offset_seconds
+        voice_duration = mix_result.voice_duration_seconds
         music_payload = {
             "voice_offset_seconds": mix_result.voice_offset_seconds,
             "voice_duration_seconds": mix_result.voice_duration_seconds,
@@ -236,35 +310,119 @@ def render_episode(
         }
     else:
         note("Montaggio...")
-        voice_result = assembler.assemble(segments, run_dir / slugify(script.titolo))
+        voice_result = assembler.assemble(segments, run_dir / basename)
         phase("montaggio", "finita")
         output_path = voice_result.path
         output_format = voice_result.audio_format
         duration_seconds = voice_result.duration_seconds
-        warnings = [*synthesis.warnings, *voice_result.warnings]
+        warnings = list(voice_result.warnings)
+        voice_offset = 0.0
+        voice_duration = duration_seconds
 
     # RACCOLTA DATI (non entra nella stima): velocita' di lettura per turno e
     # per voce, riferita SEMPRE al master di sola voce (vedi README.md,
     # "Correggere una battuta"). Va misurata PRIMA di un'eventuale
     # cancellazione dei segmenti.
     timings_file = write_timings(run_dir, script, voice_result)
-
-    # Segnali per le lezioni (src/episode_signals.py). Mai bloccante: la
-    # sintesi e' gia' andata a buon fine a questo punto.
-    try:
-        record_synthesis_event(run_dir, script)
-        collect_and_write(run_dir, provider=provider)
-    except Exception as exc:  # noqa: BLE001 - raccolta dati, non deve mai far fallire la sintesi
-        note(f"Raccolta segnali non riuscita (non blocca l'episodio): {exc}")
+    write_montage(
+        run_dir,
+        config,
+        script,
+        output_path=output_path,
+        output_format=output_format,
+        duration_seconds=duration_seconds,
+        music_choice=music_choice,
+        voice_offset=voice_offset,
+        voice_duration=voice_duration,
+        segments=segments,
+    )
 
     return RenderResult(
         output_path=output_path,
         output_format=output_format,
         duration_seconds=duration_seconds,
-        synthesis=synthesis,
+        synthesis=None,  # type: ignore[arg-type]
         warnings=warnings,
         music_payload=music_payload,
         timings_file=timings_file,
+    )
+
+
+# ----------------------------------------------------------------------
+# Registro del montaggio
+# ----------------------------------------------------------------------
+
+
+def load_montage(run_dir: Path) -> dict[str, Any] | None:
+    """_montaggio.json, o None (run mai montata, o montata prima di C3)."""
+    target = Path(run_dir) / MONTAGE_FILENAME
+    if not target.is_file():
+        return None
+    try:
+        raw = json.loads(target.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return None
+    return raw if isinstance(raw, dict) else None
+
+
+def write_montage(
+    run_dir: Path,
+    config: Any,
+    script: PodcastScript,
+    *,
+    output_path: Path,
+    output_format: str,
+    duration_seconds: float | None,
+    music_choice: Any,
+    voice_offset: float,
+    voice_duration: float | None,
+    segments: list[Path],
+) -> Path:
+    """Cosa c'e' nel file finale, scritto dal montaggio che lo ha prodotto.
+
+    Non e' uno stato: e' la descrizione di un file, scritta insieme a lui.
+    Da qui si DERIVA se l'episodio e' ancora coerente (copione, take scelti
+    e musiche di adesso contro quelli di allora: src/episode_info.py), e
+    dove cadono le sezioni nel file finale. Sostituisce musiche_usate.json
+    come fonte dell'offset della voce: quello resta da un mix precedente
+    anche quando l'episodio viene rimontato senza musiche.
+    """
+    total = float(duration_seconds or 0.0)
+    sections: list[dict[str, Any]] = []
+    tracks: dict[str, Any] = {}
+    if music_choice is not None and music_choice.any():
+        gap = float(config.music.get("intro_gap_ms", 800)) / 1000.0
+        for category in ("intro", "sottofondo", "outro"):
+            track = getattr(music_choice, category)
+            tracks[category] = {"nome": track.name, "sha256": track.sha256()} if track else None
+        if music_choice.intro:
+            sections.append({"tipo": "intro", "inizio": 0.0, "fine": round(max(0.0, voice_offset - gap), 3)})
+        sections.append(
+            {"tipo": "parlato", "inizio": round(voice_offset, 3), "fine": round(voice_offset + float(voice_duration or 0.0), 3)}
+        )
+        if music_choice.outro:
+            outro_seconds = music_choice.outro.duration_seconds() or 0.0
+            sections.append({"tipo": "outro", "inizio": round(max(0.0, total - outro_seconds), 3), "fine": round(total, 3)})
+    else:
+        sections.append({"tipo": "parlato", "inizio": 0.0, "fine": round(total, 3)})
+
+    return write_json_atomic(
+        Path(run_dir) / MONTAGE_FILENAME,
+        {
+            "file": Path(output_path).name,
+            "formato": output_format,
+            "montato_il": datetime.now().replace(microsecond=0).isoformat(),
+            "duration_seconds": round(total, 3) if duration_seconds else None,
+            "copione_sha256": script_hash(script.to_dict()),
+            "segmenti": [Path(p).name for p in segments],
+            # Le scelte dei take al momento del montaggio: se cambiano
+            # (retake.py --choose) l'episodio e' da rimontare.
+            "scelte_take": load_choices(Path(run_dir) / "segmenti"),
+            "musiche": tracks or None,
+            "voice_offset_seconds": round(voice_offset, 3),
+            "voice_duration_seconds": round(float(voice_duration), 3) if voice_duration else None,
+            "sezioni": sections,
+        },
     )
 
 
@@ -722,6 +880,11 @@ def _produce_locked(
 
 __all__ = [
     "AUDIO_PATHS_FILENAME",
+    "MONTAGE_FILENAME",
+    "assemble_episode",
+    "final_basename",
+    "load_montage",
+    "write_montage",
     "EVENTS_FILENAME",
     "ApprovalRequired",
     "EventLog",

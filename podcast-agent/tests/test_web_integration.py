@@ -1236,6 +1236,8 @@ REQUIRED_ARGS = {
     "voices_prepare.py": ["--speakers", "Mario Rossi"],
     "voice_meta.py": ["--name", "Mario Rossi"],
     "produce.py": ["--run-dir", "R"],
+    "episode_info.py": ["--run-dir", "R"],
+    "waveform.py": ["--run-dir", "R"],
 }
 
 
@@ -1920,6 +1922,157 @@ def test_c2() -> None:
 
 
 # ----------------------------------------------------------------------
+# C3 · Episodio e correzioni (passo 7)
+# ----------------------------------------------------------------------
+
+
+def tts_texts(root: Path) -> list[str]:
+    log = root / "tts.log"
+    return [json.loads(line)["text"] for line in log.read_text(encoding="utf-8").splitlines()] if log.is_file() else []
+
+
+def test_c3() -> None:
+    root = Path(tempfile.mkdtemp(prefix="podcast-web-c3-"))
+    setup(root)
+    (root / "musiche" / "outro").mkdir(parents=True)
+    make_wav(root / "musiche" / "outro" / "Chiusura.wav", 0.7, 330)
+    config = write_c2_config(root, "config-c3.yaml", tts_log_file=str(root / "tts.log"))
+    for name in ("Mario Rossi", "Giulia Bianchi"):
+        tool("voice_meta.py", "--name", name, "--consent", "--by", "Utente A", config=config)
+
+    print("\n[C3] G7: il titolo dell'episodio da' il nome al file")
+    run_dir = approved_run(root, config, "Episodio C3", SCRIPT_C2)
+    tool("music_set.py", "--run-dir", run_dir, "--intro", "Piano calmo", "--outro", "Chiusura", config=config)
+    code, out, err = tool("produce.py", "--run-dir", run_dir, config=config)
+    check("produzione con intro e outro: exit 0", code == 0, err[-300:])
+    check("file dal titolo di episodio.json, non da quello del copione", out["file"] == "episodio-c3.mp3", out.get("file"))
+    montage = json.loads((Path(run_dir) / "_montaggio.json").read_text(encoding="utf-8"))
+    check("_montaggio.json: file, sha256 del copione, musiche, sezioni", montage["file"] == "episodio-c3.mp3" and montage["copione_sha256"].startswith("sha256:") and montage["musiche"]["intro"]["nome"] == "Piano calmo" and [x["tipo"] for x in montage["sezioni"]] == ["intro", "parlato", "outro"], str(montage)[:400])
+
+    print("\n[C3] episode_info: intestazione, sezioni, trascrizione")
+    code, info, err = tool("episode_info.py", "--run-dir", run_dir, config=config)
+    check("episode_info: exit 0, pronto, verificabile", code == 0 and info["stato"] == "pronto" and info["verificabile"] and info["motivi"] == [], err[-300:] + str(info)[:300])
+    check("intestazione: titolo, durata, voci, data di montaggio", info["titolo"] == "Episodio C3" and info["durata_seconds"] and info["durata_label"] and info["numero_voci"] == 2 and info["montato_il"], str({k: info[k] for k in ("titolo", "durata_seconds", "numero_voci", "montato_il")}))
+    check("file finale con percorso relativo", info["file_finale"]["nome"] == "episodio-c3.mp3" and info["file_finale"]["percorso"] == f"output/{Path(run_dir).name}/episodio-c3.mp3", str(info["file_finale"]))
+    sections = {x["tipo"]: x for x in info["sezioni"]}
+    check("sezioni intro, parlato (6 battute), outro in ordine e dentro il file", sections["intro"]["inizio"] == 0 and sections["intro"]["fine"] < sections["parlato"]["inizio"] < sections["parlato"]["fine"] <= sections["outro"]["inizio"] < sections["outro"]["fine"] <= info["durata_seconds"] + 0.01 and sections["parlato"]["battute"] == 6, str(info["sezioni"]))
+    trans = info["trascrizione"]
+    check("trascrizione: 6 battute con inizio/fine nel file finale", len(trans) == 6 and all(t["inizio_finale"] is not None and t["fine_finale"] > t["inizio_finale"] for t in trans), str(trans[:1]))
+    check("le battute cadono nella sezione parlata, in ordine", trans[0]["inizio_finale"] >= sections["parlato"]["inizio"] and all(a["fine_finale"] <= b["inizio_finale"] for a, b in zip(trans, trans[1:])) and trans[-1]["fine_finale"] <= sections["parlato"]["fine"] + 0.01)
+    check("ogni battuta con speaker, testo e testo parlato", all(t["speaker"] and t["testo"] and "testo_parlato" in t for t in trans))
+    check("elenco dei file della run, senza lock ne' file nascosti", {"conversazione.json", "episodio-c3.mp3", "_montaggio.json"} <= {f["nome"] for f in info["file"]} and not any(f["nome"].endswith(".lock") or f["nome"].startswith(".") or f["nome"] == "_lavoro.json" for f in info["file"]) and {f["nome"]: f["interno"] for f in info["file"]}["_montaggio.json"] is True, str([f["nome"] for f in info["file"]]))
+    middle = (trans[2]["inizio_finale"] + trans[2]["fine_finale"]) / 2
+    code, out, _ = tool("turn_at.py", "--run-dir", run_dir, "--at", f"{middle:.2f}", config=config)
+    check("turn_at e episode_info usano lo stesso orologio (battuta 3)", code == 0 and out.get("turn") == 3, str(out)[:300])
+
+    print("\n[C3] forma d'onda")
+    code, wave_out, err = tool("waveform.py", "--run-dir", run_dir, "--points", "50", config=config)
+    check("50 picchi fra 0 e 1, calcolati", code == 0 and len(wave_out["peaks"]) == 50 and all(0 <= v <= 1 for v in wave_out["peaks"]) and max(wave_out["peaks"]) > 0 and wave_out["cached"] is False, err[-300:])
+    check("legata allo sha256 del file finale", wave_out["sha256"].startswith("sha256:") and wave_out["file"] == "episodio-c3.mp3" and (Path(run_dir) / "_forma_onda_50.json").is_file())
+    code, out, _ = tool("waveform.py", "--run-dir", run_dir, "--points", "50", config=config)
+    check("seconda richiesta: dalla cache", out["cached"] is True and out["peaks"] == wave_out["peaks"])
+    code, out, _ = tool("waveform.py", "--run-dir", run_dir, "--points", "5", config=config)
+    check("punti fuori scala -> exit 1 WaveformError", code == 1 and out.get("error_type") == "WaveformError" and out["details"]["minimo"] == 10, str(out))
+    empty = tool("run_init.py", "--title", "Senza file", config=config)[1]["run_dir"]
+    (Path(empty) / "conversazione.json").write_text(json.dumps(SCRIPT_C2), encoding="utf-8")
+    code, out, _ = tool("waveform.py", "--run-dir", empty, config=config)
+    check("episodio non prodotto -> EpisodeNotProduced", code == 1 and out.get("error_type") == "EpisodeNotProduced", str(out))
+    code, out, _ = tool("episode_info.py", "--run-dir", empty, config=config)
+    check("episode_info di un episodio non prodotto: stato non_prodotto, tempi null", code == 0 and out["stato"] == "non_prodotto" and out["file_finale"] is None and out["trascrizione"][0]["inizio_finale"] is None, str(out)[:300])
+
+    print("\n[C3] retake: indicazioni di resa dalla whitelist (D1)")
+    approved_before = tool("script_show.py", "--run-dir", run_dir, config=config)[1]
+    script_before = (Path(run_dir) / "conversazione.json").read_text(encoding="utf-8")
+    testo3 = SCRIPT_C2["turni"][2]["testo"]
+    code, out, _ = tool("retake.py", "--run-dir", run_dir, "--turn", "3", "--takes", "2", "--direction", "Più calmo", "--dry-run", config=config)
+    check("dry-run: le tag si pagano (caratteri con la tag)", code == 0 and out["chars"] == 2 * len(f"[calmo] {testo3}") and out["indicazioni"] == ["Più calmo"] and out["cost_usd"] is not None, str(out))
+    for args, kind in (
+        (["--direction", "Più rauco"], "UnknownDirection"),
+        (["--direction", "Pronuncia diversa"], "DirectionNeedsTextEdit"),
+        (["--direction", "Più calmo", "--direction", "Più energico"], "ConflictingDirections"),
+        (["--takes", "4"], "TooManyTakes"),
+    ):
+        code, out, _ = tool("retake.py", "--run-dir", run_dir, "--turn", "3", *args, config=config)
+        check(f"retake {args} -> exit 1 {kind}", code == 1 and out.get("error_type") == kind, str(out)[:300])
+    check("...e nessuna sintesi", len(tts_texts(root)) == 6, str(len(tts_texts(root))))
+    code, out, err = tool("retake.py", "--run-dir", run_dir, "--turn", "3", "--takes", "2", "--direction", "Più calmo", "--direction", "Più lento", "--by", "Utente A", config=config)
+    check("retake con due indicazioni: exit 0, 2 take nuovi (2 e 3)", code == 0 and out["new_takes"] == [2, 3] and out["tts_calls"] == 2, err[-300:] + str(out)[:300])
+    check("al TTS arriva il testo approvato con SOLO le tag della whitelist davanti", tts_texts(root)[-2:] == [f"[calmo] [lentamente] {testo3}"] * 2, str(tts_texts(root)[-2:]))
+    check("il copione e l'approvazione non cambiano", (Path(run_dir) / "conversazione.json").read_text(encoding="utf-8") == script_before and tool("script_show.py", "--run-dir", run_dir, config=config)[1]["approved"] is True and approved_before["approved"] is True)
+    check("anteprime con percorso relativo", all(t["preview_ui"] and t["preview_ui"].startswith("output/") for t in out["takes"]), str([t.get("preview_ui") for t in out["takes"]]))
+    code, info, _ = tool("episode_info.py", "--run-dir", run_dir, config=config)
+    check("take generati ma non scelti: l'episodio resta 'pronto'", info["stato"] == "pronto", str(info["motivi"]))
+
+    print("\n[C3] retake --list: tutti i take con l'anteprima in contesto (G5)")
+    calls = len(tts_texts(root))
+    for preview in (Path(run_dir) / "segmenti" / "anteprime").glob("*"):
+        preview.unlink()
+    code, out, err = tool("retake.py", "--run-dir", run_dir, "--list", "3", config=config)
+    takes = out.get("take_list") or []
+    check("take originale + 2, etichette del wireframe", code == 0 and [(t["take"], t["label"]) for t in takes] == [(1, "Take originale"), (2, "Take 1"), (3, "Take 2")], err[-300:] + str(takes)[:300])
+    check("anteprima in contesto per ognuno, originale compreso, senza sintesi", all(t["preview"] and Path(t["preview"]).is_file() for t in takes) and len(tts_texts(root)) == calls and out["tts_calls"] == 0)
+    check("indicazioni registrate per i take nuovi, scelto l'originale", takes[1]["indicazioni"] == ["Più calmo", "Più lento"] and takes[0]["indicazioni"] == [] and takes[0]["scelto"] and not takes[1]["scelto"], str(takes))
+    code, out, _ = tool("retake.py", "--run-dir", run_dir, "--list", "3", "--with-music", config=config)
+    check("--list --with-music: nessun sottofondo scelto, nessuna anteprima in piu' ma exit 0", code == 0)
+
+    print("\n[C3] usa il take e rimonta (zero sintesi)")
+    code, out, _ = tool("retake.py", "--run-dir", run_dir, "--choose", "3=3", config=config)
+    check("scelta del take: exit 0", code == 0 and out["chosen_take"] == 3, str(out))
+    code, info, _ = tool("episode_info.py", "--run-dir", run_dir, config=config)
+    check("dopo la scelta: 'da_aggiornare' per i take", info["stato"] == "da_aggiornare" and info["motivi"] == ["take"], str(info["motivi"]))
+    code, out, err = tool("mix.py", "--run-dir", run_dir, config=config)
+    check("mix.py: exit 0, zero sintesi, stesso file", code == 0 and out["tts_calls"] == 0 and out["file"] == "episodio-c3.mp3" and len(tts_texts(root)) == calls, err[-300:])
+    code, info, _ = tool("episode_info.py", "--run-dir", run_dir, config=config)
+    check("dopo il rimontaggio: di nuovo 'pronto'", info["stato"] == "pronto", str(info["motivi"]))
+    code, out, _ = tool("waveform.py", "--run-dir", run_dir, "--points", "50", config=config)
+    check("forma d'onda ricalcolata sul file rimontato", out["cached"] is False and out["sha256"] != wave_out["sha256"])
+
+    print("\n[C3] retake con il consenso revocato: niente")
+    tool("voice_meta.py", "--name", "Mario Rossi", "--revoke-consent", "--by", "Utente B", config=config)
+    code, out, _ = tool("retake.py", "--run-dir", run_dir, "--turn", "3", "--takes", "1", config=config)
+    check("consenso revocato -> exit 3 ConsentRequired, nessuna sintesi", code == 3 and out.get("error_type") == "ConsentRequired" and len(tts_texts(root)) == calls, str(out)[:300])
+    tool("voice_meta.py", "--name", "Mario Rossi", "--consent", "--by", "Utente A", config=config)
+
+    print("\n[C3] cambia musiche: music_set + mix")
+    code, out, _ = tool("music_set.py", "--run-dir", run_dir, "--none", "intro", "outro", config=config)
+    code, info, _ = tool("episode_info.py", "--run-dir", run_dir, config=config)
+    check("musiche cambiate dopo il montaggio: 'da_aggiornare' per le musiche", info["stato"] == "da_aggiornare" and info["motivi"] == ["musiche"], str(info["motivi"]))
+    code, out, err = tool("mix.py", "--run-dir", run_dir, config=config)
+    check("G1: mix.py senza musiche rimonta la sola voce, zero sintesi", code == 0 and out["with_music"] is False and out["tts_calls"] == 0 and len(tts_texts(root)) == calls, err[-300:] + str(out)[:200])
+    code, info, _ = tool("episode_info.py", "--run-dir", run_dir, config=config)
+    check("senza musiche: solo la sezione parlata, da 0", [x["tipo"] for x in info["sezioni"]] == ["parlato"] and info["sezioni"][0]["inizio"] == 0 and info["stato"] == "pronto", str(info["sezioni"]))
+    check("musiche_usate.json del mix precedente resta, ma non sposta i tempi", (Path(run_dir) / "musiche_usate.json").is_file() and info["trascrizione"][0]["inizio_finale"] < 1.0, str(info["trascrizione"][0]["inizio_finale"]))
+    code, out, _ = tool("turn_at.py", "--run-dir", run_dir, "--at", f"{(info['trascrizione'][1]['inizio_finale'] + info['trascrizione'][1]['fine_finale']) / 2:.2f}", config=config)
+    check("turn_at senza musiche: offset dal montaggio, non dal vecchio musiche_usate.json", out.get("turn") == 2, str(out)[:300])
+    tool("music_set.py", "--run-dir", run_dir, "--intro", "Piano calmo", config=config)
+    code, out, _ = tool("mix.py", "--run-dir", run_dir, config=config)
+    code, info, _ = tool("episode_info.py", "--run-dir", run_dir, config=config)
+    check("intro rimessa: sezione intro di nuovo presente", [x["tipo"] for x in info["sezioni"]] == ["intro", "parlato"] and info["stato"] == "pronto", str(info["sezioni"]))
+
+    print("\n[C3] correggi il testo -> approva -> produce: paga solo la battuta cambiata")
+    code, out, _ = tool("script_edit.py", "--run-dir", run_dir, "--turn", "2", "--text", "I ricavi del trimestre sono cresciuti, e parecchio.", "--expected-version", "1", config=config)
+    check("battuta 2 corretta: versione 2", code == 0 and out["version"] == 2, str(out)[:300])
+    code, info, _ = tool("episode_info.py", "--run-dir", run_dir, config=config)
+    check("copione cambiato: 'da_aggiornare' per il copione, da approvare", info["stato"] == "da_aggiornare" and "copione" in info["motivi"] and info["copione_approvato"] is False, str(info["motivi"]))
+    code, out, _ = tool("produce.py", "--run-dir", run_dir, config=config)
+    check("senza la nuova approvazione la produzione non parte", code == 1 and out.get("error_type") == "ApprovalRequired")
+    tool("script_approve.py", "--run-dir", run_dir, "--version", "2", "--by", "Utente A", config=config)
+    code, out, err = tool("estimate.py", "--run-dir", run_dir, config=config)
+    check("la stima dice 1 battuta da generare", out["turns_to_generate"] == 1 and out["turns_to_generate_list"] == [2], str(out.get("turns_to_generate_list")))
+    code, out, err = tool("produce.py", "--run-dir", run_dir, config=config)
+    check("produce: una sola battuta sintetizzata, la 2, stesso file", code == 0 and out["generated_turns"] == [2] and out["tts_calls"] == 1 and out["file"] == "episodio-c3.mp3", err[-300:] + str(out)[:300])
+    check("...e al TTS e' arrivato solo il testo nuovo", tts_texts(root)[calls:] == ["I ricavi del trimestre sono cresciuti, e parecchio."], str(tts_texts(root)[calls:]))
+    code, info, _ = tool("episode_info.py", "--run-dir", run_dir, config=config)
+    check("di nuovo 'pronto', con il take scelto della battuta 3 mantenuto", info["stato"] == "pronto" and tool("retake.py", "--run-dir", run_dir, "--list", "3", config=config)[1]["chosen_take"] == 3, str(info["motivi"]))
+
+    print("\n[C3] il titolo cambiato dopo il montaggio non rinomina il file")
+    episode(run_dir, config, "--titolo", "Un altro titolo")
+    tool("script_approve.py", "--run-dir", run_dir, "--version", "2", "--by", "Utente A", config=config)
+    code, out, _ = tool("mix.py", "--run-dir", run_dir, config=config)
+    check("il nome del file resta quello del primo montaggio", code == 0 and out["file"] == "episodio-c3.mp3", str(out)[:200])
+
+
+# ----------------------------------------------------------------------
 
 
 def main() -> None:
@@ -1952,6 +2105,7 @@ def main() -> None:
     test_web_mode(root, config, run_dir)
 
     test_c2()
+    test_c3()
 
     from tests.test_tools_cli import PASSED
 
