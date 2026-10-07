@@ -2828,6 +2828,36 @@ def test_c6() -> None:
     check("doc_extract: size_bytes degli stessi byte di sha256 e testo", code == 0 and out["size_bytes"] == len((root / "documenti" / "report.txt").read_bytes()), str(out)[:200])
 
 
+def test_ffmpeg_input_confined() -> None:
+    """ffmpeg/ffprobe aprono file solo via src/ffmpeg_tool.py (input_args, probe_args).
+
+    Revisione finale: un `-i` scritto a mano altrove salterebbe
+    `-protocol_whitelist file` e il formato forzato. Il controllo e' statico:
+    nessuna costante "-i" (anche dentro una f-string) e nessuna riga di comando
+    "ffmpeg ... -i" / "ffprobe ... -i" in src/, tools/ e run.py, salvo
+    src/ffmpeg_tool.py.
+    """
+    import ast
+    import re
+
+    print("\n[revisione finale] ffmpeg/ffprobe con -i solo in src/ffmpeg_tool.py")
+    allowed = PROJECT_ROOT / "src" / "ffmpeg_tool.py"
+    command_line = re.compile(r"\b(ffmpeg|ffprobe)\b.*\s-i(\s|$)")
+    files = [*sorted((PROJECT_ROOT / "src").rglob("*.py")), *sorted((PROJECT_ROOT / "tools").rglob("*.py")), PROJECT_ROOT / "run.py"]
+
+    def offenders_in(path: Path) -> list[str]:
+        found = []
+        for node in ast.walk(ast.parse(path.read_text(encoding="utf-8"), filename=str(path))):
+            if isinstance(node, ast.Constant) and isinstance(node.value, str):
+                if node.value.strip() == "-i" or command_line.search(node.value):
+                    found.append(f"{path.relative_to(PROJECT_ROOT)}:{node.lineno}")
+        return found
+
+    check("il controllo vede il -i di src/ffmpeg_tool.py (non e' vuoto)", bool(offenders_in(allowed)))
+    offenders = [hit for path in files if path != allowed for hit in offenders_in(path)]
+    check("nessun -i per ffmpeg/ffprobe fuori da src/ffmpeg_tool.py", not offenders, ", ".join(offenders))
+
+
 # ----------------------------------------------------------------------
 
 
@@ -2866,6 +2896,7 @@ def main() -> None:
     test_full_flow()
     test_full_flow(web=True)
     test_c6()
+    test_ffmpeg_input_confined()
 
     from tests.test_tools_cli import PASSED
 
