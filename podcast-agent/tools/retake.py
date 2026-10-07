@@ -32,7 +32,7 @@ import wave
 from pathlib import Path
 
 from _approval import add_gate_args, enforce  # noqa: E402
-from _common import add_config_arg, bootstrap, emit, note, parse_args, run_dir_arg, run_tool  # noqa: E402
+from _common import add_config_arg, bootstrap, emit, note, parse_args, require_by_in_web, run_dir_arg, run_tool  # noqa: E402
 from src.audio_assembler import AudioAssembler  # noqa: E402
 from src.errors import DomainError  # noqa: E402
 from src.fileio import atomic_output  # noqa: E402
@@ -87,6 +87,8 @@ def main() -> None:
             "Scegli una sola modalita': --turn N (genera), --list N (elenca) "
             "oppure --choose N=K (sceglie)."
         )
+    if args.turn is not None and not args.dry_run:
+        require_by_in_web(args.by, "la generazione di un retake")
 
     config = bootstrap(args)
     run_dir = run_dir_arg(args.run_dir, config)

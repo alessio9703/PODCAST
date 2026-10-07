@@ -3287,6 +3287,148 @@ def test_c7_gaps(root: Path) -> None:
     check("intro tolta: avvisa che il copione ne teneva conto", code == 0 and any("non ne e' stato scelto nessuno" in w for w in out["warnings"]), err[-300:] + str(out.get("warnings")))
 
 
+def test_c7_security() -> None:
+    """Blocco G: N2, N3, N4, N6, N14, N17, N19, N24, N25, N27."""
+    print("\n[C7] N2 · un'approvazione ritirata ferma la produzione in corso")
+    root, run = c7_project(tts_delay_seconds=0.5)
+    for speaker in ("Mario Rossi", "Giulia Bianchi"):
+        run("voice_meta.py", "--name", speaker, "--consent", "--by", "Utente A", web=False)
+    script = {"titolo": "Ritirata", "turni": [
+        {"speaker": "Mario Rossi" if i % 2 == 0 else "Giulia Bianchi", "testo": f"Battuta {i + 1} di una produzione che perde l'approvazione."}
+        for i in range(8)
+    ]}
+    name = c7_approved_run(root, run, "Ritirata", script)
+    events = root / "output" / name / "_eventi.jsonl"
+    env = clean_env()
+    env["PODCAST_AGENT_WEB"] = "1"
+    proc = subprocess.Popen([PYTHON, str(root / "tools" / "produce.py"), "--run-dir", name, "--events"], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, cwd=str(root), env=env)
+    deadline = time.monotonic() + 60
+    while time.monotonic() < deadline and not any(r["evento"] == "battuta" and r["n"] >= 2 for r in read_events(events)):
+        time.sleep(0.1)
+    code, out, _ = run("script_approve.py", "--run-dir", name, "--revoke", "--by=Utente B")
+    check("approvazione ritirata mentre produce", code == 0, str(out)[:200])
+    stdout, stderr = proc.communicate(timeout=60)
+    out = json.loads(stdout) if stdout.strip() else {}
+    details = out.get("details") or {}
+    check(
+        "produce si ferma: exit 1 ApprovalRequired con battute pronte e mancanti",
+        proc.returncode == 1 and out.get("error_type") == "ApprovalRequired" and details.get("missing") and details["done"] + len(details["missing"]) == 8,
+        stdout[-400:] + stderr[-300:],
+    )
+    check("...e non paga le battute restanti", len(tts_texts(root)) < 8, str(len(tts_texts(root))))
+    check("evento 'errore' ApprovalRequired", read_events(events)[-1]["evento"] == "errore" and read_events(events)[-1]["error_type"] == "ApprovalRequired")
+
+    print("\n[C7] N14 · le fasi annunciate sono quelle vere")
+    fasi = next(r["fasi"] for r in read_events(events) if r["evento"] == "iniziata")
+    check("senza musiche 'iniziata' non annuncia 'mix'", "mix" not in fasi and "sintesi" in fasi, str(fasi))
+    run("script_approve.py", "--run-dir", name, "--version", "1", "--by=Utente A")
+    run("music_set.py", "--run-dir", name, "--intro=Piano calmo")
+    code, out, err = run("produce.py", "--run-dir", name, "--events")
+    fasi = next(r["fasi"] for r in read_events(events) if r["evento"] == "iniziata")
+    check("con una musica 'mix' c'e'", code == 0 and "mix" in fasi, err[-300:] + str(fasi))
+    (root / "musiche" / "intro" / "Piano calmo.wav").rename(root / "musiche" / "intro" / "Spostato.wav")
+    events.write_text("", encoding="utf-8")
+    code, out, _ = run("produce.py", "--run-dir", name, "--events")
+    check("brano scelto sparito: errore solo nel JSON, nessun evento", code == 1 and read_events(events) == [], str(out)[:200] + str(read_events(events)))
+    (root / "musiche" / "intro" / "Spostato.wav").rename(root / "musiche" / "intro" / "Piano calmo.wav")
+
+    print("\n[C7] N17 · mix.py: percorsi relativi dall'interfaccia")
+    code, out, err = run("mix.py", "--run-dir", name)
+    check(
+        "web: output e musiche_usate_file relativi (output/<run>/...)",
+        code == 0 and out["output"].startswith("output/") and out["output"] == out["file_ui"] and out["musiche_usate_file"].startswith("output/"),
+        err[-300:] + str(out)[:300],
+    )
+    code, out, err = run("mix.py", "--run-dir", name, web=False)
+    check("locale (subagent): output assoluto come prima", code == 0 and Path(out["output"]).is_absolute(), str(out.get("output")))
+
+    print("\n[C7] N3 · eventi e avvisi senza percorsi del server")
+    proc = run_python(
+        f"""
+        from pathlib import Path
+        from src.production import EventLog
+        from src.redaction import PROJECT_ROOT
+        log = EventLog(Path({str(root / "eventi-n3.jsonl")!r}))
+        log.emit("avviso", testo=f"ffmpeg: errore su {{PROJECT_ROOT}}/output/run/segmenti/x.wav")
+        log.close()
+        """
+    )
+    text = (root / "eventi-n3.jsonl").read_text(encoding="utf-8") if (root / "eventi-n3.jsonl").exists() else ""
+    check("avviso con un percorso assoluto: nell'evento resta output/...", str(PROJECT_ROOT) not in text and "output/run/segmenti/x.wav" in text, text + proc.stderr)
+
+    print("\n[C7] N4 · le librerie non seguono i link simbolici")
+    outside = root / "fuori.wav"
+    make_wav(outside, 1.0, 400)
+    (root / "voci" / "Collegata.wav").symlink_to(outside)
+    (root / "musiche" / "intro" / "Collegato.wav").symlink_to(outside)
+    code, out, _ = run("voices_list.py")
+    check("voce come link: non e' una voce, e' fra i file scartati", "Collegata" not in {v["name"] for v in out["voices"]} and "Collegata.wav" in out["rejected"], str(out["rejected"]))
+    code, out, _ = run("voice_meta.py", "--name", "Collegata")
+    check("...e non si puo' usare per nome", code != 0, str(out)[:200])
+    code, out, _ = run("music_list.py")
+    names = json.dumps(out)
+    check("brano come link: non compare fra i brani", '"Collegato"' not in names, names[:300])
+    (root / "voci" / "Collegata.wav").unlink()
+    (root / "musiche" / "intro" / "Collegato.wav").unlink()
+
+    print("\n[C7] N24 · data di caricamento delle voci")
+    code, out, _ = run("voices_list.py")
+    check("ogni voce ha caricata_il", all(v.get("caricata_il") for v in out["voices"]), str([v.get("caricata_il") for v in out["voices"]]))
+
+    print("\n[C7] N6 · dal web il cast arriva solo da episodio.json")
+    for extra in (["--speakers", "Mario Rossi"], ["--format", "monologo"], ["--participant", "Mario Rossi|Mario Rossi|ospite"], ["--presenter", "Anna Neri"], ["--interviewer", "Mario Rossi"], ["--target-minutes", "5"]):
+        code, out, _ = run("script_write.py", "--run-dir", name, "--by=Utente A", *extra)
+        check(f"script_write {extra[0]} dal web -> NotAllowedInWebMode", code == 1 and out.get("error_type") == "NotAllowedInWebMode" and extra[0] in out["details"]["argomenti"], str(out)[:200])
+
+    print("\n[C7] N19 · il rifiuto della modalita' web non dipende dall'ordine dei controlli")
+    code, out, _ = run("voices_prepare.py")
+    check("voices_prepare senza argomenti: NotAllowedInWebMode con details.comando", code == 1 and out.get("error_type") == "NotAllowedInWebMode" and out["details"].get("comando") == "voices_prepare.py", str(out)[:200])
+    code, out, _ = run("synthesize.py")
+    check("synthesize senza argomenti: NotAllowedInWebMode con details.comando", code == 1 and out.get("error_type") == "NotAllowedInWebMode" and out["details"].get("comando") == "synthesize.py", str(out)[:200])
+    code, out, _ = run("produce.py", "--run-dir", name, "--no-consent-gate")
+    check("produce --no-consent-gate (che non ha): NotAllowedInWebMode, non InvalidArguments", code == 1 and out.get("error_type") == "NotAllowedInWebMode" and out["details"]["argomenti"] == ["--no-consent-gate"], str(out)[:200])
+    code, out, _ = run("doc_extract.py", "--trusted")
+    check("abbreviazione di un'opzione vietata, senza gli obbligatori: NotAllowedInWebMode", code == 1 and out.get("error_type") == "NotAllowedInWebMode", str(out)[:200])
+    code, out, _ = run("script_edit.py", "--run-dir", name, "--turn", "1", "--te=Testo nuovo.", "--by=Utente A")
+    check("abbreviazione di un'opzione permessa: passa il controllo", out.get("error_type") != "NotAllowedInWebMode", str(out)[:200])
+
+    print("\n[C7] N27 · dal web --by obbligatorio per le azioni che lasciano una firma")
+    cases = [
+        ("script_approve.py", ["--run-dir", name, "--version", "1"]),
+        ("script_approve.py", ["--run-dir", name, "--revoke"]),
+        ("script_edit.py", ["--run-dir", name, "--turn", "1", "--text=Ciao."]),
+        ("script_versions.py", ["--run-dir", name, "--restore", "1"]),
+        ("script_revise.py", ["--run-dir", name, "--instructions=Accorcia"]),
+        ("script_write.py", ["--run-dir", name]),
+        ("retake.py", ["--run-dir", name, "--turn", "1"]),
+        ("voice_meta.py", ["--name", "Mario Rossi", "--spoken-name=Mario Rossi"]),
+    ]
+    session_before = (root / "output" / name / "_script_session.json").read_text(encoding="utf-8")
+    for tool_name, args in cases:
+        code, out, _ = run(tool_name, *args)
+        check(f"{tool_name} {args[2] if len(args) > 2 else ''} senza --by: exit 1 InvalidArguments campo 'by'", code == 1 and out.get("error_type") == "InvalidArguments" and out["details"].get("campo") == "by", str(out)[:200])
+    check("...e niente e' cambiato nella sessione del copione", (root / "output" / name / "_script_session.json").read_text(encoding="utf-8") == session_before)
+    code, out, _ = run("retake.py", "--run-dir", name, "--turn", "1", "--dry-run")
+    check("retake --dry-run (non firma, non spende) senza --by: ammesso", code == 0, str(out)[:200])
+    current = str(run("script_show.py", "--run-dir", name)[1]["version"])
+    code, out, _ = run("script_approve.py", "--run-dir", name, "--version", current, "--by=Utente A")
+    check("con --by: approvato, e 'approvato da' e' registrato", code == 0 and out["by"] == "Utente A", str(out)[:200])
+    code, out, _ = run("script_approve.py", "--run-dir", name, "--revoke", web=False)
+    check("in locale --by resta facoltativo", code == 0, str(out)[:200])
+
+    print("\n[C7] N25 · lessons --accept con il tetto pieno: candidati in details")
+    from tests.test_lessons import _VALID_PATTERN, _seed_db
+    _seed_db(root / "prompts", [
+        {"id": "L1", "stato": "attiva", "testo": "Prima lezione, gia' attiva da tempo.", "pattern": _VALID_PATTERN, "prove": [{"episodio": "ep1"}], "episodi": ["ep1"], "accettata_il": "2026-01-01T00:00:00"},
+        {"id": "L2", "stato": "proposta", "testo": "Seconda lezione, appena proposta.", "pattern": {"categoria": "tag_aggiunta", "dettaglio": {"tag": "ride", "posizione": "interna"}}, "prove": [], "episodi": ["ep2", "ep3"]},
+    ])
+    config_file = root / "config.yaml"
+    config_file.write_text(config_file.read_text(encoding="utf-8") + "lessons:\n  max_lines: 3\n", encoding="utf-8")
+    code, out, _ = run("lessons.py", "--accept", "L2", "--by=Utente A")
+    candidates = (out.get("details") or {}).get("candidates") or []
+    check("exit 3 con i candidati da togliere in details", code == 3 and any(c["id"] == "L1" and c["testo"] and c["motivo"] for c in candidates) and out["details"]["campo"] == "remove_id", str(out)[:400])
+
+
 def test_c7() -> None:
     test_c7_consent()
     test_c7_run_py()
@@ -3295,6 +3437,7 @@ def test_c7() -> None:
     gaps = Path(tempfile.mkdtemp(prefix="podcast-web-c7-gaps-"))
     setup(gaps)
     test_c7_gaps(gaps)
+    test_c7_security()
 
 
 def test_ffmpeg_input_confined() -> None:

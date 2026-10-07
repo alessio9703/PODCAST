@@ -117,8 +117,10 @@ class EventLog:
             return
         if self._handle is None:
             self._handle = self._open()
+        # Gli eventi arrivano al browser: niente percorsi del server, nemmeno
+        # dentro un avviso che riporta lo stderr di ffmpeg (revisione finale, N3).
         line = json.dumps(
-            {"evento": evento, "at": datetime.now().replace(microsecond=0).isoformat(), **data},
+            {"evento": evento, "at": datetime.now().replace(microsecond=0).isoformat(), **redact(data)},
             ensure_ascii=False,
         )
         self._handle.write(line + "\n")
@@ -737,14 +739,40 @@ def _produce_locked(
             details={"approval_problem": approval["approval_problem"]},
         )
     total = len(script.turni)
-    events.emit("iniziata", totale=total, fasi=list(PHASES))
 
-    # Musiche: tutto validato PRIMA di spendere (clonazione compresa).
+    # Musiche: tutto validato PRIMA di spendere (clonazione compresa). Un
+    # errore qui e' solo nel JSON su stdout: 'iniziata' si scrive dopo, con le
+    # fasi che ci saranno davvero (senza musiche niente 'mix', revisione
+    # finale N14).
     music_choice, music_warnings = preflight(run_dir, config, accept_changed_music=accept_changed_music)
+    phases = [p for p in PHASES if p != "mix" or music_choice is not None]
+    events.emit("iniziata", totale=total, fasi=phases)
     for warning in music_warnings:
         events.emit("avviso", testo=warning)
 
     provider = config.build_provider()
+
+    # Un'approvazione ritirata a produzione in corso (script_approve --revoke,
+    # cambio di cast, ripristino di una versione) la ferma alla clonazione o
+    # alla battuta successiva: il copione che si sta pagando non e' piu'
+    # quello approvato (revisione finale, N2). Si rilegge solo la sessione.
+    approval_lost: list[str] = []
+
+    def stop_or_unapproved() -> bool:
+        if should_stop():
+            return True
+        now = approval_state(run_dir, script)
+        if not now["approved"]:
+            approval_lost.append(now["approval_problem"] or "approvazione ritirata")
+            return True
+        return False
+
+    def approval_withdrawn(done: int, missing: list[int]) -> ApprovalRequired:
+        return ApprovalRequired(
+            f"L'approvazione del copione e' stata ritirata durante la produzione: mi sono fermato "
+            f"({done} battute pronte su {total}). {approval_lost[0]}",
+            details={"approval_problem": approval_lost[0], "done": done, "total": total, "missing": missing},
+        )
 
     # -- voci ----------------------------------------------------------
     events.emit("fase_iniziata", fase="preparazione_voci")
@@ -753,11 +781,13 @@ def _produce_locked(
         list(script.speakers),
         provider=provider,
         on_voice=lambda speaker, action: events.emit("voce", speaker=speaker, azione=action),
-        should_stop=should_stop,
+        should_stop=stop_or_unapproved,
         note=note,
     )
     if len(prepared.voice_map) < len(script.speakers):
         # Fermata fra una clonazione e l'altra: nessuna battuta toccata.
+        if approval_lost:
+            raise approval_withdrawn(0, list(range(1, total + 1)))
         raise _interrupted(0, total, list(range(1, total + 1)))
     write_json_atomic(run_dir / VOICES_FILENAME, prepared.voice_map)
     write_json_atomic(run_dir / AUDIO_PATHS_FILENAME, prepared.audio_paths)
@@ -794,7 +824,7 @@ def _produce_locked(
     revoked: list[str] = []
 
     def stop_or_revoked() -> bool:
-        if should_stop():
+        if stop_or_unapproved():
             return True
         # Anche le revoche tenute nel registro delle voci (revisione finale, N1).
         registry_now = VoiceRegistry(config.registry_file, project_root=config.registry_file.parent)
@@ -821,6 +851,8 @@ def _produce_locked(
             note=note,
         )
     except SynthesisStopped as stop:
+        if approval_lost:
+            raise approval_withdrawn(stop.done, stop.missing) from stop
         if revoked:
             speakers = sorted(set(revoked))
             raise ConsentRequired(
@@ -875,7 +907,7 @@ def _produce_locked(
         "approved_version": approval["approved_version"],
         "documento": document_note,
         "timings_file": ui_path(render.timings_file, config) if render.timings_file else None,
-        "warnings": warnings,
+        "warnings": redact(warnings),
         **render.music_payload,
     }
     if payload.get("musiche_usate_file"):

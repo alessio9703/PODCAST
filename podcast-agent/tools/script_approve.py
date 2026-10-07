@@ -33,7 +33,7 @@ import argparse
 import json
 from pathlib import Path
 
-from _common import add_config_arg, bootstrap, emit, note, parse_args, run_dir_arg, run_tool  # noqa: E402
+from _common import add_config_arg, bootstrap, emit, note, parse_args, require_by_in_web, run_dir_arg, run_tool  # noqa: E402
 from src.errors import DomainError  # noqa: E402
 from src.run_lock import session_lock  # noqa: E402
 from src.script_editing import check_expected_version  # noqa: E402
@@ -61,6 +61,7 @@ def main() -> None:
     # --current approva "quello che c'e' adesso": dall'interfaccia vale solo la
     # versione che l'utente ha letto.
     args = parse_args(parser, web_forbidden=("--current",))
+    require_by_in_web(args.by, "il ritiro dell'approvazione" if args.revoke else "l'approvazione")
 
     config = bootstrap(args)
     # --session vale come la sua cartella: stessa regola di --run-dir.

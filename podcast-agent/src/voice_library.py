@@ -84,7 +84,15 @@ class VoiceLibrary:
         voices: list[AvailableVoice] = []
         rejected: list[Path] = []
         for entry in sorted(self.dir.iterdir()):
-            if not entry.is_file() or entry.name.startswith("."):
+            if entry.name.startswith("."):
+                continue
+            if entry.is_symlink():
+                # Un link si scarta (finisce fra i file scartati): seguirlo
+                # vorrebbe dire mandare al provider, come campione da clonare,
+                # un file fuori dalla libreria (revisione finale, N4).
+                rejected.append(entry)
+                continue
+            if not entry.is_file():
                 continue
             # Metadati accanto alla registrazione (src/voice_meta.py) e i loro
             # lock: non sono registrazioni, ne' file in un formato sbagliato.

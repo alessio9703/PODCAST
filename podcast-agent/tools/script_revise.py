@@ -20,7 +20,7 @@ from __future__ import annotations
 import argparse
 from pathlib import Path
 
-from _common import add_config_arg, bootstrap, note, parse_args, run_dir_arg, run_tool  # noqa: E402
+from _common import add_config_arg, bootstrap, note, parse_args, require_by_in_web, run_dir_arg, run_tool  # noqa: E402
 from script_write import report  # noqa: E402
 from src.script_authoring import revise_draft  # noqa: E402
 
@@ -34,6 +34,7 @@ def main() -> None:
     parser.add_argument("--by", default=None, help="Chi ha chiesto la modifica")
     add_config_arg(parser)
     args = parse_args(parser)
+    require_by_in_web(args.by, "la richiesta di modifica")
 
     config = bootstrap(args)
     # --session vale come la sua cartella: stessa regola di --run-dir.

@@ -78,10 +78,15 @@ dell'adattatore:
 | `--no-consent-gate` | (C2) salta il consenso prima della clonazione |
 | `--save-to`, `--text-file`, `--session`, `--script-json`, `--script`, `--out`, `--voices`, `--audio-paths` | file passati per percorso: l'adattatore lavora sempre per `--run-dir`, e i nomi dei file li fissa il tool |
 | `--document` di `script_write.py` | il documento si registra con `episode_config.py --documento` |
+| `--speakers`, `--participant`, `--presenter`, `--interviewer`, `--format`, `--target-minutes` di `script_write.py` | (C7, N6) dal web il cast e la durata arrivano solo da `episodio.json` (passo 2, con i suoi controlli e i soli formati di D4) |
 | `--current` di `script_approve.py` | dall'interfaccia si approva solo la versione che l'utente ha letto (`--version V`) |
 
-Il controllo guarda i valori già interpretati, quindi valgono anche le
-abbreviazioni (`--trusted`) e la forma `--opzione=valore`. Esito:
+Il controllo si fa **prima** di interpretare gli argomenti (C7, N19), sul testo della
+riga di comando: nome esatto, forma `--opzione=valore` e abbreviazioni delle opzioni del
+comando (`--trusted`). Quindi il rifiuto arriva anche se mancano argomenti obbligatori,
+e un argomento vietato che il comando non ha (`produce.py --no-consent-gate`) dà
+`NotAllowedInWebMode`, non `InvalidArguments`. Dopo l'interpretazione lo stesso
+controllo si ripete sui valori, come rete di sicurezza. Esito:
 
 ```json
 {
@@ -95,12 +100,22 @@ abbreviazioni (`--trusted`) e la forma `--opzione=valore`. Esito:
 
 Il comando non fa niente prima del rifiuto. In modalità web **non si usano per
 intero** `voices_prepare.py` e `synthesize.py` (`NotAllowedInWebMode` con
-`details.comando`): preparazione delle voci, sintesi e chiusura della run fanno
+`details.comando`, anche senza argomenti; se fra gli argomenti ce n'è uno vietato,
+`details.argomenti` lo elenca): preparazione delle voci, sintesi e chiusura della run fanno
 parte di `produce.py`, legato al copione approvato. Per lo stesso motivo
 `run_finalize.py` (`--voices` obbligatorio) non si usa. `NotAllowedInWebMode` indica un
 errore dell'adattatore, non dell'utente: va registrato nei log, non mostrato
 come campo da correggere. Anche `script_save.py` (`--script-json` obbligatorio) non
 si usa; la stima dall'interfaccia è `estimate.py --run-dir` (senza `--script`).
+
+**`--by` obbligatorio dal web** (C7, N27). Le azioni che lasciano una firma
+("Approvato da …", elenco versioni, metadati dei take) vogliono `--by` con il nome
+dell'utente collegato: senza, exit 1 `InvalidArguments` con `details.campo: "by"`, e
+niente cambia. Sono: `script_approve.py` (approva e `--revoke`), `script_edit.py`,
+`script_versions.py --restore`, `script_write.py`, `script_revise.py`, `retake.py --turn`
+(non `--dry-run`), `voice_meta.py --spoken-name`. `voice_meta.py --consent`/`--revoke-consent`
+(`ConsentByRequired`), `music_meta.py` e `lessons.py --accept/--reject` lo richiedevano già.
+In locale (subagent, CLI) `--by` resta facoltativo dove lo era.
 
 ### Campi da mostrare e campi da non mostrare
 
@@ -109,8 +124,9 @@ che servono al subagent: `run_dir`, `session_file`, `script_file`,
 `episodio_file`, `musiche_file`, `musiche_usate_file`, `output`, `path`,
 `documento.percorso`, `voices_dir`, `music_dir`, `timings_file`,
 `segnali_file`, `voci_usate`, `text_file`, `audio_file`, `events_file`. In
-modalità web `voices_list.py` e `music_list.py` danno le cartelle per nome e
-`voices_list.py` omette `path`, `voice_id` e `cache_reason`. **L'adattatore non
+modalità web `voices_list.py` e `music_list.py` danno le cartelle per nome,
+`voices_list.py` omette `path`, `voice_id` e `cache_reason`, e `mix.py` dà `output` e
+`musiche_usate_file` relativi (`output/<run>/…`, come `produce.py`; C7, N17). **L'adattatore non
 li mostra mai all'utente.** Per la UI ci sono i nomi relativi:
 
 - `run`: il nome della cartella dell'episodio (è anche un `--run-dir` valido);
@@ -137,8 +153,9 @@ percorsi che ricevono, quindi la difesa non dipende dall'adattatore:
 - i **documenti** (`--document`, `--documento`, argomento di `doc_extract.py`)
   si indicano **per nome** e devono stare nella libreria `documenti/`. File
   nascosti, file senza estensione gestita e percorsi che escono dalla libreria
-  (anche tramite link simbolici) sono rifiutati. Un nome non viene mai cercato
-  nella cartella corrente.
+  (anche tramite link simbolici) sono rifiutati con exit 1 `DocumentError` (C7, N20:
+  senza `details`, il messaggio dice il motivo; non è `PathNotAllowed`). Un nome non viene
+  mai cercato nella cartella corrente.
 - i file passati per percorso (`--script`, `--voices`, `--out`,
   `--audio-paths`, `--script-json`, `--text-file`, `--save-to`) devono stare
   dentro `output/`.
@@ -295,12 +312,12 @@ copione e mostra la versione nuova, non riprova da sola.
 
 | error_type | exit | Quando | `details` |
 |---|---|---|---|
-| `ConsentRequired` | **3** | Una voce da usare non ha il consenso valido: **nessuna voce è stata clonata** (o, a produzione in corso, un consenso è stato revocato: ci si ferma) | `voci: [{speaker, azione, stato, file}]` (+ `done`, `total`, `missing` se la sintesi era partita) |
+| `ConsentRequired` | **3** | Una voce da usare non ha il consenso valido: **nessuna voce è stata clonata** (o, a produzione in corso, un consenso è stato revocato: ci si ferma). Dal web anche una voce già clonata da **riusare** senza consenso registrato (C7, N1) | `voci: [{speaker, azione, stato, da_confermare, file}]`; una revoca trovata solo nel registro: `{speaker, azione, stato: "revocato", revoca_nel_registro: true}` | (+ `done`, `total`, `missing` se la sintesi era partita) |
 | `CloneOutcomeUnknown` | **3** | Una clonazione precedente della stessa voce è finita con un errore o è stata interrotta: la voce potrebbe esistere sul provider. **Non si ritenta da soli** | `speaker`, `dal`, `provider` |
 | `RecordingChanged` | **3** | `voice_meta.py --consent --expect-sha256 H`: la registrazione non è più quella che l'utente ha visto. Niente registrato | `voce`, `atteso`, `attuale` |
 | `ConsentByRequired` | 1 | `voice_meta.py --consent`/`--revoke-consent` senza `--by` | `campo: "by"` |
 | `VoiceMetaError` | 1 | File dei metadati di una voce illeggibile | `file` |
-| `ApprovalRequired` | 1 | `produce.py` su un copione non approvato, o diverso da quello approvato | `approval_problem` |
+| `ApprovalRequired` | 1 | `produce.py` su un copione non approvato, o diverso da quello approvato; oppure (C7, N2) approvazione ritirata **a produzione in corso**: ci si ferma alla battuta successiva | `approval_problem`; a produzione in corso anche `done`, `total`, `missing` |
 | `ScriptMissing` | 1 | Stima o produzione di una run senza copione | — |
 | `ProductionInterrupted` | 1 | Produzione fermata (SIGTERM/Ctrl-C) fra una battuta e l'altra | `done`, `total`, `missing` |
 
@@ -310,6 +327,9 @@ richiama `produce.py`. `CloneOutcomeUnknown` chiede all'utente di controllare le
 sul provider (una voce duplicata va cancellata lì) e di confermare con
 `voice_meta.py --name VOCE --confirm-clone-retry --by U`; poi si richiama `produce.py`. `stato` dice perché: `mancante`, `superato` (la registrazione è
 stata sostituita dopo il consenso) o `revocato` (vale anche per una voce già clonata).
+`da_confermare: true` (C7, N1): la voce è già clonata ma il consenso non è mai stato
+registrato (voci clonate prima del consenso o fuori dal controllo). Non c'è migrazione
+automatica: la UI mostra la stessa casella "Confermo che …", da spuntare una volta.
 
 ### Introdotti in C3
 
@@ -320,7 +340,7 @@ stata sostituita dopo il consenso) o `revocato` (vale anche per una voce già cl
 | `ConflictingDirections` | 1 | Due indicazioni opposte insieme (es. più lento e più veloce) | `indicazioni` |
 | `TooManyTakes` | 1 | Più take di `retake.max_takes` | `massimo`, `richiesti` |
 | `SegmentsMissing` | 1 | `mix.py` senza tutti i segmenti in cache (copione cambiato o episodio vecchio): serve `produce.py` | `missing` |
-| `WaveformError` | 1 | Numero di punti fuori scala, file non decodificabile | `campo`, `minimo`, `massimo` |
+| `WaveformError` | 1 | Numero di punti non ammesso, file non decodificabile | `campo` (`"points"`), `ammessi` (i valori di `--points` accettati) |
 | `EpisodeNotProduced` | 1 | Forma d'onda di un episodio senza file finale | — |
 
 ### Introdotti in C4
@@ -350,10 +370,10 @@ millisecondi. Se compare, la UI può proporre di riprovare.
 
 Più comandi possono girare in parallelo, anche per utenti diversi:
 
-- i file condivisi (`voices_registry.json`, e dalle prossime fasi i metadati
-  di voci e musiche) si modificano sotto lock fra processi, rileggendo il
-  contenuto dentro il lock: due clonazioni simultanee non si cancellano a
-  vicenda;
+- i file condivisi (`voices_registry.json` con le revoche, i metadati di voci e
+  musiche, il registro delle lezioni) e `musiche.json` di una run (C7, N5) si
+  modificano sotto lock fra processi, rileggendo il contenuto dentro il lock: due
+  clonazioni, o due scelte di brani, simultanee non si cancellano a vicenda;
 - tutte le scritture sono atomiche: chi legge vede la versione vecchia o
   quella nuova, mai una a metà.
 
@@ -392,6 +412,21 @@ lunghe sono accorciate con `"…"`.
 | Avanzate: Impostazioni | `settings_show.py` | Impostazioni |
 | Avanzate: Diagnostica | `doctor.py` | Diagnostica |
 | Stati e errori (`Stati`) | exit code e `error_type` | §2, §3 |
+| Barra dei passi (`Stepper`) | `run_status.py --run-dir R` → `passo` | qui sotto |
+
+**Barra dei passi (`Stepper`, C7 N23).** `run_status.py` dà `passo` (1–7): il passo in cui
+si trova l'episodio, cioè dove porta "Riprendi". I passi **precedenti** sono raggiungibili
+(i loro dati si rileggono con i comandi del passo); quelli **successivi** no finché lo
+stato non ci arriva. Tornare indietro non cambia niente da solo: cambia solo se l'utente
+modifica qualcosa (es. il cast dopo l'approvazione ritira l'approvazione, D8).
+
+**I due "Annulla" (C7, N22).**
+- *Passo 1, "Annulla"*: a carico dell'adattatore. Se la run non è ancora stata creata
+  (`run_init.py` non chiamato) non c'è niente da annullare; se lo è, resta nell'Archivio
+  come "Bozza · Cast" (non c'è un comando di cancellazione: vedi "Non supportato").
+- *Messaggio "Copione salvato · versione N", "Annulla"*: `script_versions.py --run-dir R
+  --restore N-1 --expected-version N --by U`. Crea una versione nuova (`ripristino`)
+  uguale alla precedente, la storia resta; come ogni ripristino ritira l'approvazione.
 
 ## Passo 1 · Documento
 
@@ -499,6 +534,31 @@ Esempio reale (cast completo, con un'intro scelta al passo 3):
 | Scegli / togli un brano | `music_set.py --run-dir R --intro NOME` / `--none intro` | no | no |
 | Salta il passo (nessuna musica) | `music_set.py --run-dir R --none intro outro sottofondo` | no | no |
 | Durata totale indicativa | `episode_config.py --run-dir R` → `durata_indicativa` | no | no |
+| Brani già scelti (select del passo 3, Riepilogo del passo 5, "Cambia musiche" del passo 7) | `episode_config.py --run-dir R` → `musiche` | no | no |
+
+**Musiche scelte** (C7, B2): `episode_config.py --run-dir R` (senza altri argomenti è
+in sola lettura) dà `musiche`, una chiave per categoria:
+
+```json
+"musiche": {
+  "intro": {"nome": "Piano calmo", "sha256": "sha256:c0b4…9e1a", "disponibile": true},
+  "outro": null,
+  "sottofondo": "non_scelta"
+}
+```
+
+- `"non_scelta"`: il passo 3 non è stato fatto (`musiche.json` non c'è ancora); in
+  pratica vale per tutte e tre le categorie insieme;
+- `null`: scelta fatta, **nessuna musica** in questa categoria (anche "Salta il passo");
+- `{nome, sha256, disponibile}`: il brano scelto; `disponibile: false` (e `sha256: null`
+  se il file non c'è più) quando nel frattempo è sparito dalla libreria o non è
+  utilizzabile: la UI chiede di sceglierne un altro.
+
+`music_set.py` legge e scrive `musiche.json` **sotto lock**, rileggendolo dentro il lock
+(C7, N5): due scelte contemporanee (intro da una scheda, outro da un'altra) non si
+cancellano. Argomenti in conflitto (`--intro X --none intro`), nessuna scelta, brano
+inesistente o inutilizzabile: exit 1 `MusicChoiceError` (prima `ValueError`); nome
+ambiguo: exit 3 `AmbiguousName`, come prima.
 
 Le durate dei brani mp3/m4a si misurano anche senza `ffprobe` di sistema. Per
 ogni brano `music_list.py` dà anche licenza, parlato, trascrizione e "usato in"
@@ -577,6 +637,13 @@ comunque, perché la chiamata è già pagata, ma con `errors` non vuoto e
 }
 ```
 
+- **Non tutti i comandi danno tutte le chiavi** (C7, N18). L'esempio è quello completo
+  di `script_show.py`. `script_write.py`, `script_edit.py` e `script_versions.py
+  --restore` non danno `run`, `run_dir`, `has_script`, `in_corso`; `script_write.py` e
+  `script_edit.py` non danno nemmeno `versions`; `script_write.py` aggiunge `problems`
+  (gli stessi controlli di `errors`/`warnings`, nella forma del subagent). Dopo una
+  scrittura la UI può richiamare `script_show.py` per avere la vista completa; il nome
+  della run lo conosce già (è il `--run-dir` che ha passato).
 - **Ruoli**: `ruolo` vale `presentatore`, `intervistatore`, `ospite` o `voce`
   (in conversazione). Il badge Presentatore/Partecipanti si decide da
   `presentatore` (vero/falso).
@@ -735,12 +802,16 @@ registro; le battute delle voci da clonare contano tutte come da generare. Esemp
 - **Voci dell'episodio**: `voices[]`, con `azione` (`reuse` = "Già clonata il
   `clonata_il`", `clone` = "Da clonare per la prima volta"), `ruolo` (da
   `episodio.json`, `null` se manca) e `consenso`. La casella del consenso si mostra per
-  le voci in `consent_missing`.
+  le voci in `consent_missing`. Dal web `consent_missing` comprende anche le voci **già
+  clonate** senza consenso registrato (`consenso.da_confermare: true`, C7 N1): il consenso
+  è una proprietà della voce, e anche il riuso lo richiede.
 - **Copione approvato**: `approved`, `approved_version`, `approval_problem` (stessa regola
   del gate: sha256 del copione approvato).
 
 **`voice_meta.py`** risponde
-`{"voce", "file", "consenso": {"stato", "audio_sha256", "da", "il", "revocato_da", "revocato_il"}, "consenso_revocato", "clonazione_incerta", "clonazione_incerta_tolta"}`.
+`{"voce", "file", "nome_pronunciato", "consenso": {"stato", "audio_sha256", "da", "il", "revocato_da", "revocato_il", "revoca_nel_registro", "da_confermare"}, "consenso_revocato", "clonazione_incerta", "clonazione_incerta_tolta"}`.
+`--consent` senza `--expect-sha256` dal web dà exit 1 `InvalidArguments`
+(`details.messaggio: "manca --expect-sha256"`; C7, N20).
 **`--expect-sha256`** è obbligatorio in modalità web con `--consent`: la UI ripassa il
 `consenso.audio_sha256` che ha mostrato (dalla stima o da `voice_meta.py`). Se la
 registrazione è cambiata nel frattempo, exit 3 `RecordingChanged` e il consenso non si
@@ -748,7 +819,17 @@ registra.
 Il nome si risolve senza indovinare: esatto a meno di maiuscole e accenti, altrimenti
 exit 3 `AmbiguousName` con `candidates`. Il consenso vale per la registrazione attuale (se
 ne salva lo sha256): se il file audio viene sostituito lo stato diventa `superato`. Una
-voce con il consenso **revocato** non si clona e non si riusa.
+voce con il consenso **revocato** non si clona, non si riusa e non si rimonta.
+
+**Revoche nel registro** (C7, N1). `--revoke-consent` scrive la revoca anche in
+`voices_registry.json` (chiave riservata `__revoche__`: voce, `voice_id` clonato,
+sha256 della registrazione, chi e quando). La revoca vale quindi anche dopo aver
+cancellato la registrazione e il suo `.json`: la stessa registrazione ricaricata risulta
+`revocato` (`revoca_nel_registro: true`), e un retake o un rimontaggio di un episodio
+vecchio con quel `voice_id` dà exit 3 `ConsentRequired`. Un nuovo `--consent` sulla
+**stessa** registrazione toglie la revoca; una registrazione diversa con lo stesso nome
+non rende di nuovo usabile il `voice_id` revocato. Per cancellare una voce, quindi,
+**prima** si revoca, poi si cancellano i file.
 
 ## Passo 6 · Generazione
 
@@ -766,13 +847,19 @@ produzione, scrittura o revisione sulla stessa run esce con `RunBusy`) e fa, in 
    `ApprovalRequired` e niente speso;
 2. **musiche**: validate prima di spendere (ffmpeg, brani, sha256);
 3. **voci**: riuso o clonazione, solo con il consenso (exit 3 `ConsentRequired`, nessuna
-   clonazione fatta), **senza retry** (un errore del provider esce con exit 2: blocco,
+   clonazione fatta; dal web anche il riuso vuole il consenso registrato, C7 N1), **senza retry** (un errore del provider esce con exit 2: blocco,
    nessun "Riprova"; il rilancio dà exit 3 `CloneOutcomeUnknown` finché l'utente non
    conferma). Il consenso si ricontrolla sui byte effettivamente mandati al provider,
    subito prima di ogni clonazione. Due produzioni con la stessa voce nuova la clonano
    una volta sola;
 4. **sintesi** delle sole battute non in cache, **montaggio**, **mix** con le musiche;
 5. **chiusura**: `voci_usate.json`, copia del documento, tempi e segnali.
+
+Fra una clonazione e l'altra, e fra una battuta e l'altra, si ricontrollano l'approvazione
+(C7, N2: un'approvazione ritirata con `script_approve.py --revoke`, un cambio di cast o un
+ripristino ferma la produzione con exit 1 `ApprovalRequired` e `done`/`total`/`missing`)
+e le revoche del consenso (anche quelle tenute nel registro). I `warnings` del JSON finale
+e gli eventi non contengono percorsi del server (C7, N3).
 
 Esempio reale (rilancio con tutto in cache):
 
@@ -820,7 +907,7 @@ un'intro, voci già clonate):
 
 | `evento` | Campi | Uso nello schermo "Generazione" |
 |---|---|---|
-| `iniziata` | `totale`, `fasi` | Quante battute, quali fasi (`mix` compare solo con musiche) |
+| `iniziata` | `totale`, `fasi` | Quante battute, quali fasi (`mix` compare solo con musiche: C7, N14). Si scrive dopo la validazione delle musiche |
 | `fase_iniziata` / `fase_finita` | `fase` (+ `riusate`, `clonate` alla fine di `preparazione_voci`) | Pronta / In corso / In attesa; "1 riusata · 2 clonate" |
 | `voce` | `speaker`, `azione` (`riusata`, `clonata`) | Dettaglio della preparazione voci |
 | `battuta` | `n`, `totale`, `speaker`, `cached`, `eta_seconds` | "[n] di [totale] · ~[m] min rimanenti" (`eta_seconds` è `null` finché non c'è una misura) |
@@ -832,8 +919,16 @@ un'intro, voci già clonate):
 Il file degli eventi si apre solo dopo che il lock è stato preso: un secondo lancio
 respinto con `RunBusy` non lo tocca. **Revoca a produzione in corso**: il consenso si
 ricontrolla fra una battuta e l'altra; se una voce viene revocata la produzione si ferma
-con exit 3 `ConsentRequired` (con `done`/`total`/`missing`), evento `errore`. Un errore prima di quel punto (approvazione,
-consenso, percorsi) è solo nel JSON su stdout.
+con exit 3 `ConsentRequired` (con `done`/`total`/`missing`), evento `errore`; lo stesso per
+un'approvazione ritirata (exit 1 `ApprovalRequired`). Cosa finisce anche negli eventi
+(C7, N15):
+
+- **solo nel JSON su stdout**: approvazione mancante all'avvio, `RunBusy`, percorsi, e gli
+  errori delle **musiche** (brano sparito, sostituito, ffmpeg assente): vengono prima di
+  `iniziata`, e il file degli eventi resta com'era;
+- **anche nell'evento `errore`** (dopo `iniziata`): consenso e clonazione
+  (`ConsentRequired`, `CloneOutcomeUnknown`, errori del provider), sintesi, montaggio,
+  revoche e ritiri a produzione in corso.
 
 **Interruzione.** SIGTERM (o Ctrl-C) ferma la produzione fra una battuta e l'altra: la
 battuta in corso finisce e si salva, una clonazione già partita finisce. Esito exit 1
@@ -960,12 +1055,35 @@ legata allo sha256 del file: dopo un rimontaggio si ricalcolano da soli (`cached
 - Generazione e scelta tengono il lock di lavoro della run; il gate di approvazione si
   attraversa dentro il lock, sul copione che si sintetizza. Una voce con il consenso
   revocato non si usa nemmeno per un retake o per le anteprime di `--list` (exit 3
-  `ConsentRequired`).
+  `ConsentRequired`). Dal web un retake (`--turn`) vuole anche il consenso **registrato**
+  per la voce, perché è un riuso (C7, N1), e `--by` (N27).
 
 **`mix.py`** rimonta dalla cache, con le musiche scelte o la sola voce (G1); zero sintesi,
 tiene il lock di lavoro (operazione `montaggio`) e controlla l'approvazione dentro il lock,
-sul copione che monta. Con una voce revocata non rimonta (exit 3 `ConsentRequired`). Se mancano segmenti (copione cambiato
-dopo l'ultima produzione) esce con `SegmentsMissing`: serve `produce.py`.
+sul copione che monta. Con una voce revocata non rimonta (exit 3 `ConsentRequired`; vale
+anche per un `voice_id` dell'episodio revocato nel registro, C7 N1). Se mancano segmenti
+(copione cambiato dopo l'ultima produzione) esce con `SegmentsMissing`: serve `produce.py`.
+
+Esempio reale di `mix.py` dal web (C7, N17: `output` e `musiche_usate_file` relativi;
+`file_ui` è lo stesso percorso relativo, presente anche in locale dove `output` resta
+assoluto):
+
+```json
+{
+  "ok": true, "run": "2026-10-07_21-54_con-musica",
+  "output": "output/2026-10-07_21-54_con-musica/con-musica.mp3", "file": "con-musica.mp3",
+  "file_ui": "output/2026-10-07_21-54_con-musica/con-musica.mp3",
+  "format": "mp3", "duration_seconds": 8.2, "duration_label": "0m 08s",
+  "with_music": true, "tts_calls": 0, "warnings": [],
+  "voice_offset_seconds": 1.3, "voice_duration_seconds": 6.92,
+  "musiche_usate_file": "output/2026-10-07_21-54_con-musica/musiche_usate.json",
+  "approval_gate": "passed", "approved_version": 1, "approved_at": "2026-10-07T21:54:37"
+}
+```
+
+`warnings` comprende l'avviso "il copione era stato scritto per un intro diverso" quando
+l'intro o l'outro **con parlato** è cambiata (o è stata tolta) dopo la stesura del
+copione: non blocca. I `warnings` non contengono percorsi del server (C7, N3).
 
 | exit | Comandi del passo 7 |
 |---|---|
@@ -1060,6 +1178,9 @@ Esempio reale (una riga):
 | Elenco | `voices_list.py [--filter clonate\|da_clonare\|consenso_da_confermare] [--search T]` | no | no |
 | Nuova voce | *adattatore*: salva la registrazione in `voci_disponibili/`, poi `voice_meta.py --name VOCE --spoken-name "Nome Cognome" --consent --expect-sha256 H --by U` | no | no |
 | Registra il consenso | `voice_meta.py --name VOCE --consent --expect-sha256 H --by U` | no | no |
+| Revoca il consenso | `voice_meta.py --name VOCE --revoke-consent --by U` (prima di cancellare i file: vedi "Revoche nel registro", passo 5) | no | no |
+| Ascolta il campione | *adattatore*: serve il file della voce (vedi "Download") | no | no |
+| Menu "⋯" di una voce | Rinomina il nome pronunciato (`voice_meta.py --spoken-name`), Revoca il consenso; Sostituisci e Elimina sono dell'adattatore (vedi "Caricamenti" e "Non supportato") | no | no |
 
 Esempio reale (una voce; omessi `path`, `voice_id`, `cache_reason`, che restano per il subagent):
 
@@ -1067,8 +1188,9 @@ Esempio reale (una voce; omessi `path`, `voice_id`, `cache_reason`, che restano 
 {"name": "Voce Fabio", "spoken_name": "Fabio Verdi", "name_complete": true, "nome_pronunciato": "Fabio Verdi",
  "nome_confermato": true, "file": "Voce Fabio.wav", "extension": ".wav", "size_mb": 0.13,
  "durata_campione_seconds": 1.5, "cached": false, "stato": "Da clonare", "clonata_il": null,
+ "caricata_il": "2026-10-07T11:19:02",
  "consenso": {"stato": "mancante", "audio_sha256": "sha256:d83f…350f", "da": null, "il": null,
-              "revocato_da": null, "revocato_il": null},
+              "revocato_da": null, "revocato_il": null, "revoca_nel_registro": false, "da_confermare": false},
  "usata_in": 0, "episodi": []}
 ```
 
@@ -1081,6 +1203,15 @@ Esempio reale (una voce; omessi `path`, `voice_id`, `cache_reason`, che restano 
 - Con `--spoken-name` e `--consent` insieme, un nome incompleto ferma tutto prima del
   consenso. Nome e `--by`: al massimo 100 caratteri.
 - Una voce con i metadati rotti compare con `errore` (`stato: "Illeggibile"`). La voce si clona solo alla prima produzione che la usa, dopo la stima.
+- `caricata_il` (C7, N24): data del file della registrazione. È la "registrata il" che
+  `Stati` mostra accanto ai candidati di un `AmbiguousName`: i candidati in `details`
+  sono nomi, la UI prende la data da questo elenco.
+- `consenso.da_confermare` (C7, N1): la voce è già clonata ma il consenso non è
+  registrato; compare nel filtro `consenso_da_confermare` e si conferma una volta con
+  "Registra il consenso". `revoca_nel_registro`: la revoca è tenuta nel registro delle
+  voci (anche se il `.json` accanto all'audio non c'è più).
+- Un **link simbolico** nella cartella delle voci non è una voce: finisce fra i file
+  scartati (`rejected`) e non si può usare (C7, N4). Lo stesso vale per i brani.
 
 ## Libreria Musiche
 
@@ -1135,7 +1266,8 @@ retake, valuta, lezioni, cartelle}}`. Sola lettura, solo una **whitelist** di ch
 - Testo di una lezione: al massimo 400 caratteri, nessuna riga che inizi con `#` o `---`;
   `lezioni.md` al massimo 4000 caratteri (`LessonsError`, nulla scritto).
 - `--accept` può dare exit 3 `needs_user_input` (serve togliere una lezione: si richiama con
-  `--remove-id`).
+  `--remove-id`). I candidati sono in `details` (C7, N25):
+  `{"campo": "remove_id", "lezione": "L2", "candidates": [{"id": "L1", "motivo": "…", "testo": "…"}]}`.
 - Gli errori dell'API in `--propose` hanno gli stessi `error_type` della scrittura del
   copione (§3, "Errori dell'API del modello"): chiave o credito → exit 2, rate limit,
   sovraccarico e rete → exit 1 con `retry_after_seconds`.
@@ -1241,8 +1373,9 @@ Le tre librerie sono cartelle: un caricamento è la scrittura di un file lì den
   --expect-sha256=… --by=…` (lo sha256 è quello che l'utente ha visto, da `voices_list.py`
   o `voice_meta.py`). Durata consigliata 10–30 s: `voices_list.py` la riporta
   (`durata_campione_seconds`), l'adattatore può avvisare.
-- **Cancellazione** (non c'è un comando): una voce si cancella **insieme** al suo `.json`
-  (e sparisce il consenso); un file non si cancella mentre una run che lo usa è
+- **Cancellazione** (non c'è un comando): una voce si cancella **dopo** averne revocato il
+  consenso (`voice_meta.py --revoke-consent`: la revoca resta nel registro, C7 N1), poi
+  **insieme** al suo `.json`; un file non si cancella mentre una run che lo usa è
   `in_corso`. Cancellare un episodio vuol dire cancellare la sua cartella in `output/`,
   solo se `run_status.py` non dice `in_corso`.
 
@@ -1256,6 +1389,13 @@ Le tre librerie sono cartelle: un caricamento è la scrittura di un file lì den
   `output/<run>` del run richiesto, rifiutando `..` e link simbolici.
 - Un documento della libreria si serve per **nome** (uno di `documents_list.py`), risolto
   dentro `documenti/`: niente nomi con il punto iniziale, niente link simbolici.
+- **"Ascolta il campione"** di una voce e **"Ascolta l'anteprima"** di un brano (C7, N21):
+  si servono per **nome di file**: `file` di `voices_list.py`, oppure `name` + `extension`
+  di un brano di `music_list.py` nella sua categoria, risolto dentro la cartella della
+  libreria (`cartelle.voci`, `cartelle.musiche/<categoria>` di `settings_show.py`):
+  niente `..`, separatori, punto iniziale o link simbolici (le librerie li scartano già).
+  Solo ai utenti autenticati: una registrazione di voce è un dato personale. I `.json`
+  accanto ai file (metadati, consenso) non si servono.
 
 ## Autorizzazioni
 
@@ -1299,6 +1439,15 @@ che li chiede e dopo che l'utente ha risposto, mai d'ufficio.
 | Consenso per singolo episodio | passo 5 | il consenso vale per la voce e per la sua registrazione (D11) |
 | Modificare le impostazioni | Impostazioni | `config.yaml` è dell'amministratore; lo schermo è in sola lettura |
 | Rinominare il file dell'episodio cambiando il titolo | passo 7 | il nome resta quello del primo montaggio (G7), così i link non si rompono |
-| Cancellare episodi, documenti, voci, brani con un comando | menu "⋯" delle librerie | non c'è un comando: se l'adattatore lo fa, regole in "Caricamenti" |
+| Cancellare episodi, documenti, voci, brani con un comando | menu "⋯" delle librerie e dell'Archivio | (C7, N26) è un'operazione **distruttiva su dati condivisi** fra utenti ed episodi: un documento, una voce o un brano possono essere usati da run di altri utenti (l'Archivio ne mostra l'uso), e cancellarli rompe rimontaggi e retake di quegli episodi. Decidere **chi** può cancellare e tenerne traccia richiede l'identità dell'utente, che i comandi non hanno (vedi "Autorizzazioni"). Se l'adattatore la offre, segue le regole di "Caricamenti" (voce: prima la revoca, poi i file; mai durante `in_corso`) |
 | Pronuncia diversa come retake | passo 7 | si corregge il testo ("Cosa dice"), con una nuova approvazione |
+
+**Cosa c'è nei menu "⋯"** (C7, N26; il wireframe mostra solo il simbolo):
+
+| Menu | Voci con un comando | Voci a carico dell'adattatore |
+|---|---|---|
+| Documento (libreria Documenti) | — (Anteprima e "Crea episodio" sono già fuori dal menu: `doc_extract.py`, `run_init.py --document`) | Sostituisci file (regole in "Caricamenti"), Elimina (vedi sopra) |
+| Voce (libreria Voci) | Nome da pronunciare (`voice_meta.py --spoken-name`), Registra / Revoca il consenso (`voice_meta.py --consent` / `--revoke-consent`) | Sostituisci registrazione (il consenso diventa `superato`), Elimina (dopo la revoca) |
+| Brano (libreria Musiche) | Licenza, parlato, trascrizione (`music_meta.py`) | Sostituisci file, Elimina |
+| Episodio (Archivio) | Riprendi / Ascolta (`run_status.py` → `azione`, `passo`) | Scarica (vedi "Download"), Elimina (vedi sopra) |
 

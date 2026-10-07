@@ -166,7 +166,16 @@ def _do_accept(lessons_config: dict, lesson_id: str, text_override: str | None, 
     except lessons_mod.NeedsRemoval as exc:
         candidati = "; ".join(f"{c['id']} ({c['motivo']}): {c['testo']}" for c in exc.candidates)
         note(f"{exc} Candidati: {candidati or 'nessuno'}.")
-        raise NeedsUserInput(f"{exc} Candidati: {candidati or 'nessuno'}.") from exc
+        # I candidati anche in `details`, come ogni altro esito 3: la UI li
+        # mostra come scelta, senza leggere il testo (revisione finale, N25).
+        raise NeedsUserInput(
+            f"{exc} Candidati: {candidati or 'nessuno'}.",
+            details={
+                "campo": "remove_id",
+                "lezione": lesson_id,
+                "candidates": [{"id": c["id"], "motivo": c["motivo"], "testo": c["testo"]} for c in exc.candidates],
+            },
+        ) from exc
 
     note(f"Lezione {lesson_id} attiva in {result['lezioni_md']}.")
     if result.get("rimossa"):

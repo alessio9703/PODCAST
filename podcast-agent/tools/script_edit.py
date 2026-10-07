@@ -19,7 +19,7 @@ from __future__ import annotations
 
 import argparse
 
-from _common import add_config_arg, bootstrap, emit, note, parse_args, run_dir_arg, run_tool  # noqa: E402
+from _common import add_config_arg, bootstrap, emit, note, parse_args, require_by_in_web, run_dir_arg, run_tool  # noqa: E402
 from src.script_editing import edit_turn  # noqa: E402
 from src.script_view import script_payload  # noqa: E402
 
@@ -33,6 +33,7 @@ def main() -> None:
     parser.add_argument("--by", default=None, help="Chi fa la modifica")
     add_config_arg(parser)
     args = parse_args(parser)
+    require_by_in_web(args.by, "la modifica di una battuta")
 
     config = bootstrap(args)
     run_dir = run_dir_arg(args.run_dir, config)

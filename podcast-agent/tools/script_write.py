@@ -32,7 +32,7 @@ from __future__ import annotations
 import argparse
 from pathlib import Path
 
-from _common import add_config_arg, add_trusted_paths_arg, bootstrap, documents_confined, emit, file_arg, note, parse_args, run_dir_arg, run_tool  # noqa: E402
+from _common import add_config_arg, add_trusted_paths_arg, bootstrap, documents_confined, emit, file_arg, note, parse_args, require_by_in_web, run_dir_arg, run_tool  # noqa: E402
 from src.episode_config import EXTRACTED_TEXT_FILENAME, EpisodeConfig  # noqa: E402
 from src.pdf_reader import Document, DocumentTooLarge, extract_text  # noqa: E402
 from src.script_authoring import Cast, write_draft, writer_from_config  # noqa: E402
@@ -142,8 +142,17 @@ def main() -> None:
     parser.add_argument("--by", default=None, help="Chi ha chiesto la stesura (per l'elenco versioni)")
     add_trusted_paths_arg(parser)
     add_config_arg(parser)
-    args = parse_args(parser, web_forbidden=("--document",))
+    # Dal web il cast arriva solo da episodio.json (passo 2, con i suoi
+    # controlli: voci risolte, nome e cognome, formati ammessi da D4), mai
+    # dalla riga di comando (revisione finale, N6).
+    args = parse_args(
+        parser,
+        web_forbidden=(
+            "--document", "--speakers", "--participant", "--presenter", "--interviewer", "--format", "--target-minutes",
+        ),
+    )
 
+    require_by_in_web(args.by, "la stesura del copione")
     config = bootstrap(args)
     run_dir = run_dir_arg(args.run_dir, config)
 

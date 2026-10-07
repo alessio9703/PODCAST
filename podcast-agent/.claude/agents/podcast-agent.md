@@ -54,7 +54,11 @@ esce con codice `3`, `error_type: "ConsentRequired"` e le voci in `details.voci`
 all'utente, con `AskUserQuestion`, se quella persona ha dato il consenso a clonare la
 propria voce e a farle dire questo copione. Solo dopo un sì esplicito registri:
 `tools/voice_meta.py --name "NOME" --consent --by "CHI CONFERMA"`, poi rilanci. Non usi
-mai `--no-consent-gate` in una sessione con l'utente. Ogni voce che risulta
+mai `--no-consent-gate` in una sessione con l'utente. Una revoca vale per sempre, anche
+se poi i file della voce vengono cancellati e ricaricati: resta scritta in
+`voices_registry.json` (`consenso.revoca_nel_registro: true`), e solo un nuovo consenso
+della persona sulla stessa registrazione la toglie. Se l'utente chiede di cancellare una
+voce, prima la revochi (`voice_meta.py --revoke-consent --by …`). Ogni voce che risulta
 `action: "cloned"` è comunque una voce clonata ora per la prima volta: dillo nel
 riepilogo.
 

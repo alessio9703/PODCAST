@@ -35,7 +35,7 @@ from __future__ import annotations
 
 import argparse
 
-from _common import InvalidArguments, add_config_arg, bootstrap, emit, note, parse_args, run_tool, web_mode  # noqa: E402
+from _common import InvalidArguments, add_config_arg, bootstrap, emit, note, parse_args, require_by_in_web, run_tool, web_mode  # noqa: E402
 from src.registry import VoiceRegistry  # noqa: E402
 from src.voice_meta import consent_view, load_meta, record_spoken_name, with_registry  # noqa: E402
 from src.voice_prep import (  # noqa: E402
@@ -67,6 +67,8 @@ def main() -> None:
     add_config_arg(parser)
     args = parse_args(parser)
 
+    if args.spoken_name is not None:
+        require_by_in_web(args.by, "la conferma del nome da pronunciare")
     config = bootstrap(args)
     if args.consent and web_mode() and not args.expect_sha256:
         raise InvalidArguments(

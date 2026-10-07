@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import json
 import unicodedata
+from datetime import datetime
 from pathlib import Path
 from typing import Any
 
@@ -122,6 +123,9 @@ def _voice_row(voice: Any, config: Any, registry: VoiceRegistry, usage: dict, ca
         "cache_reason": reason,
         "stato": "Già clonata" if voice_id else "Da clonare",
         "clonata_il": entry.get("cloned_at") if voice_id else None,
+        # Quando e' stata caricata la registrazione (data del file): la UI la
+        # mostra accanto ai candidati di un nome ambiguo (Stati, N24).
+        "caricata_il": datetime.fromtimestamp(voice.path.stat().st_mtime).replace(microsecond=0).isoformat(),
         "consenso": consent,
         "usata_in": len(runs),
         "episodi": runs,

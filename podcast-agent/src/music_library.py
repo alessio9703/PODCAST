@@ -163,7 +163,14 @@ class MusicLibrary:
             category_dir = self.dir / category
             if category_dir.is_dir():
                 for entry in sorted(category_dir.iterdir()):
-                    if not entry.is_file() or entry.name.startswith("."):
+                    if entry.name.startswith("."):
+                        continue
+                    if entry.is_symlink():
+                        # Come nella libreria Voci: un link non si segue,
+                        # finisce fra i file scartati (revisione finale, N4).
+                        rejected.append(entry)
+                        continue
+                    if not entry.is_file():
                         continue
                     if entry.suffix.lower() in (".json", ".lock", ".tmp"):
                         continue  # metadati accanto al brano (e loro lock), non un brano

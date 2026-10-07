@@ -154,10 +154,15 @@ def parse_args(
     voices_prepare.py: le voci le prepara produce.py, legato al copione
     approvato).
 
-    Il controllo guarda i valori GIA' interpretati da argparse e non il testo
-    della riga di comando: cosi' valgono anche le abbreviazioni (`--trusted`,
-    `--conf=x`) e la forma `--opzione=valore`. Un argomento conta come usato
-    se il suo valore e' diverso dal default.
+    Il controllo si fa due volte:
+      - PRIMA di argparse, sul testo della riga di comando (revisione finale,
+        N19): un argomento vietato o un tool non ammesso danno
+        NotAllowedInWebMode anche se mancano argomenti obbligatori, invece di
+        un InvalidArguments che dipende dall'ordine dei controlli. Valgono il
+        nome esatto, la forma `--opzione=valore` e le abbreviazioni delle
+        opzioni del tool (`--trusted`);
+      - DOPO, sui valori gia' interpretati da argparse (un argomento conta come
+        usato se il suo valore e' diverso dal default): la rete di sicurezza.
     """
     def _error(message: str) -> None:
         raise InvalidArguments(
@@ -167,6 +172,8 @@ def parse_args(
         )
 
     parser.error = _error  # type: ignore[method-assign]
+    if web_mode():
+        _web_precheck(parser, set(WEB_FORBIDDEN_ARGS) | set(web_forbidden), web_allowed)
     args = parser.parse_args()
     if web_mode():
         forbidden = set(WEB_FORBIDDEN_ARGS) | set(web_forbidden)
@@ -190,6 +197,51 @@ def parse_args(
             )
     args._web_checked = True  # noqa: SLF001 - vedi bootstrap()
     return args
+
+
+def _web_precheck(parser: argparse.ArgumentParser, forbidden: set[str], web_allowed: bool) -> None:
+    """Il controllo della modalita' web sul testo della riga di comando (vedi parse_args)."""
+    defined = {name for action in parser._actions for name in action.option_strings if name.startswith("--")}  # noqa: SLF001
+    used: list[str] = []
+    for token in sys.argv[1:]:
+        if token == "--":
+            break
+        if not token.startswith("--"):
+            continue
+        name = token.split("=", 1)[0]
+        if name in defined or name in forbidden:
+            hit = name if name in forbidden else None
+        else:
+            # Abbreviazione: vietata se puo' indicare un'opzione vietata.
+            hit = next((d for d in sorted(defined) if d.startswith(name) and d in forbidden), None)
+        if hit and hit not in used:
+            used.append(hit)
+    if used:
+        raise NotAllowedInWebMode(
+            "Argomenti riservati all'uso locale, non ammessi dall'interfaccia web: " + ", ".join(used) + ".",
+            details={"argomenti": used},
+        )
+    if not web_allowed:
+        command = Path(sys.argv[0]).name
+        raise NotAllowedInWebMode(
+            f"{command} non si usa dall'interfaccia web.",
+            details={"argomenti": [], "comando": command},
+        )
+
+
+def require_by_in_web(by: str | None, what: str) -> None:
+    """Dall'interfaccia le azioni che lasciano una firma vogliono --by.
+
+    Approvazioni, ritiri, ripristini, modifiche, stesure e retake registrano
+    chi li ha fatti ("Approvato da ..."): l'adattatore sa sempre chi e'
+    l'utente collegato, quindi un --by mancante e' un suo errore
+    (InvalidArguments, `details.campo = "by"`). Revisione finale, N27.
+    """
+    if web_mode() and not (by and by.strip()):
+        raise InvalidArguments(
+            f"Dall'interfaccia {what} richiede --by: chi la fa (l'utente collegato).",
+            details={"campo": "by", "messaggio": "manca --by"},
+        )
 
 
 def bootstrap(args: argparse.Namespace) -> Config:
@@ -360,6 +412,7 @@ __all__ = [
     "INTERRUPTED",
     "add_config_arg",
     "WEB_MODE_ENV",
+    "require_by_in_web",
     "WEB_FORBIDDEN_ARGS",
     "NotAllowedInWebMode",
     "InvalidArguments",

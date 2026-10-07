@@ -21,13 +21,15 @@ config.yaml). In entrambi i casi serve una nuova produzione.
 from __future__ import annotations
 
 import argparse
+from pathlib import Path
 
 from _approval import add_gate_args, enforce  # noqa: E402
-from _common import add_config_arg, bootstrap, emit, note, parse_args, run_dir_arg, run_tool  # noqa: E402
+from _common import add_config_arg, bootstrap, emit, note, parse_args, run_dir_arg, run_tool, web_mode  # noqa: E402
 from src.audio_assembler import AudioAssembler  # noqa: E402
 from src.errors import DomainError  # noqa: E402
 from src.music_mixer import preflight  # noqa: E402
 from src.production import assemble_episode, duration_label, ui_path  # noqa: E402
+from src.redaction import redact  # noqa: E402
 from src.run_lock import work_lock  # noqa: E402
 from src.segment_cache import RunCache  # noqa: E402
 from src.voice_prep import check_not_revoked  # noqa: E402
@@ -100,22 +102,28 @@ def main() -> None:
     for warning in result.warnings:
         note(f"ATTENZIONE: {warning}")
 
-    emit(
-        {
-            "run": run_dir.name,
-            "output": str(result.output_path),
-            "file": result.output_path.name,
-            "file_ui": ui_path(result.output_path, config),
-            "format": result.output_format,
-            "duration_seconds": round(result.duration_seconds, 1) if result.duration_seconds else None,
-            "duration_label": duration_label(result.duration_seconds),
-            "with_music": bool(choice is not None and choice.any()),
-            "tts_calls": 0,
-            "warnings": result.warnings,
-            **result.music_payload,
-            **gate,
-        }
-    )
+    payload = {
+        "run": run_dir.name,
+        "output": str(result.output_path),
+        "file": result.output_path.name,
+        "file_ui": ui_path(result.output_path, config),
+        "format": result.output_format,
+        "duration_seconds": round(result.duration_seconds, 1) if result.duration_seconds else None,
+        "duration_label": duration_label(result.duration_seconds),
+        "with_music": bool(choice is not None and choice.any()),
+        "tts_calls": 0,
+        "warnings": redact(result.warnings),
+        **result.music_payload,
+        **gate,
+    }
+    if web_mode():
+        # Dall'interfaccia, come produce.py: percorsi relativi (output/<run>/...),
+        # mai la struttura delle cartelle del server (revisione finale, N17).
+        # In locale (subagent) restano assoluti.
+        payload["output"] = payload["file_ui"]
+        if payload.get("musiche_usate_file"):
+            payload["musiche_usate_file"] = ui_path(Path(payload["musiche_usate_file"]), config)
+    emit(payload)
 
 
 if __name__ == "__main__":
