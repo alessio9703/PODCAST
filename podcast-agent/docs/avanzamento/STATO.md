@@ -28,10 +28,11 @@ resoconti accanto a questo file:
 | `4d8ede8` | sicurezza C2: ALTA-1 corretta (consenso ricontrollato sui byte clonati) |
 | `9006245` | sicurezza C2: medie e basse corrette |
 | `8621966` | **C3** episodio: `_montaggio.json`, `episode_info`, `waveform`, retake con indicazioni, `mix` senza musiche |
-| (questo) | rapporto di sicurezza C3 |
+| `711c34b` | rapporto di sicurezza C3 |
+| (questo) | sicurezza C3: medie e basse corrette |
 
 Test all'ultimo commit, sempre con `.venv/bin/python`: smoke 68, tools_cli 183 (+2
-saltati, servono `ANTHROPIC_API_KEY`), music 73, lessons 80, web_integration 488.
+saltati, servono `ANTHROPIC_API_KEY`), music 73, lessons 80, web_integration 499.
 
 ## 2. Fasi
 
@@ -42,7 +43,7 @@ saltati, servono `ANTHROPIC_API_KEY`), music 73, lessons 80, web_integration 488
 | Sicurezza C0+C1 | Revisione, rapporto, correzione delle alte | **fatta**: alte, medie e basse corrette |
 | Correzioni + modalità web | MEDIA-1, BASSA-1/2/3, `PODCAST_AGENT_WEB=1` | **fatta**; revisione del diff: 0 alte, 2 medie e 4 basse, **tutte corrette** |
 | C2 | Produzione: passi 5 (stima e consenso) e 6 (generazione) | **fatta**; revisione: 1 alta, 4 medie, 5 basse, **tutte corrette** |
-| C3 | Episodio e correzioni: passo 7 | **fatta**; revisione (con le correzioni di C2): 0 alte, 2 medie e 6 basse **in attesa di decisione** |
+| C3 | Episodio e correzioni: passo 7 | **fatta**; revisione (con le correzioni di C2): 0 alte, 2 medie, 6 basse, **tutte corrette** |
 | C4 | Archivio e librerie (Documenti, Voci, Musiche), Impostazioni, verifica di Lezioni e Diagnostica | da fare |
 | C5 | Contratto completo + README/LEGENDA + riepilogo finale | da fare (il contratto è già aggiornato per C0–C1) |
 | C6 | Allineamento di `run.py` a `src/music_context.py`, fase finale dedicata | da fare |
@@ -268,13 +269,7 @@ musiche → copione → modifica → approva → stima → consenso → produce 
 
 ## 4. Richieste ricevute e non ancora completate
 
-1. **Decidere medie e basse della revisione C3** (`C3-sicurezza.md`): MEDIA-1 `mix.py`
-   (e `retake.py`) controllano l'approvazione prima del lock su una lettura diversa da
-   quella montata; MEDIA-2 `mix.py` e `retake --list` usano una voce revocata; BASSA-1…6
-   (percorsi assoluti in retake ed `episode_info`, file interni elencati, nome del file
-   da `_montaggio.json` non validato, cache della forma d'onda senza limite, anteprime
-   legate al numero di battuta).
-2. **OK per C4.**
+1. **OK per C4.**
 
 ## 5. Annotazioni per le fasi successive e per la fase finale
 

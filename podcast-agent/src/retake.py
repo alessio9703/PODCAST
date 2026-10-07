@@ -18,6 +18,7 @@ segnala gli sbalzi di livello; non decide quale sia il take buono, perche'
 
 from __future__ import annotations
 
+import hashlib
 import json
 import math
 import re
@@ -361,9 +362,14 @@ def _build_preview(
         if following.is_file():
             pieces.append(following)
 
-    target = (
-        cache.segments_dir / PREVIEWS_DIRNAME / f"turno-{numero:03d}_t{take}.wav"
-    )
+    # Il nome dipende dai segmenti montati (chiave del take e battute vicine):
+    # dopo una correzione del testo, o un altro take scelto accanto,
+    # l'anteprima vecchia non viene riusata per sbaglio (revisione di
+    # sicurezza C3, BASSA-6). Se c'e' gia', e' quella giusta.
+    digest = hashlib.sha256("|".join(p.name for p in pieces).encode("utf-8")).hexdigest()[:12]
+    target = cache.segments_dir / PREVIEWS_DIRNAME / f"turno-{numero:03d}_t{take}_{digest}.wav"
+    if target.is_file():
+        return target
     try:
         return assembler.preview(pieces, target)
     except AssemblyError:
@@ -383,9 +389,7 @@ def list_takes(cache: RunCache, assembler: AudioAssembler, numero: int) -> list[
     info = load_take_info(cache.segments_dir).get(cache.key(numero), {})
     out = []
     for take in cache.takes(numero):
-        preview = cache.segments_dir / PREVIEWS_DIRNAME / f"turno-{numero:03d}_t{take}.wav"
-        if not preview.is_file():
-            preview = _build_preview(cache, assembler, numero, take)
+        preview = _build_preview(cache, assembler, numero, take)
         meta = info.get(str(take)) or {}
         out.append(
             {

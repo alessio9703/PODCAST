@@ -40,9 +40,13 @@ from .script_view import _add_presenter_name, cast_view, session_cast, structure
 
 #: File della run che non sono "file dell'episodio" per l'utente.
 _HIDDEN_SUFFIXES = (".lock", ".tmp")
-#: _lavoro.json contiene il pid del processo che lavora sulla run: resta sul
-#: server (revisione di sicurezza C0+C1, BASSA-2).
-_HIDDEN_NAMES = ("_lavoro.json",)
+#: File che restano sul server: _lavoro.json ha il pid del processo (C0+C1,
+#: BASSA-2); gli altri hanno percorsi assoluti delle registrazioni o i
+#: voice_id del provider (C3, BASSA-3).
+_HIDDEN_NAMES = ("_lavoro.json", "_audio_paths.json", "voci.json", "voci_usate.json")
+#: Cache della forma d'onda (C3, BASSA-5) e riferimenti a percorsi del server.
+_HIDDEN_PREFIXES = ("_forma_onda_",)
+_HIDDEN_NAME_SUFFIXES = (".percorso.txt",)
 
 
 def final_file(run_dir: Path, script: Any) -> Path | None:
@@ -107,9 +111,11 @@ def _run_files(run_dir: Path, config: Any) -> list[dict[str, Any]]:
     files = []
     for entry in sorted(Path(run_dir).iterdir()):
         if (
-            not entry.is_file()
+            entry.is_symlink()
+            or not entry.is_file()
             or entry.name.startswith(".")
-            or entry.name.endswith(_HIDDEN_SUFFIXES)
+            or entry.name.endswith(_HIDDEN_SUFFIXES + _HIDDEN_NAME_SUFFIXES)
+            or entry.name.startswith(_HIDDEN_PREFIXES)
             or entry.name in _HIDDEN_NAMES
         ):
             continue
@@ -152,6 +158,10 @@ def episode_info(run_dir: Path, config: Any) -> dict[str, Any]:
         state = "non_prodotto"
     else:
         reasons = _staleness(run_dir, record, script) if record else []
+        # Un file coerente con un copione NON approvato non e' "pronto"
+        # (revisione di sicurezza C3, MEDIA-1).
+        if session is not None and session.approval_problem(script.to_dict()) is not None:
+            reasons.append("non_approvato")
         state = "da_aggiornare" if reasons else "pronto"
 
     # -- chi parla ------------------------------------------------------------
@@ -192,7 +202,15 @@ def episode_info(run_dir: Path, config: Any) -> dict[str, Any]:
             timeline = attach_texts(load_timeline(run_dir), [t["testo"] for t in script.turni])
         except TimelineError as exc:
             timeline = None
-            timing_note = str(exc).split("\n")[0]
+            timing_note = {
+                "codice": exc.code,
+                "messaggio": (
+                    "Tempi non disponibili: il file e' stato montato da un copione diverso. "
+                    "Produci di nuovo l'episodio."
+                    if exc.code == "timeline_diversa"
+                    else "Tempi non disponibili: rimonta l'episodio."
+                ),
+            }
     else:
         timeline = None
     for turn, timed in zip(turns, timeline or [{} for _ in turns]):

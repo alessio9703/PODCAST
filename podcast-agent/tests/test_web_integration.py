@@ -1931,6 +1931,65 @@ def tts_texts(root: Path) -> list[str]:
     return [json.loads(line)["text"] for line in log.read_text(encoding="utf-8").splitlines()] if log.is_file() else []
 
 
+def test_c3_fixes(root: Path, config: Path, run_dir: str) -> None:
+    """Revisione di sicurezza C3: MEDIA-1, MEDIA-2, BASSA-1..6."""
+    print("\n[sicurezza C3] voce revocata: niente rimontaggio, niente anteprime")
+    tool("voice_meta.py", "--name", "Giulia Bianchi", "--revoke-consent", "--by", "Utente B", config=config)
+    before = (Path(run_dir) / "_montaggio.json").read_text(encoding="utf-8")
+    code, out, _ = tool("mix.py", "--run-dir", run_dir, config=config)
+    check("mix.py con una voce revocata -> exit 3 ConsentRequired, file non rimontato", code == 3 and out.get("error_type") == "ConsentRequired" and (Path(run_dir) / "_montaggio.json").read_text(encoding="utf-8") == before, str(out)[:300])
+    code, out, _ = tool("retake.py", "--run-dir", run_dir, "--list", "3", config=config)
+    check("retake --list con una voce vicina revocata -> exit 3", code == 3 and out.get("error_type") == "ConsentRequired", str(out)[:300])
+    tool("voice_meta.py", "--name", "Giulia Bianchi", "--consent", "--by", "Utente A", config=config)
+
+    print("\n[sicurezza C3] percorsi relativi nel JSON dei retake")
+    code, out, _ = tool("retake.py", "--run-dir", run_dir, "--list", "3", config=config)
+    check("retake --list: nessun percorso assoluto", code == 0 and str(root) not in json.dumps(out) and all(t["file"].startswith("output/") for t in out["take_list"]), json.dumps(out)[:300])
+
+    print("\n[sicurezza C3] anteprime legate ai segmenti montati")
+    names_before = {t["take"]: Path(t["preview"]).name for t in tool("retake.py", "--run-dir", run_dir, "--list", "2", config=config)[1]["take_list"]}
+    tool("retake.py", "--run-dir", run_dir, "--choose", "3=2", config=config)
+    names_after = {t["take"]: Path(t["preview"]).name for t in tool("retake.py", "--run-dir", run_dir, "--list", "2", config=config)[1]["take_list"]}
+    check("cambiato il take della battuta dopo: l'anteprima della 2 e' un'altra", names_before[1] != names_after[1] and names_after[1].startswith("turno-002_t1_"), str((names_before, names_after)))
+    tool("retake.py", "--run-dir", run_dir, "--choose", "3=3", config=config)
+
+    print("\n[sicurezza C3] approvazione e stato")
+    code, out, _ = tool("script_edit.py", "--run-dir", run_dir, "--turn", "1", "--text", "Ciao a tutti, oggi parliamo dei ricavi.", config=config)
+    code, info, _ = tool("episode_info.py", "--run-dir", run_dir, config=config)
+    check("copione modificato e non approvato: motivi con 'non_approvato'", info["stato"] == "da_aggiornare" and "non_approvato" in info["motivi"], str(info["motivi"]))
+    before = (Path(run_dir) / "_montaggio.json").read_text(encoding="utf-8")
+    code, out, _ = tool("mix.py", "--run-dir", Path(run_dir).name, config=config)
+    check("mix.py (con il solo nome della run) su un copione non approvato: rifiutato, niente montaggio", code == 1 and "approv" in out.get("error", "") and (Path(run_dir) / "_montaggio.json").read_text(encoding="utf-8") == before, str(out)[:300])
+    version = tool("script_show.py", "--run-dir", run_dir, config=config)[1]["version"]
+    tool("script_approve.py", "--run-dir", run_dir, "--version", str(version), "--by", "Utente A", config=config)
+    tool("produce.py", "--run-dir", run_dir, config=config)
+
+    print("\n[sicurezza C3] tempi non disponibili e file elencati")
+    timings = Path(run_dir) / "_tempi_turni.json"
+    saved = timings.read_bytes()
+    timings.unlink()
+    code, info, _ = tool("episode_info.py", "--run-dir", run_dir, config=config)
+    check("tempi mancanti: codice e messaggio senza percorsi", info["tempi_non_disponibili"]["codice"] == "timeline_assente" and str(root) not in json.dumps(info) and "synthesize" not in json.dumps(info["tempi_non_disponibili"]), str(info["tempi_non_disponibili"]))
+    timings.write_bytes(saved)
+    secret = root / "segreto-c3.txt"
+    secret.write_text("SEGRETO", encoding="utf-8")
+    (Path(run_dir) / "collegamento.txt").symlink_to(secret)
+    code, info, _ = tool("episode_info.py", "--run-dir", run_dir, config=config)
+    names = {f["nome"] for f in info["file"]}
+    check("file[]: niente voice_id, percorsi del server, cache della forma d'onda, link simbolici", not names & {"_audio_paths.json", "voci.json", "voci_usate.json", "collegamento.txt"} and not any(n.startswith("_forma_onda_") for n in names), str(sorted(names)))
+    (Path(run_dir) / "collegamento.txt").unlink()
+
+    print("\n[sicurezza C3] nome del file finale validato")
+    montage_file = Path(run_dir) / "_montaggio.json"
+    record = json.loads(montage_file.read_text(encoding="utf-8"))
+    record["file"] = "."
+    montage_file.write_text(json.dumps(record), encoding="utf-8")
+    code, out, err = tool("mix.py", "--run-dir", run_dir, config=config)
+    check("_montaggio.json con 'file': '.' -> il file finale resta dentro la run", code == 0 and not Path(run_dir + ".mp3").exists() and (Path(run_dir) / out["file"]).is_file(), err[-300:] + str(out)[:200])
+    proc = run_python("from src.audio_assembler import slugify; print(slugify('CON'), slugify('Nul'), slugify('Console'))")
+    check("titoli riservati su Windows: suffisso", proc.stdout.split() == ["con-episodio", "nul-episodio", "console"], proc.stdout + proc.stderr)
+
+
 def test_c3() -> None:
     root = Path(tempfile.mkdtemp(prefix="podcast-web-c3-"))
     setup(root)
@@ -1972,7 +2031,9 @@ def test_c3() -> None:
     code, out, _ = tool("waveform.py", "--run-dir", run_dir, "--points", "50", config=config)
     check("seconda richiesta: dalla cache", out["cached"] is True and out["peaks"] == wave_out["peaks"])
     code, out, _ = tool("waveform.py", "--run-dir", run_dir, "--points", "5", config=config)
-    check("punti fuori scala -> exit 1 WaveformError", code == 1 and out.get("error_type") == "WaveformError" and out["details"]["minimo"] == 10, str(out))
+    check("punti fuori scala -> exit 1 WaveformError", code == 1 and out.get("error_type") == "WaveformError" and 50 in out["details"]["ammessi"], str(out))
+    code, out, _ = tool("waveform.py", "--run-dir", run_dir, "--points", "57", config=config)
+    check("solo le risoluzioni previste (niente cache per ogni larghezza)", code == 1 and out.get("error_type") == "WaveformError" and not (Path(run_dir) / "_forma_onda_57.json").exists(), str(out))
     empty = tool("run_init.py", "--title", "Senza file", config=config)[1]["run_dir"]
     (Path(empty) / "conversazione.json").write_text(json.dumps(SCRIPT_C2), encoding="utf-8")
     code, out, _ = tool("waveform.py", "--run-dir", empty, config=config)
@@ -2010,7 +2071,7 @@ def test_c3() -> None:
     code, out, err = tool("retake.py", "--run-dir", run_dir, "--list", "3", config=config)
     takes = out.get("take_list") or []
     check("take originale + 2, etichette del wireframe", code == 0 and [(t["take"], t["label"]) for t in takes] == [(1, "Take originale"), (2, "Take 1"), (3, "Take 2")], err[-300:] + str(takes)[:300])
-    check("anteprima in contesto per ognuno, originale compreso, senza sintesi", all(t["preview"] and Path(t["preview"]).is_file() for t in takes) and len(tts_texts(root)) == calls and out["tts_calls"] == 0)
+    check("anteprima in contesto per ognuno, originale compreso, senza sintesi", all(t["preview"] and (root / t["preview"]).is_file() and t["preview"].startswith("output/") for t in takes) and len(tts_texts(root)) == calls and out["tts_calls"] == 0)
     check("indicazioni registrate per i take nuovi, scelto l'originale", takes[1]["indicazioni"] == ["Più calmo", "Più lento"] and takes[0]["indicazioni"] == [] and takes[0]["scelto"] and not takes[1]["scelto"], str(takes))
     code, out, _ = tool("retake.py", "--run-dir", run_dir, "--list", "3", "--with-music", config=config)
     check("--list --with-music: nessun sottofondo scelto, nessuna anteprima in piu' ma exit 0", code == 0)
@@ -2070,6 +2131,8 @@ def test_c3() -> None:
     tool("script_approve.py", "--run-dir", run_dir, "--version", "2", "--by", "Utente A", config=config)
     code, out, _ = tool("mix.py", "--run-dir", run_dir, config=config)
     check("il nome del file resta quello del primo montaggio", code == 0 and out["file"] == "episodio-c3.mp3", str(out)[:200])
+
+    test_c3_fixes(root, config, run_dir)
 
 
 # ----------------------------------------------------------------------

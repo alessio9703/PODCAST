@@ -472,7 +472,8 @@ def main() -> None:
     )
     check("retake --with-music: exit 0", code == 0, err)
     check("previews_with_music popolato", len(out.get("previews_with_music", [])) == 1, str(out))
-    check("anteprima con musica esiste", Path(out["previews_with_music"][0]).is_file())
+    # percorso relativo alla cartella che contiene output/ (mai assoluto)
+    check("anteprima con musica esiste", (Path(run_dir).parent.parent / out["previews_with_music"][0]).is_file())
     new_take = out["new_takes"][0]
 
     code, out, err = tool("retake.py", "--run-dir", str(run_dir), "--choose", f"1={new_take}", config=config)

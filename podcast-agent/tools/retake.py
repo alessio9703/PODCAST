@@ -35,6 +35,7 @@ from _approval import add_gate_args, enforce  # noqa: E402
 from _common import add_config_arg, bootstrap, emit, note, parse_args, run_dir_arg, run_tool  # noqa: E402
 from src.audio_assembler import AudioAssembler  # noqa: E402
 from src.errors import DomainError  # noqa: E402
+from src.fileio import atomic_output  # noqa: E402
 from src.music_mixer import preflight, render_bed_under  # noqa: E402
 from src.production import ui_path  # noqa: E402
 from src.retake import (  # noqa: E402
@@ -47,7 +48,8 @@ from src.retake import (  # noqa: E402
 )
 from src.run_lock import work_lock  # noqa: E402
 from src.segment_cache import RunCache  # noqa: E402
-from src.voice_prep import check_consent, plan_voices  # noqa: E402
+from src.redaction import redact  # noqa: E402
+from src.voice_prep import check_not_revoked  # noqa: E402
 
 
 def main() -> None:
@@ -87,6 +89,9 @@ def main() -> None:
 
     config = bootstrap(args)
     run_dir = run_dir_arg(args.run_dir, config)
+    # Il gate di approvazione legge args.run_dir: deve essere il percorso gia'
+    # confinato, non il valore ricevuto (che puo' essere il solo nome).
+    args.run_dir = str(run_dir)
     provider = config.build_provider()
     cache = RunCache.load(run_dir, provider)
 
@@ -106,15 +111,16 @@ def main() -> None:
 def _do_list(cache: RunCache, config, args: argparse.Namespace) -> None:
     numero = args.list
     turn = cache.turn(numero)
+    # Le anteprime montano la battuta e le due vicine: nessuna voce revocata
+    # (revisione di sicurezza C3, MEDIA-2).
+    neighbours = range(max(1, numero - 1), min(len(cache.script.turni), numero + 1) + 1)
+    check_not_revoked(config, sorted({cache.turn(n)["speaker"] for n in neighbours}))
     assembler = AudioAssembler.from_config(cache.provider, config.audio)
     takes = list_takes(cache, assembler, numero)
     warnings: list[str] = []
     if args.with_music:
         _add_previews_with_music(cache, config, takes, warnings)
-    for take in takes:
-        take["preview_ui"] = ui_path(Path(take["preview"]), config) if take["preview"] else None
-        if take.get("preview_with_music"):
-            take["preview_with_music_ui"] = ui_path(Path(take["preview_with_music"]), config)
+    _relative_paths(takes, config)
     note(f"Turno {numero} ({turn['speaker']}): take {[t['take'] for t in takes] or 'nessuno'}, scelto {cache.chosen(numero)}")
     emit(
         {
@@ -125,7 +131,7 @@ def _do_list(cache: RunCache, config, args: argparse.Namespace) -> None:
             "chosen_take": cache.chosen(numero),
             "files": {str(t["take"]): t["file"] for t in takes},
             "take_list": takes,
-            "warnings": warnings,
+            "warnings": redact(warnings),
             "tts_calls": 0,
         }
     )
@@ -180,16 +186,15 @@ def _do_generate(cache: RunCache, config, args: argparse.Namespace) -> None:
         emit({**prediction, "dry_run": True, "approval_gate": "not_needed"})
         return
 
-    # Un retake non cambia il copione, quindi l'approvazione esistente resta
-    # valida — ma il gate si attraversa lo stesso: e' un passo che spende.
-    gate = enforce(args)
-
     with work_lock(cache.run_dir, "retake", turno=numero):
+        # Il copione si rilegge dentro il lock e il gate si attraversa su
+        # QUELLO: si sintetizza esattamente il testo verificato (revisione di
+        # sicurezza C3, MEDIA-1). Un retake non cambia il copione, ma spende.
+        cache = RunCache.load(cache.run_dir, cache.provider)
+        gate = enforce(args, cache.script.to_dict())
         # Una voce con il consenso revocato non si usa, nemmeno per un take.
         speaker = cache.turn(numero)["speaker"]
-        plan = plan_voices(config, [speaker])[0]
-        if plan.consent["stato"] == "revocato":
-            check_consent([plan])
+        check_not_revoked(config, [speaker])
 
         assembler = AudioAssembler.from_config(cache.provider, config.audio)
         note(f"Turno {numero} ({speaker}): genero {count} take...")
@@ -202,9 +207,8 @@ def _do_generate(cache: RunCache, config, args: argparse.Namespace) -> None:
         if args.with_music:
             _add_previews_with_music(cache, config, takes, warnings)
 
+    _relative_paths(takes, config)
     previews = [t["preview"] for t in takes if t["preview"]]
-    for take in takes:
-        take["preview_ui"] = ui_path(Path(take["preview"]), config) if take["preview"] else None
     if previews:
         note("Anteprime da far ascoltare all'utente (turno precedente, take, successivo):")
         for path in previews:
@@ -231,10 +235,25 @@ def _do_generate(cache: RunCache, config, args: argparse.Namespace) -> None:
             "cost_usd": prediction["cost_usd"],
             "cost_eur": prediction["cost_eur"],
             "cost_basis": prediction["cost_basis"],
-            "warnings": warnings,
+            "warnings": redact(warnings),
             **gate,
         }
     )
+
+
+def _relative_paths(takes: list[dict], config) -> None:
+    """Percorsi dei take e delle anteprime nella forma output/<run>/...
+
+    Mai assoluti nel JSON (revisione di sicurezza C3, BASSA-1). `preview_ui`
+    resta come sinonimo di `preview`, per il contratto.
+    """
+    for take in takes:
+        for key in ("file", "preview", "preview_with_music"):
+            if take.get(key):
+                take[key] = ui_path(Path(take[key]), config)
+        take["preview_ui"] = take.get("preview")
+        if take.get("preview_with_music"):
+            take["preview_with_music_ui"] = take["preview_with_music"]
 
 
 def _add_previews_with_music(cache: RunCache, config, takes: list[dict], warnings: list[str]) -> None:
@@ -270,7 +289,9 @@ def _build_preview_with_music(preview_wav: Path, sottofondo, config) -> Path:
     target = preview_wav.with_name(preview_wav.stem + "_con_musica.wav")
     with tempfile.TemporaryDirectory(prefix="lil-preview-") as tmp_name:
         out = render_bed_under(preview_wav, sottofondo, rate, channels, config.music, Path(tmp_name))
-        shutil.copy2(out, target)
+        # Atomico: chi serve l'anteprima non la legge mai a meta' (C3, BASSA-6).
+        with atomic_output(target) as partial:
+            shutil.copyfile(out, partial)
     return target
 
 

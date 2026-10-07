@@ -804,7 +804,7 @@ episodio troncato. Ogni esecuzione di ffmpeg ha un limite di 15 minuti.
 | Azione | Comando | Lunga | Costa |
 |---|---|---|---|
 | Intestazione, sezioni, trascrizione, file | `episode_info.py --run-dir R` | no | no |
-| Forma d'onda | `waveform.py --run-dir R --points N` (10–4000) | no (la prima volta qualche secondo) | no |
+| Forma d'onda | `waveform.py --run-dir R --points N` (N fra 50, 100, 200, 400, 800, 1600) | no (la prima volta qualche secondo) | no |
 | Scarica mp3 | *adattatore*: il file in `file_finale.percorso` | — | — |
 | Clic su un punto → battuta | dalla `trascrizione` (`inizio_finale`/`fine_finale`), oppure `turn_at.py --run-dir R --at 4:12` | no | no |
 | "Come è detta": stima | `retake.py --run-dir R --turn N --takes K [--direction "Più calmo" …] --dry-run` | no | no |
@@ -842,7 +842,8 @@ episodio troncato. Ogni esecuzione di ffmpeg ha un limite di 15 minuti.
 ```
 
 - **`stato`** è derivato: `pronto`, `da_aggiornare` (con `motivi`: `copione`, `take`,
-  `musiche`, cioè cosa è cambiato dopo il montaggio), `in_corso` (un'operazione lunga sulla
+  `musiche`, cioè cosa è cambiato dopo il montaggio, e `non_approvato` se il copione
+  attuale non è approvato), `in_corso` (un'operazione lunga sulla
   run: `in_corso.operazione`), `non_prodotto`. `verificabile: false` per le run montate
   prima di C3 (senza `_montaggio.json`): se il file c'è risultano `pronto`.
 - **Intestazione** "Intervista · [mm:ss] · 3 voci · montato il [gg/mm]": `formato`,
@@ -851,9 +852,15 @@ episodio troncato. Ogni esecuzione di ffmpeg ha un limite di 15 minuti.
   numero di battute.
 - **Trascrizione**: `inizio_finale`/`fine_finale` sono i secondi **nel file finale**
   (intro compresa): sono quelli del player. `null` se l'episodio non è prodotto o se i
-  tempi non sono disponibili (`tempi_non_disponibili` dice perché).
-- **File**: `file[]` senza file nascosti, lock e `_lavoro.json`; `interno: true` per i file
-  di lavoro (nome con `_` davanti).
+  tempi non sono disponibili: `tempi_non_disponibili` è allora
+  `{"codice", "messaggio"}` (`timeline_assente`, `timeline_vecchia`,
+  `timeline_illeggibile`: si rimonta con `mix.py`; `timeline_diversa`: si produce di
+  nuovo).
+- **File**: `file[]` senza file nascosti, lock, link simbolici, cache della forma d'onda e
+  file con dati del server (`_lavoro.json`, `_audio_paths.json`, `voci.json`,
+  `voci_usate.json`, `*.percorso.txt`); `interno: true` per i file di lavoro (nome con
+  `_` davanti). **L'adattatore serve per il download solo `file_finale` e i file con
+  `interno: false`**, risolvendo il `percorso` dentro `output/<run>`.
 - Il **nome del file finale** viene dal titolo dell'episodio (`episodio.json`) per le run
   nuove, e resta quello anche se il titolo cambia dopo (G7).
 
@@ -865,7 +872,8 @@ episodio troncato. Ogni esecuzione di ffmpeg ha un limite di 15 minuti.
  "peaks": [0.235, 0.235, 0.0, 0.292, 0.292, 0.296, "…"], "cached": false}
 ```
 
-I picchi (0–1) coprono l'intero file finale. Sono in cache in `_forma_onda_<N>.json`,
+I picchi (0–1) coprono l'intero file finale. Sono ammesse solo poche risoluzioni (50, 100,
+200, 400, 800, 1600): la UI sceglie la più vicina e ridimensiona in pagina. Sono in cache in `_forma_onda_<N>.json`,
 legata allo sha256 del file: dopo un rimontaggio si ricalcolano da soli (`cached: false`).
 
 **Retake** ("Come è detta"): il testo resta quello approvato.
@@ -881,15 +889,22 @@ legata allo sha256 del file: dopo un rimontaggio si ricalcolano da soli (`cached
   conta anche le tag (`chars`, `cost_usd`, `cost_eur`).
 - **Ascolta in contesto**: `--list N` restituisce `take_list[]` con, per ogni take
   (originale compreso), `label` ("Take originale", "Take 1", …), `scelto`,
-  `indicazioni`, `preview_ui` (battuta prima + take + battuta dopo) e, con
-  `--with-music`, `preview_with_music_ui` se la run ha un sottofondo. Nessuna sintesi.
+  `indicazioni`, `preview` (battuta prima + take + battuta dopo; `preview_ui` è lo stesso
+  valore) e, con `--with-music`, `preview_with_music` se la run ha un sottofondo. Nessuna
+  sintesi. Le anteprime dipendono dai segmenti montati: dopo una correzione o un take
+  diverso accanto se ne monta una nuova.
+- Nel JSON di `retake.py` **tutti i percorsi** (`file`, `files`, `preview`, `previews`,
+  `previews_with_music`) sono relativi: `output/<run>/…`.
 - **Usa il take e rimonta**: `--choose N=K` poi `mix.py`. Lo stato passa da
   `da_aggiornare` (`motivi: ["take"]`) a `pronto`.
-- Generazione e scelta tengono il lock di lavoro della run. Una voce con il consenso
-  revocato non si usa nemmeno per un retake (exit 3 `ConsentRequired`).
+- Generazione e scelta tengono il lock di lavoro della run; il gate di approvazione si
+  attraversa dentro il lock, sul copione che si sintetizza. Una voce con il consenso
+  revocato non si usa nemmeno per un retake o per le anteprime di `--list` (exit 3
+  `ConsentRequired`).
 
 **`mix.py`** rimonta dalla cache, con le musiche scelte o la sola voce (G1); zero sintesi,
-tiene il lock di lavoro (operazione `montaggio`). Se mancano segmenti (copione cambiato
+tiene il lock di lavoro (operazione `montaggio`) e controlla l'approvazione dentro il lock,
+sul copione che monta. Con una voce revocata non rimonta (exit 3 `ConsentRequired`). Se mancano segmenti (copione cambiato
 dopo l'ultima produzione) esce con `SegmentsMissing`: serve `produce.py`.
 
 | exit | Comandi del passo 7 |
@@ -897,5 +912,5 @@ dopo l'ultima produzione) esce con `SegmentsMissing`: serve `produce.py`.
 | 0 | fatto |
 | 1 | `WaveformError`, `EpisodeNotProduced`, `UnknownDirection`, `DirectionNeedsTextEdit`, `ConflictingDirections`, `TooManyTakes`, `SegmentsMissing`, `RunBusy`, gate di approvazione (`retake.py`/`mix.py` su un copione non approvato), `ScriptMissing` |
 | 2 | errore del provider durante la sintesi di un take |
-| 3 | `ConsentRequired` (retake con voce revocata), `MusicChangedError` |
+| 3 | `ConsentRequired` (retake, anteprime o rimontaggio con una voce revocata), `MusicChangedError` |
 

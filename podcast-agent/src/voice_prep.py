@@ -234,6 +234,18 @@ def _snapshot(audio_path: Path, data: bytes) -> Iterator[Path]:
             pass
 
 
+def check_not_revoked(config: Any, speakers: list[str]) -> None:
+    """ConsentRequired (exit 3) se una delle voci ha il consenso revocato.
+
+    Per i passi che riusano voci gia' clonate o audio gia' sintetizzato
+    (rimontaggio, retake, anteprime): non spendono, ma un consenso revocato
+    vale anche li' (revisione di sicurezza C3, MEDIA-2).
+    """
+    revoked = [plan for plan in plan_voices(config, list(speakers)) if plan.consent["stato"] == CONSENT_REVOKED]
+    if revoked:
+        check_consent(revoked)
+
+
 def _clone_lock_target(config: Any, name: str) -> Path:
     digest = hashlib.sha256(name.encode("utf-8")).hexdigest()[:16]
     return config.registry_file.parent / f".clonazione-{digest}"
@@ -416,6 +428,7 @@ __all__ = [
     "VoicePlan",
     "VoicePrepResult",
     "check_consent",
+    "check_not_revoked",
     "plan_voices",
     "prepare_voices",
     "resolve_library_voice",

@@ -1241,9 +1241,18 @@ def _slug(value: str) -> str:
     return "".join(keep).strip("-").replace("--", "-") or "speaker"
 
 
+#: Nomi che Windows riserva ai dispositivi, anche con un'estensione ("con.mp3").
+_WINDOWS_RESERVED = {"con", "prn", "aux", "nul", *(f"com{i}" for i in range(1, 10)), *(f"lpt{i}" for i in range(1, 10))}
+
+
 def slugify(value: str, max_length: int = 60) -> str:
-    """Slug riutilizzabile per i nomi delle cartelle di output."""
-    return _slug(value)[:max_length].strip("-") or "episodio"
+    """Slug riutilizzabile per i nomi delle cartelle di output.
+
+    Un titolo come "CON" darebbe un nome riservato su Windows: si aggiunge un
+    suffisso (revisione di sicurezza C3, BASSA-4).
+    """
+    slug = _slug(value)[:max_length].strip("-") or "episodio"
+    return f"{slug}-episodio" if slug in _WINDOWS_RESERVED else slug
 
 
 def total_bytes(paths: Iterable[Path]) -> int:

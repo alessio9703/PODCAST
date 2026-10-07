@@ -249,7 +249,12 @@ def final_basename(run_dir: Path, script: PodcastScript) -> str:
     run_dir = Path(run_dir)
     record = load_montage(run_dir)
     if record and record.get("file"):
-        return Path(str(record["file"])).stem
+        stem = Path(str(record["file"])).stem
+        # Solo un nome semplice, gia' nella forma di uno slug: un registro
+        # manomesso ("file": ".") non deve far scrivere fuori dalla run
+        # (revisione di sicurezza C3, BASSA-4).
+        if stem and slugify(stem) == stem:
+            return stem
     legacy = slugify(script.titolo)
     if any((run_dir / f"{legacy}{ext}").is_file() for ext in (".mp3", ".wav")):
         return legacy

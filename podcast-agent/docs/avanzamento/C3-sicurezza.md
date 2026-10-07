@@ -334,3 +334,35 @@ Test: `tests/test_web_integration.py` → 488 controlli superati, 0 saltati.
 - **`in_corso`**: per l'operazione `revisione_copione` contiene l'`istruzione` scritta
   dall'utente (`src/script_authoring.py:208`). Con più utenti va deciso se gli altri
   possono vederla (non è nel diff).
+
+
+---
+
+## Esito delle correzioni (aggiunto da chi ha implementato, non dal revisore)
+
+Data: 2026-10-07. Nessuna alta. L'utente ha deciso di correggere tutte le medie e le basse
+prima di C4.
+
+- **MEDIA-1**: `mix.py` e `retake.py` (generazione) leggono il copione dentro il lock di
+  lavoro e attraversano il gate su **quella** lettura (`enforce(args, cache.script…)`).
+  `episode_info` aggiunge il motivo `non_approvato`. In più: `mix.py`, `synthesize.py` e
+  `retake.py` passavano al gate il `--run-dir` così come ricevuto, quindi con il solo
+  nome della run il gate cercava la sessione nella cartella corrente. Ora ricevono il
+  percorso già confinato.
+- **MEDIA-2**: `voice_prep.check_not_revoked()`; `mix.py` e `retake.py --list` (battuta e
+  vicine) escono con exit 3 `ConsentRequired` se una voce è revocata.
+- **BASSA-1**: nel JSON di `retake.py` tutti i percorsi sono relativi (`output/<run>/…`),
+  `warnings` passano da `redact`. Tre test esistenti (tools_cli, music, web) risolvono ora
+  il percorso dalla cartella che contiene `output/`.
+- **BASSA-2**: `TimelineError` ha un `code` e i suoi messaggi usano solo nomi;
+  `tempi_non_disponibili` è `{codice, messaggio}` con un testo fisso per la UI.
+- **BASSA-3**: `file[]` esclude link simbolici, `_audio_paths.json`, `voci.json`,
+  `voci_usate.json`, `*.percorso.txt`, `_forma_onda_*`; il contratto dice che si servono
+  solo `file_finale` e i file con `interno: false`.
+- **BASSA-4**: `final_basename` accetta il nome del registro solo se è già uno slug;
+  `slugify` aggiunge `-episodio` ai nomi riservati di Windows.
+- **BASSA-5**: `--points` solo fra 50, 100, 200, 400, 800, 1600.
+- **BASSA-6**: le anteprime hanno nel nome un hash dei segmenti montati (take e battute
+  vicine); `_con_musica.wav` scritto con `atomic_output`.
+- Test: web_integration da 488 a 499; le altre suite verdi.
+

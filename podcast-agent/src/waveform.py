@@ -23,8 +23,9 @@ from .ffmpeg_tool import FFMPEG_TIMEOUT_SECONDS, require_ffmpeg
 from .fileio import write_json_atomic
 from .registry import file_hash
 
-MIN_POINTS = 10
-MAX_POINTS = 4000
+#: Le risoluzioni ammesse: poche, perche' ognuna e' una decodifica completa
+#: e un file di cache (revisione di sicurezza C3, BASSA-5).
+ALLOWED_POINTS = (50, 100, 200, 400, 800, 1600)
 #: Frequenza a cui si decodifica: abbastanza per i picchi, poca memoria
 #: (un'ora di episodio = ~14 MB di campioni).
 _DECODE_RATE = 2000
@@ -75,10 +76,10 @@ def peaks(path: Path, points: int) -> tuple[list[float], float]:
 
 
 def waveform(run_dir: Path, final: Path | None, points: int) -> dict[str, Any]:
-    if not MIN_POINTS <= points <= MAX_POINTS:
+    if points not in ALLOWED_POINTS:
         raise WaveformError(
-            f"Numero di punti fuori scala: {points} (da {MIN_POINTS} a {MAX_POINTS}).",
-            details={"campo": "points", "minimo": MIN_POINTS, "massimo": MAX_POINTS},
+            f"Numero di punti non previsto: {points}. Ammessi: {', '.join(map(str, ALLOWED_POINTS))}.",
+            details={"campo": "points", "ammessi": list(ALLOWED_POINTS)},
         )
     if final is None or not final.is_file():
         raise WaveformError(
@@ -99,4 +100,4 @@ def waveform(run_dir: Path, final: Path | None, points: int) -> dict[str, Any]:
     return {**payload, "cached": False}
 
 
-__all__ = ["MAX_POINTS", "MIN_POINTS", "WaveformError", "cache_path", "peaks", "waveform"]
+__all__ = ["ALLOWED_POINTS", "WaveformError", "cache_path", "peaks", "waveform"]

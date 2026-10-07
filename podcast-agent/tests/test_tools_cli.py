@@ -782,7 +782,8 @@ def main() -> None:
     check("retake: non ha toccato l'altro turno con lo stesso testo",
           hashes(segdir)[indice[4]["file"]] == duplicato_hash)
     check("retake: 2 anteprime montate", len(out["previews"]) == 2
-          and all(Path(p).is_file() for p in out["previews"]), str(out["previews"]))
+          # percorsi relativi alla cartella che contiene output/ (mai assoluti)
+          and all((rd.parent.parent / p).is_file() for p in out["previews"]), str(out["previews"]))
     check("retake: il take NON viene scelto dal tool", out["chosen_take"] == 1)
 
     code, out, _ = tool("retake.py", "--run-dir", str(rd), "--list", "3", config=cfg)

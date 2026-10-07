@@ -23,7 +23,16 @@ TIMINGS_FILENAME = "_tempi_turni.json"
 
 
 class TimelineError(RuntimeError):
-    """Timeline mancante, illeggibile o senza gli offset dei turni."""
+    """Timeline mancante, illeggibile o senza gli offset dei turni.
+
+    `code` dice quale dei casi, per l'interfaccia: "timeline_assente",
+    "timeline_illeggibile", "timeline_vecchia", "timeline_diversa" (montata da
+    un copione diverso da quello attuale).
+    """
+
+    def __init__(self, message: str, *, code: str = "timeline_illeggibile") -> None:
+        super().__init__(message)
+        self.code = code
 
 
 @dataclass(frozen=True)
@@ -73,25 +82,27 @@ def load_timeline(run_dir: Path) -> list[dict[str, Any]]:
     target = Path(run_dir) / TIMINGS_FILENAME
     if not target.is_file():
         raise TimelineError(
-            f"Nessuna timeline in {target}.\n"
-            "Il file viene scritto dal montaggio: rilancia tools/synthesize.py "
-            "sulla cartella dell'episodio. Se i segmenti sono ancora in cache "
-            "non costa niente, perche' non viene risintetizzato nessun turno."
+            f"Nessuna timeline ({target.name}) per questo episodio.\n"
+            "Il file viene scritto dal montaggio: rimonta l'episodio (tools/mix.py, "
+            "o tools/synthesize.py in locale). Se i segmenti sono ancora in cache "
+            "non costa niente, perche' non viene risintetizzato nessun turno.",
+            code="timeline_assente",
         )
     try:
         raw = json.loads(target.read_text(encoding="utf-8"))
     except (json.JSONDecodeError, OSError) as exc:
-        raise TimelineError(f"{target} non e' leggibile: {exc}") from exc
+        raise TimelineError(f"{target.name} non e' leggibile: {exc}") from exc
 
     turni = raw.get("turni") if isinstance(raw, dict) else None
     if not turni:
-        raise TimelineError(f"{target} non contiene nessun turno.")
+        raise TimelineError(f"{target.name} non contiene nessun turno.")
     if any("inizio" not in t or "fine" not in t for t in turni):
         raise TimelineError(
-            f"{target} e' stato scritto da una versione precedente e non contiene "
+            f"{target.name} e' stato scritto da una versione precedente e non contiene "
             "gli offset dei turni.\n"
-            "Rimonta l'episodio con tools/synthesize.py: con i segmenti in cache "
-            "non c'e' nessuna chiamata al provider, quindi non costa niente."
+            "Rimonta l'episodio (tools/mix.py): con i segmenti in cache "
+            "non c'e' nessuna chiamata al provider, quindi non costa niente.",
+            code="timeline_vecchia",
         )
     return list(turni)
 
@@ -108,7 +119,8 @@ def attach_texts(turni: list[dict[str, Any]], testi: list[str]) -> list[dict[str
         raise TimelineError(
             f"La timeline ha {len(turni)} turni ma il copione ne ha {len(testi)}: "
             "l'episodio e' stato montato da un copione diverso da quello attuale.\n"
-            "Rimonta con tools/synthesize.py, poi richiedi il minutaggio."
+            "Produci o rimonta l'episodio con il copione attuale, poi richiedi il minutaggio.",
+            code="timeline_diversa",
         )
     return [{**turn, "testo": testo} for turn, testo in zip(turni, testi)]
 

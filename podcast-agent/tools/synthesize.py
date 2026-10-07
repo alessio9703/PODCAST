@@ -52,6 +52,9 @@ def main() -> None:
 
     config = bootstrap(args)
     run_dir = run_dir_arg(args.run_dir, config)
+    # Il gate di approvazione legge args.run_dir: deve essere il percorso gia'
+    # confinato, non il valore ricevuto (che puo' essere il solo nome).
+    args.run_dir = str(run_dir)
     script = PodcastScript.from_dict(
         json.loads(file_arg(args.script, config, args, "script").read_text(encoding="utf-8"))
     )

@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Forma d'onda del file finale dell'episodio (player del passo 7).
 
-    python tools/waveform.py --run-dir output/<run> --points 400
+    python tools/waveform.py --run-dir output/<run> --points 400   # 50, 100, 200, 400, 800, 1600
 
 `peaks` sono N valori fra 0 e 1, uno per barra, sull'intero file finale
 (intro e outro comprese). In cache in `_forma_onda_<N>.json`, legata allo
@@ -21,7 +21,7 @@ from src.waveform import waveform  # noqa: E402
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--run-dir", required=True, help="Cartella dell'episodio")
-    parser.add_argument("--points", type=int, default=400, help="Numero di barre (10-4000)")
+    parser.add_argument("--points", type=int, default=400, help="Numero di barre: 50, 100, 200, 400, 800 o 1600")
     add_config_arg(parser)
     args = parse_args(parser)
 

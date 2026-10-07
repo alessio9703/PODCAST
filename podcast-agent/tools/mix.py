@@ -30,6 +30,7 @@ from src.music_mixer import preflight  # noqa: E402
 from src.production import assemble_episode, duration_label, ui_path  # noqa: E402
 from src.run_lock import work_lock  # noqa: E402
 from src.segment_cache import RunCache  # noqa: E402
+from src.voice_prep import check_not_revoked  # noqa: E402
 
 
 def main() -> None:
@@ -47,16 +48,22 @@ def main() -> None:
 
     config = bootstrap(args)
     run_dir = run_dir_arg(args.run_dir, config)
-
-    # Non spende, ma produce l'output finale: passa comunque dal gate.
-    gate = enforce(args)
+    # Il gate di approvazione legge args.run_dir: deve essere il percorso gia'
+    # confinato, non il valore ricevuto (che puo' essere il solo nome).
+    args.run_dir = str(run_dir)
 
     with work_lock(run_dir, "montaggio"):
+        provider = config.build_provider()
+        cache = RunCache.load(run_dir, provider)
+        # Non spende, ma produce l'output finale: passa comunque dal gate, sul
+        # copione che si sta per montare, letto una volta sola e dentro il
+        # lock (revisione di sicurezza C3, MEDIA-1).
+        gate = enforce(args, cache.script.to_dict())
+        # Una voce con il consenso revocato non si rimonta (C3, MEDIA-2).
+        check_not_revoked(config, list(cache.script.speakers))
         choice, drift_warnings = preflight(
             run_dir, config, accept_changed_music=args.accept_changed_music
         )
-        provider = config.build_provider()
-        cache = RunCache.load(run_dir, provider)
 
         missing = cache.missing_turns()
         if missing:
