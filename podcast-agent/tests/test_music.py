@@ -233,7 +233,7 @@ def prepare_run(root: Path, config: Path, title: str = "Prova musiche") -> Path:
     voices_json = run_dir / "voci.json"
     code, out, err = tool(
         "voices_prepare.py", "--speakers", "Mario Rossi", "Giulia Bianchi",
-        "--out", str(voices_json), "--no-approval-gate", config=config,
+        "--out", str(voices_json), "--no-approval-gate", "--no-consent-gate", config=config,
     )
     check(f"voices_prepare ({title})", code == 0, err)
     return run_dir

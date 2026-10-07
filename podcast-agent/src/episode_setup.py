@@ -28,6 +28,7 @@ from .run_lock import session_lock
 from .script_session import FILENAME as SESSION_FILENAME
 from .script_session import ScriptSession
 from .voice_library import VoiceLibrary, VoiceLibraryError, spoken_name_guess
+from .voice_meta import consent_view
 
 
 def resolve_voice(library: VoiceLibrary, query: str, role: str) -> str:
@@ -240,6 +241,9 @@ def episode_view(run_dir: Path, config: Any, episode: EpisodeConfig | None = Non
                 **row,
                 "voce_presente": voice is not None if row["voce"] else None,
                 "clonata": cloned,
+                # Stato del consenso alla clonazione (src/voice_meta.py):
+                # registrato, mancante, superato, revocato. None = nessuna voce.
+                "consenso": consent_view(voice.path) if voice is not None else None,
                 # Solo una PROPOSTA ricavata dal nome del file, mai salvata da
                 # sola: il nome lo conferma l'utente (name_complete=false vuol
                 # dire che manca nome o cognome e va chiesto).

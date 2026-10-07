@@ -1234,6 +1234,8 @@ REQUIRED_ARGS = {
     "turn_at.py": ["--run-dir", "R", "--at", "0:01"],
     "voices_list.py": [],
     "voices_prepare.py": ["--speakers", "Mario Rossi"],
+    "voice_meta.py": ["--name", "Mario Rossi"],
+    "produce.py": ["--run-dir", "R"],
 }
 
 
@@ -1293,6 +1295,7 @@ def test_web_mode(root: Path, config: Path, run_dir: str) -> None:
         ("run_finalize.py", ["--trusted-paths"]),
         ("run_finalize.py", ["--audio-paths", str(root / "output" / "audio.json")]),
         ("voices_prepare.py", ["--out", str(root / "output" / "voci.json")]),
+        ("voices_prepare.py", ["--no-consent-gate"]),
         ("script_approve.py", ["--current"]),
     ]
     for name, extra in cases:
@@ -1396,6 +1399,320 @@ def test_web_mode(root: Path, config: Path, run_dir: str) -> None:
 
 
 # ----------------------------------------------------------------------
+# C2 · Produzione (passi 5 e 6)
+# ----------------------------------------------------------------------
+
+
+def write_c2_config(root: Path, name: str, *, clone_cost: float | None = None, eur: tuple[float, str] | None = None, **options: object) -> Path:
+    """Config con il provider finto, le opzioni date e i costi del passo 5."""
+    opts = {"seconds_per_100_chars": 2.0, "voices_file": str(root / "fake_voices.json"), "clone_log_file": str(root / "clonazioni.log"), **options}
+    text = (root / "config-web.yaml").read_text(encoding="utf-8")
+    head, _, rest = text.partition("paths:")
+    provider = "active_provider: fake\nproviders:\n  fake:\n    class: tests.fake_provider:FakeProvider\n    options:\n"
+    provider += "".join(f"      {key}: {json.dumps(value)}\n" for key, value in opts.items())
+    provider += f"    clone_cost_usd: {json.dumps(clone_cost)}\n"
+    currency = f"currency:\n  eur_per_usd: {json.dumps(eur[0] if eur else None)}\n  rate_date: {json.dumps(eur[1] if eur else None)}\n"
+    config = root / name
+    config.write_text(provider + currency + "paths:" + rest, encoding="utf-8")
+    return config
+
+
+SCRIPT_C2 = {
+    "titolo": "Produzione di prova",
+    "turni": [
+        {"speaker": "Mario Rossi", "testo": "Ciao a tutti, oggi parliamo di ricavi."},
+        {"speaker": "Giulia Bianchi", "testo": "I ricavi del trimestre sono cresciuti."},
+        {"speaker": "Mario Rossi", "testo": "Di quanto, esattamente?"},
+        {"speaker": "Giulia Bianchi", "testo": "Del dodici per cento rispetto all'anno scorso."},
+        {"speaker": "Mario Rossi", "testo": "E da cosa dipende questa crescita?"},
+        {"speaker": "Giulia Bianchi", "testo": "Soprattutto dalle vendite all'estero."},
+    ],
+}
+
+
+def approved_run(root: Path, config: Path, title: str, script: dict) -> str:
+    """run_init con documento + copione salvato e approvato (versione 1)."""
+    code, out, err = tool("run_init.py", "--title", title, "--document", "report.txt", config=config)
+    check(f"run '{title}' creata", code == 0, err)
+    run_dir = out["run_dir"]
+    draft = Path(run_dir) / "bozza.json"
+    draft.write_text(json.dumps(script, ensure_ascii=False), encoding="utf-8")
+    speakers = sorted({t["speaker"] for t in script["turni"]})
+    code, out, err = tool("script_save.py", "--run-dir", run_dir, "--script-json", str(draft), "--speakers", *speakers, config=config)
+    check(f"copione '{title}' salvato", code == 0, err[-300:] + str(out)[:300])
+    code, out, _ = tool("script_approve.py", "--run-dir", run_dir, "--version", "1", "--by", "Utente A", config=config)
+    check(f"copione '{title}' approvato", code == 0, str(out)[:300])
+    return run_dir
+
+
+def read_events(path: Path) -> list[dict]:
+    if not path.is_file():
+        return []
+    return [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines() if line.strip()]
+
+
+def clone_attempts(root: Path) -> list[str]:
+    log = root / "clonazioni.log"
+    return log.read_text(encoding="utf-8").splitlines() if log.is_file() else []
+
+
+def test_c2_consent(root: Path, config: Path) -> None:
+    print("\n[C2] consenso: voice_meta.py")
+    code, out, _ = tool("voice_meta.py", "--name", "mario rossi", config=config)
+    check("nome a meno di maiuscole: la voce giusta, consenso mancante", code == 0 and out["voce"] == "Mario Rossi" and out["consenso"]["stato"] == "mancante", str(out))
+    code, out, _ = tool("voice_meta.py", "--name", "Mario", config=config)
+    check("nome incompleto -> exit 3 AmbiguousName con candidati", code == 3 and out.get("error_type") == "AmbiguousName" and out["details"]["candidates"] == ["Mario Rossi"], str(out))
+    code, out, _ = tool("voice_meta.py", "--name", "1", config=config)
+    check("indice numerico non vale come nome", code != 0, str(out))
+    code, out, _ = tool("voice_meta.py", "--name", "Mario Rossi", "--consent", config=config)
+    check("consenso senza --by -> exit 1 ConsentByRequired", code == 1 and out.get("error_type") == "ConsentByRequired", str(out))
+    code, out, _ = tool("voice_meta.py", "--name", "Mario Rossi", "--consent", "--by", "Utente A", config=config)
+    check("consenso registrato con chi e quando", code == 0 and out["consenso"]["stato"] == "registrato" and out["consenso"]["da"] == "Utente A" and out["consenso"]["il"], str(out))
+    meta = json.loads((root / "voci" / "Mario Rossi.json").read_text(encoding="utf-8"))
+    check("metadati accanto all'audio, con lo sha256 della registrazione", meta["consenso"]["audio_sha256"].startswith("sha256:") and meta["consenso"]["file"] == "Mario Rossi.wav", str(meta))
+    code, out, _ = tool("voices_list.py", config=config)
+    check("i .json accanto alle voci non sono voci ne' file scartati", code == 0 and out["count"] == 3 and out["rejected"] == [], str({k: out.get(k) for k in ("count", "rejected")}))
+    code, out, _ = tool("voice_meta.py", "--name", "Mario Rossi", "--revoke-consent", "--by", "Utente B", config=config)
+    check("revoca: stato revocato, da chi, consenso precedente restituito", code == 0 and out["consenso"]["stato"] == "revocato" and out["consenso"]["revocato_da"] == "Utente B" and out["consenso_revocato"]["da"] == "Utente A", str(out))
+    tool("voice_meta.py", "--name", "Mario Rossi", "--consent", "--by", "Utente A", config=config)
+
+    proc = run_python(
+        f"""
+        import threading
+        from pathlib import Path
+        from src.voice_meta import record_consent, load_meta
+        audio = Path({str(root / "voci" / "Anna Neri.wav")!r})
+        threads = [threading.Thread(target=record_consent, args=(audio,), kwargs={{"voice": "Anna Neri", "by": f"U{{i}}"}}) for i in range(8)]
+        [t.start() for t in threads]; [t.join() for t in threads]
+        print(load_meta(audio)["consenso"]["da"].startswith("U"))
+        """
+    )
+    check("scritture concorrenti dei metadati: file sempre valido", proc.stdout.strip() == "True", proc.stdout + proc.stderr)
+    tool("voice_meta.py", "--name", "Anna Neri", "--revoke-consent", "--by", "Utente A", config=config)
+
+
+def test_c2_estimate_and_produce(root: Path, config: Path) -> str:
+    print("\n[C2] passo 5: stima per la run, senza voci.json (G2)")
+    run_dir = approved_run(root, config, "Produzione", SCRIPT_C2)
+    check("nessun voci.json prima della produzione", not (Path(run_dir) / "voci.json").exists())
+    code, out, err = tool("estimate.py", "--run-dir", run_dir, config=config)
+    check("estimate --run-dir senza voci.json: exit 0", code == 0, err[-300:] + str(out)[:300])
+    by_speaker = {v["speaker"]: v for v in out["voices"]}
+    check("entrambe le voci da clonare", {v["azione"] for v in out["voices"]} == {"clone"} and sorted(out["voices_to_clone"]) == ["Giulia Bianchi", "Mario Rossi"], str(out["voices"]))
+    check("consenso per voce: Mario registrato, Giulia mancante", by_speaker["Mario Rossi"]["consenso"]["stato"] == "registrato" and by_speaker["Giulia Bianchi"]["consenso"]["stato"] == "mancante")
+    check("consent_missing = le voci da confermare", out["consent_missing"] == ["Giulia Bianchi"], str(out["consent_missing"]))
+    check("tutte le battute da generare", out["turns_to_generate"] == 6 and out["turns_to_generate_list"] == [1, 2, 3, 4, 5, 6])
+    chars = sum(len(t["testo"]) for t in SCRIPT_C2["turni"])
+    check("caratteri e costo della sintesi (USD)", out["chars_to_generate"] == chars and out["cost_tts_usd"] == round(chars * 10 / 1_000_000, 4), str(out["cost_tts_usd"]))
+    check("costo di clonazione non noto: dichiarato, costo incompleto", out["clone_cost_usd"] is None and out["clone_cost_known"] is False and out["cost_complete"] is False and out["cost_usd"] == out["cost_tts_usd"], str({k: out[k] for k in ("clone_cost_usd", "cost_usd", "cost_complete")}))
+    check("senza cambio in config: niente euro", out["cost_eur"] is None and out["eur_per_usd"] is None)
+    check("copione approvato, versione 1", out["approved"] is True and out["approved_version"] == 1, str(out.get("approval_problem")))
+    check("durata con le chiavi di sempre", "duration_label" in out and "duration_with_music_seconds" in out and out["turns"] == 6)
+
+    priced = write_c2_config(root, "config-c2-prezzi.yaml", clone_cost=0.5, eur=(0.9, "2026-10-01"))
+    code, out, _ = tool("estimate.py", "--run-dir", run_dir, config=priced)
+    expected = round(chars * 10 / 1_000_000 + 1.0, 4)
+    check("con il costo di clonazione: sintesi + 2 clonazioni", out["clone_cost_total_usd"] == 1.0 and out["cost_usd"] == expected and out["cost_complete"] is True, str({k: out[k] for k in ("clone_cost_total_usd", "cost_usd")}))
+    check("con il cambio datato: euro e data del tasso", out["cost_eur"] == round((chars * 10 / 1_000_000 + 1.0) * 0.9, 4) and out["eur_rate_date"] == "2026-10-01", str(out["cost_eur"]))
+
+    cast_run = tool("run_init.py", "--title", "Solo cast", config=config)[1]["run_dir"]
+    code, out, _ = episode(cast_run, config, "--formato", "conversazione", "--voce", "voce_a=Mario Rossi")
+    roles = {r["ruolo"]: r for r in out["ruoli"]}
+    check(
+        "vista dei ruoli: consenso per voce assegnata, null per ruolo vuoto",
+        code == 0 and roles["voce_a"]["consenso"]["stato"] == "registrato" and roles["voce_b"]["consenso"] is None,
+        str({k: v.get("consenso") for k, v in roles.items()}),
+    )
+
+    print("\n[C2] passo 6: produzione con consenso mancante")
+    events = Path(run_dir) / "_eventi.jsonl"
+    code, out, _ = tool("produce.py", "--run-dir", run_dir, "--events", str(events), config=config)
+    check("consenso mancante -> exit 3 ConsentRequired con le voci", code == 3 and out.get("error_type") == "ConsentRequired" and [v["speaker"] for v in out["details"]["voci"]] == ["Giulia Bianchi"] and out["details"]["voci"][0]["stato"] == "mancante", str(out))
+    check("nessun tentativo di clonazione, nemmeno per la voce con il consenso", clone_attempts(root) == [], str(clone_attempts(root)))
+    check("nessuna voce nel registro", not (root / "voices_registry.json").exists() or "Mario Rossi" not in json.loads((root / "voices_registry.json").read_text(encoding="utf-8")))
+
+    tool("voice_meta.py", "--name", "Giulia Bianchi", "--consent", "--by", "Utente A", config=config)
+    wav = root / "voci" / "Giulia Bianchi.wav"
+    original = wav.read_bytes()
+    make_wav(wav, 1.2, 345)
+    code, out, _ = tool("produce.py", "--run-dir", run_dir, config=config)
+    check("registrazione sostituita dopo il consenso -> ConsentRequired 'superato'", code == 3 and out["details"]["voci"][0]["stato"] == "superato", str(out))
+    wav.write_bytes(original)
+
+    print("\n[C2] passo 6: produzione completa con eventi")
+    code, out, err = tool("produce.py", "--run-dir", run_dir, "--events", str(events), config=config)
+    check("produce: exit 0", code == 0, err[-500:] + str(out)[:300])
+    check("due voci clonate, tutte le battute sintetizzate", sorted(out["voices"]["clonate"]) == ["Giulia Bianchi", "Mario Rossi"] and out["tts_calls"] == 6 and out["reused_turns"] == [], str(out)[:400])
+    check("una clonazione per voce", sorted(clone_attempts(root)) == ["Giulia Bianchi", "Mario Rossi"], str(clone_attempts(root)))
+    check("file finale nella run, nome relativo per la UI", Path(out["output"]).is_file() and out["file"] == Path(out["output"]).name and out["run"] == Path(run_dir).name)
+    for name in ("voci.json", "_audio_paths.json", "voci_usate.json", "documento_originale.txt", "_tempi_turni.json"):
+        check(f"scritto {name}", (Path(run_dir) / name).is_file())
+    check("versione approvata nel JSON", out["approved_version"] == 1)
+    rows = read_events(events)
+    kinds = [r["evento"] for r in rows]
+    check("eventi: inizia e finisce", kinds[0] == "iniziata" and kinds[-1] == "finita" and rows[0]["totale"] == 6, str(kinds))
+    phases = [(r["evento"], r["fase"]) for r in rows if r["evento"].startswith("fase_")]
+    check(
+        "fasi nell'ordine dello schermo (senza musiche: niente mix)",
+        phases == [("fase_iniziata", "preparazione_voci"), ("fase_finita", "preparazione_voci"), ("fase_iniziata", "sintesi"), ("fase_finita", "sintesi"),
+                   ("fase_iniziata", "montaggio"), ("fase_finita", "montaggio"), ("fase_iniziata", "chiusura"), ("fase_finita", "chiusura")],
+        str(phases),
+    )
+    voices_ev = [r for r in rows if r["evento"] == "voce"]
+    check("eventi voce: due clonate", sorted((r["speaker"], r["azione"]) for r in voices_ev) == [("Giulia Bianchi", "clonata"), ("Mario Rossi", "clonata")], str(voices_ev))
+    prep_done = next(r for r in rows if r["evento"] == "fase_finita" and r["fase"] == "preparazione_voci")
+    check("fine preparazione: 0 riusate, 2 clonate", prep_done["riusate"] == 0 and prep_done["clonate"] == 2)
+    turns_ev = [r for r in rows if r["evento"] == "battuta"]
+    check("una riga per battuta, i/N", [(r["n"], r["totale"]) for r in turns_ev] == [(i, 6) for i in range(1, 7)], str(turns_ev[:2]))
+    check("eta: null alla prima, poi un numero", turns_ev[0]["eta_seconds"] is None and all(isinstance(r["eta_seconds"], (int, float)) for r in turns_ev[1:]), str([r["eta_seconds"] for r in turns_ev]))
+    check("ogni evento ha l'ora", all(r.get("at") for r in rows))
+
+    code, out, _ = tool("produce.py", "--run-dir", run_dir, "--events", str(events), config=config)
+    check("rilancio: niente da pagare, voci riusate", code == 0 and out["tts_calls"] == 0 and sorted(out["voices"]["riusate"]) == ["Giulia Bianchi", "Mario Rossi"], str(out)[:300])
+    check("rilancio: nessuna nuova clonazione", len(clone_attempts(root)) == 2)
+    check("il file eventi riparte da capo a ogni produzione", read_events(events)[0]["evento"] == "iniziata" and sum(1 for r in read_events(events) if r["evento"] == "iniziata") == 1)
+    code, out, _ = tool("estimate.py", "--run-dir", run_dir, config=config)
+    check("stima dopo la produzione: 0 battute, voci da riusare, costo 0", out["turns_to_generate"] == 0 and {v["azione"] for v in out["voices"]} == {"reuse"} and out["cost_usd"] == 0 and all(v["clonata_il"] for v in out["voices"]), str(out)[:300])
+
+    print("\n[C2] consenso revocato blocca anche il riuso")
+    tool("voice_meta.py", "--name", "Mario Rossi", "--revoke-consent", "--by", "Utente B", config=config)
+    code, out, _ = tool("produce.py", "--run-dir", run_dir, config=config)
+    check("voce gia' clonata ma consenso revocato -> ConsentRequired 'revocato'", code == 3 and out["details"]["voci"] == [{"speaker": "Mario Rossi", "azione": "reuse", "stato": "revocato", "file": "Mario Rossi.wav"}], str(out))
+    tool("voice_meta.py", "--name", "Mario Rossi", "--consent", "--by", "Utente A", config=config)
+
+    print("\n[C2] produzione: controlli prima di spendere")
+    code, out, _ = tool("produce.py", "--run-dir", run_dir, "--events", str(root / "fuori.jsonl"), config=config)
+    check("--events fuori dalla run -> PathNotAllowed", code == 1 and out.get("error_type") == "PathNotAllowed" and not (root / "fuori.jsonl").exists(), str(out))
+    edited = Path(run_dir) / "conversazione.json"
+    saved = edited.read_text(encoding="utf-8")
+    payload = json.loads(saved)
+    payload["turni"][0]["testo"] = "Testo cambiato a mano."
+    edited.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
+    code, out, _ = tool("produce.py", "--run-dir", run_dir, config=config)
+    check("copione diverso da quello approvato -> exit 1 ApprovalRequired", code == 1 and out.get("error_type") == "ApprovalRequired" and out["details"]["approval_problem"], str(out)[:300])
+    edited.write_text(saved, encoding="utf-8")
+
+    from src.run_lock import work_lock
+
+    events.write_text("CONTENUTO DELLA PRODUZIONE IN CORSO\n", encoding="utf-8")
+    with work_lock(Path(run_dir), "produzione"):
+        code, out, _ = tool("produce.py", "--run-dir", run_dir, "--events", str(events), config=config)
+        check("produzione gia' in corso -> RunBusy", code == 1 and out.get("error_type") == "RunBusy", str(out))
+        code, out, _ = tool("script_show.py", "--run-dir", run_dir, config=config)
+        check("lo stato 'in generazione' si deriva dal lock", out["in_corso"]["operazione"] == "produzione", str(out.get("in_corso")))
+    check("RunBusy non tocca il file eventi della produzione in corso", events.read_text(encoding="utf-8") == "CONTENUTO DELLA PRODUZIONE IN CORSO\n")
+    return run_dir
+
+
+def test_c2_interrupt(root: Path) -> None:
+    print("\n[C2] interruzione pulita e ripresa")
+    slow = write_c2_config(root, "config-c2-lenta.yaml", tts_delay_seconds=0.6)
+    script = {"titolo": "Interrotta", "turni": [
+        {"speaker": "Mario Rossi" if i % 2 == 0 else "Giulia Bianchi", "testo": f"Battuta numero {i + 1} di una produzione che verra' interrotta."}
+        for i in range(8)
+    ]}
+    run_dir = approved_run(root, slow, "Interrotta", script)
+    events = Path(run_dir) / "_eventi.jsonl"
+    env = clean_env()
+    proc = subprocess.Popen(
+        [PYTHON, str(PROJECT_ROOT / "tools" / "produce.py"), "--run-dir", run_dir, "--events", str(events), "--config", str(slow)],
+        stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, cwd=str(PROJECT_ROOT), env=env,
+    )
+    deadline = time.monotonic() + 60
+    while time.monotonic() < deadline:
+        if any(r["evento"] == "battuta" and r["n"] >= 3 for r in read_events(events)):
+            break
+        time.sleep(0.1)
+    import signal as _signal
+
+    proc.send_signal(_signal.SIGTERM)
+    stdout, stderr = proc.communicate(timeout=60)
+    out = json.loads(stdout) if stdout.strip() else {}
+    check("SIGTERM -> exit 1 ProductionInterrupted", proc.returncode == 1 and out.get("error_type") == "ProductionInterrupted", stdout[-400:] + stderr[-400:])
+    details = out.get("details") or {}
+    check("details: done/total/missing coerenti", details.get("total") == 8 and details["done"] + len(details["missing"]) == 8 and details["missing"] and details["done"] >= 2, str(details))
+    check("evento 'interrotta' con gli stessi dati", read_events(events)[-1] == {**read_events(events)[-1], "evento": "interrotta", "done": details.get("done"), "missing": details.get("missing")})
+    leftovers = [p.name for p in (Path(run_dir) / "segmenti").rglob("*") if p.name.endswith(".tmp") or p.name.startswith(".")]
+    check("nessun segmento scritto a meta'", leftovers == [], str(leftovers))
+    code, out2, _ = tool("script_show.py", "--run-dir", run_dir, config=slow)
+    check("dopo l'interruzione il lock e' libero (nessuna operazione in corso)", out2["in_corso"] is None)
+
+    code, out2, err = tool("produce.py", "--run-dir", run_dir, config=slow)
+    check("ripresa: exit 0", code == 0, err[-300:])
+    check("ripresa: paga solo le battute mancanti", out2["generated_turns"] == details.get("missing") and out2["tts_calls"] == len(details.get("missing", [])), str((out2.get("generated_turns"), details.get("missing"))))
+
+
+def test_c2_clone_errors(root: Path, config: Path) -> None:
+    print("\n[C2] errore di clonazione: exit 2, un solo tentativo")
+    failing = write_c2_config(root, "config-c2-guasto.yaml", fail_clone=True)
+    tool("voice_meta.py", "--name", "Anna Neri", "--consent", "--by", "Utente A", config=config)
+    script = {"titolo": "Con Anna", "turni": [
+        {"speaker": "Anna Neri", "testo": "Buongiorno, sono Anna."},
+        {"speaker": "Mario Rossi", "testo": "Ciao Anna, benvenuta."},
+    ]}
+    run_dir = approved_run(root, failing, "Con Anna", script)
+    events = Path(run_dir) / "_eventi.jsonl"
+    before = len(clone_attempts(root))
+    code, out, _ = tool("produce.py", "--run-dir", run_dir, "--events", str(events), config=failing)
+    check("clonazione fallita -> exit 2 (errore del provider)", code == 2 and out.get("error_type") == "ProviderQuotaError", str(out))
+    check("un solo tentativo di clonazione", clone_attempts(root)[before:] == ["Anna Neri"], str(clone_attempts(root)[before:]))
+    check("evento 'errore' in fondo al file", read_events(events)[-1]["evento"] == "errore" and read_events(events)[-1]["error_type"] == "ProviderQuotaError")
+    check("nessuna battuta sintetizzata", not (Path(run_dir) / "segmenti").exists() or not any((Path(run_dir) / "segmenti").glob("*.wav")))
+
+    print("\n[C2] due produzioni insieme con la stessa voce nuova: una clonazione")
+    slow_clone = write_c2_config(root, "config-c2-clone-lento.yaml", clone_delay_seconds=1.5)
+    before = len(clone_attempts(root))
+    procs = [
+        subprocess.Popen(
+            [PYTHON, str(PROJECT_ROOT / "tools" / "voices_prepare.py"), "--speakers", "Anna Neri", "--no-approval-gate", "--config", str(slow_clone)],
+            stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, cwd=str(PROJECT_ROOT), env=clean_env(),
+        )
+        for _ in range(2)
+    ]
+    outs = [json.loads(p.communicate(timeout=60)[0]) for p in procs]
+    check("entrambe exit 0", all(p.returncode == 0 for p in procs), str(outs))
+    check("un solo tentativo di clonazione", clone_attempts(root)[before:] == ["Anna Neri"], str(clone_attempts(root)[before:]))
+    check("stesso voice_id per entrambe", outs[0]["voice_map"]["Anna Neri"] == outs[1]["voice_map"]["Anna Neri"], str([o["voice_map"] for o in outs]))
+    check("una clonata, l'altra riusata", sorted(o["speakers"]["Anna Neri"]["action"] for o in outs) == ["cloned", "reused"], str([o["speakers"] for o in outs]))
+
+    print("\n[C2] voices_prepare: consenso e flag esplicito")
+    tool("voice_meta.py", "--name", "Anna Neri", "--revoke-consent", "--by", "Utente A", config=config)
+    code, out, _ = tool("voices_prepare.py", "--speakers", "Anna Neri", "--no-approval-gate", config=config)
+    check("voices_prepare con consenso revocato -> exit 3 ConsentRequired", code == 3 and out.get("error_type") == "ConsentRequired", str(out))
+    code, out, _ = tool("voices_prepare.py", "--speakers", "Anna Neri", "--no-approval-gate", "--no-consent-gate", config=config)
+    check("--no-consent-gate (uso locale) passa e lo dichiara", code == 0 and out["consent_gate"] == "bypassed", str(out))
+    code, out, _ = tool("voices_prepare.py", "--speakers", "Anna Neri", "Giulia Bianchi", "--dry-run", config=config)
+    check("dry-run: dice il consenso senza bloccare", code == 0, str(out))
+
+
+def test_c2_music(root: Path, config: Path) -> None:
+    print("\n[C2] produzione con un'intro: fasi montaggio e mix")
+    run_dir = approved_run(root, config, "Con musica", {"titolo": "Con musica", "turni": SCRIPT_C2["turni"][:2]})
+    code, out, _ = tool("music_set.py", "--run-dir", run_dir, "--intro", "Piano calmo", config=config)
+    check("intro scelta", code == 0, str(out)[:300])
+    events = Path(run_dir) / "_eventi.jsonl"
+    code, out, err = tool("produce.py", "--run-dir", run_dir, "--events", str(events), config=config)
+    check("produce con musica: exit 0, mp3", code == 0 and out["format"] == "mp3" and out["musiche_usate_file"], err[-400:] + str(out)[:300])
+    phases = [(r["evento"], r["fase"]) for r in read_events(events) if r["evento"].startswith("fase_")]
+    check(
+        "montaggio finito prima che il mix inizi",
+        phases[4:8] == [("fase_iniziata", "montaggio"), ("fase_finita", "montaggio"), ("fase_iniziata", "mix"), ("fase_finita", "mix")],
+        str(phases),
+    )
+
+
+def test_c2() -> None:
+    root = Path(tempfile.mkdtemp(prefix="podcast-web-c2-"))
+    setup(root)
+    config = write_c2_config(root, "config-c2.yaml")
+    test_c2_consent(root, config)
+    test_c2_estimate_and_produce(root, config)
+    test_c2_music(root, config)
+    test_c2_interrupt(root)
+    test_c2_clone_errors(root, config)
+
+
+# ----------------------------------------------------------------------
 
 
 def main() -> None:
@@ -1426,6 +1743,8 @@ def main() -> None:
     test_ui_fields(root, config)
     test_run_dir_race(root)
     test_web_mode(root, config, run_dir)
+
+    test_c2()
 
     from tests.test_tools_cli import PASSED
 

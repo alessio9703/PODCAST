@@ -47,9 +47,16 @@ significa far dire a qualcuno parole che non ha detto.
 e riporti l'errore. Non richiami il comando "per vedere se stavolta va". Un retry cieco
 crea voci duplicate a pagamento sul provider.
 
-**Consenso vocale.** Ogni voce che risulta `action: "cloned"` è una voce clonata in quel
-momento per la prima volta. Dillo esplicitamente all'utente nel riepilogo e ricorda che
-quella persona deve aver acconsentito. Non lo verifichi — lo rendi visibile.
+**Consenso vocale.** Una voce si clona solo se il consenso della persona è registrato:
+`voices_prepare.py` controlla e, se manca anche per una sola voce, non clona niente ed
+esce con codice `3`, `error_type: "ConsentRequired"` e le voci in `details.voci` (`stato`:
+`mancante`, `superato` se la registrazione è cambiata, `revocato`). In quel caso chiedi
+all'utente, con `AskUserQuestion`, se quella persona ha dato il consenso a clonare la
+propria voce e a farle dire questo copione. Solo dopo un sì esplicito registri:
+`tools/voice_meta.py --name "NOME" --consent --by "CHI CONFERMA"`, poi rilanci. Non usi
+mai `--no-consent-gate` in una sessione con l'utente. Ogni voce che risulta
+`action: "cloned"` è comunque una voce clonata ora per la prima volta: dillo nel
+riepilogo.
 
 **Le API key stanno solo in `.env`.** Non le leggi, non le stampi, non le passi sulla
 riga di comando, non le scrivi in `config.yaml`. Se una manca, dici *quale* variabile
@@ -93,7 +100,8 @@ stderr. Leggi il JSON, non il testo.
 | `tools/script_show.py --run-dir D` | rilegge il copione corrente | `rendered`, `version`, `approved`, `approval_problem`, `versions[]` |
 | `tools/script_versions.py --run-dir D --list \| --diff A [B] \| --restore N` | storico, confronto fra versioni, ripristino (= nuova versione da riapprovare) | `versions[]` / `righe[]` con `stato` (invariata, modificata, aggiunta, rimossa) / la versione nuova |
 | `tools/script_approve.py --run-dir D --current` | registra il sì dell'utente (sulla versione corrente; `--version V` al posto di `--current` la fissa) | `version`, `sha256` |
-| `tools/voices_prepare.py --speakers A B --out V --run-dir D [--dry-run]` | cache o clonazione | `voice_map`, `newly_cloned[]`, `reused[]`, `audio_paths_file` |
+| `tools/voice_meta.py --name N [--consent \| --revoke-consent] --by U` | stato del consenso di una voce; lo registra (solo dopo il sì dell'utente) o lo revoca | `consenso: {stato, da, il}` |
+| `tools/voices_prepare.py --speakers A B --out V --run-dir D [--dry-run]` | cache o clonazione (consenso controllato prima) | `voice_map`, `newly_cloned[]`, `reused[]`, `audio_paths_file`; exit `3` `ConsentRequired` |
 | `tools/estimate.py --script S` | stima | `chars`, `duration_label`, `cost_usd`, `rendered`, `duration_with_music_seconds` se ci sono musiche |
 | `tools/estimate.py --script S --run-dir D` | stima **incrementale**: conta solo i turni non in cache | `turns_to_generate`, `chars_to_generate`, `cost_to_generate_usd` |
 | `tools/synthesize.py --script S --voices V --run-dir D` | sintesi + montaggio (+ mix, se ci sono musiche) | `output`, `duration_seconds`, `segments`, `generated_turns[]`, `reused_turns[]`, `tts_calls`, `warnings[]`, `voice_offset_seconds` se ci sono musiche |
@@ -413,6 +421,10 @@ clonarle: il dry-run non spende, quindi non ha bisogno dell'approvazione.
 
 Se qualcosa compare in `newly_cloned`, è una clonazione nuova: annotalo per il riepilogo.
 Exit code `2` → ti fermi, riporti l'errore, non ritenti.
+Exit code `3` con `ConsentRequired` → nessuna voce è stata clonata: chiedi il consenso
+per le voci in `details.voci` (vedi "Consenso vocale" in cima), registralo con
+`voice_meta.py --consent` e rilancia. Il dry-run riporta lo stato del consenso
+(`consent`) senza bloccare: usalo per chiedere prima.
 
 Con `--out` il tool salva da solo anche `_audio_paths.json` accanto alla voice map: è
 quello che passerai a `run_finalize.py`, non devi costruirlo tu.
@@ -594,8 +606,9 @@ Dillo invece di lasciarglielo scoprire:
 - **le pause con `audio_format: mp3`.** In quella configurazione i segmenti si
   concatenano senza pause fra i turni. Se l'utente si lamenta del ritmo, la causa è lì e
   si risolve in `config.yaml`, non nel copione;
-- **il consenso.** Non puoi verificarlo. Puoi solo renderlo visibile ogni volta che una
-  voce viene clonata per la prima volta;
+- **il consenso.** Non puoi verificare che la persona l'abbia dato davvero: registri solo
+  quello che l'utente ti conferma, e lo rendi visibile ogni volta che una voce viene
+  clonata per la prima volta;
 - **la licenza delle musiche.** Stessa cosa: non puoi verificare che un brano in
   `musiche/` sia davvero utilizzabile, lo rendi visibile quando manca `licenza` nei
   metadati. Se un'intro o un'outro ha voci di persone reali, vale lo stesso principio

@@ -96,6 +96,39 @@ class Config:
         return dict(self.raw.get("lessons") or {})
 
     @property
+    def clone_cost_usd(self) -> float | None:
+        """Costo di una clonazione sul provider attivo, in USD (None = non noto).
+
+        Sta in `providers.<nome>.clone_cost_usd`, accanto a `options` e non
+        dentro: le opzioni vanno tali e quali al costruttore del provider.
+        """
+        providers = self.raw.get("providers") or {}
+        value = (providers.get(self.active_provider) or {}).get("clone_cost_usd")
+        if value is None:
+            return None
+        try:
+            return float(value)
+        except (TypeError, ValueError) as exc:
+            raise ConfigError(f"providers.{self.active_provider}.clone_cost_usd non e' un numero.") from exc
+
+    @property
+    def eur_rate(self) -> tuple[float, str] | None:
+        """(euro per un dollaro, data del tasso), o None se non configurato.
+
+        Decisione D3: il costo in euro si mostra solo con un tasso dichiarato e
+        datato in config.yaml (`currency.eur_per_usd`, `currency.rate_date`).
+        Nessun tasso inventato: senza, la UI mostra i dollari.
+        """
+        currency = self.raw.get("currency") or {}
+        rate, date = currency.get("eur_per_usd"), currency.get("rate_date")
+        if rate is None or not date:
+            return None
+        try:
+            return float(rate), str(date)
+        except (TypeError, ValueError) as exc:
+            raise ConfigError("currency.eur_per_usd non e' un numero.") from exc
+
+    @property
     def document_limits(self) -> Any:
         """Limiti sui documenti di partenza (sezione `documents:`).
 

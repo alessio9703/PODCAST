@@ -2,8 +2,8 @@
 
 > Documento in costruzione: si completa fase per fase (vedi `docs/avanzamento/`).
 > Coperti finora: contratto generale (C0), passi 1–4 + Confronto (C1), correzioni
-> della revisione di sicurezza C0+C1 e modalità web.
-> Le azioni dei passi 5–7, Archivio e Librerie arrivano con le fasi C2–C4; la
+> della revisione di sicurezza C0+C1 e modalità web, passi 5–6 (C2).
+> Le azioni del passo 7, Archivio e Librerie arrivano con le fasi C3–C4; la
 > versione completa con la sezione "a carico dell'adattatore" chiude la C5.
 
 ## 1. Come si chiama un comando
@@ -79,7 +79,7 @@ Le risposte di successo contengono ancora percorsi **assoluti** del server,
 che servono al subagent: `run_dir`, `session_file`, `script_file`,
 `episodio_file`, `musiche_file`, `musiche_usate_file`, `output`, `path`,
 `documento.percorso`, `voices_dir`, `music_dir`, `timings_file`,
-`segnali_file`, `voci_usate`, `text_file`, `audio_file`. **L'adattatore non
+`segnali_file`, `voci_usate`, `text_file`, `audio_file`, `events_file`. **L'adattatore non
 li mostra mai all'utente.** Per la UI ci sono i nomi relativi:
 
 - `run`: il nome della cartella dell'episodio (è anche un `--run-dir` valido);
@@ -260,6 +260,22 @@ copione e mostra la versione nuova, non riprova da sola.
   viene rilasciato.
 - I messaggi non contengono mai intestazioni HTTP né la chiave.
 
+### Introdotti in C2
+
+| error_type | exit | Quando | `details` |
+|---|---|---|---|
+| `ConsentRequired` | **3** | Una voce da usare non ha il consenso valido: **nessuna voce è stata clonata** | `voci: [{speaker, azione, stato, file}]` |
+| `ConsentByRequired` | 1 | `voice_meta.py --consent`/`--revoke-consent` senza `--by` | `campo: "by"` |
+| `VoiceMetaError` | 1 | File dei metadati di una voce illeggibile | `file` |
+| `ApprovalRequired` | 1 | `produce.py` su un copione non approvato, o diverso da quello approvato | `approval_problem` |
+| `ScriptMissing` | 1 | Stima o produzione di una run senza copione | — |
+| `ProductionInterrupted` | 1 | Produzione fermata (SIGTERM/Ctrl-C) fra una battuta e l'altra | `done`, `total`, `missing` |
+
+`ConsentRequired` è un esito 3: la UI mostra le caselle "Confermo che … ha dato il
+consenso" per le voci in `details.voci`, registra le conferme con `voice_meta.py` e
+richiama `produce.py`. `stato` dice perché: `mancante`, `superato` (la registrazione è
+stata sostituita dopo il consenso) o `revocato` (vale anche per una voce già clonata).
+
 ### `LockTimeout` · exit 1
 
 Un file condiviso (per esempio il registro delle voci) è rimasto in uso da
@@ -377,7 +393,8 @@ Esempio reale (cast completo, con un'intro scelta al passo 3):
 
 - `ruoli[]` elenca sempre i ruoli del formato, anche vuoti, nell'ordine dello
   schermo. `clonata` è `true`/`false` ("Già clonata" / "Da clonare"),
-  `null` se il ruolo non ha voce. Il consenso arriva in C2.
+  `null` se il ruolo non ha voce. `consenso` è lo stato del consenso alla
+  clonazione di quella voce (vedi passo 5), `null` se il ruolo non ha voce.
 - `nome_proposto` è solo un suggerimento ricavato dal nome del file
   (`nome_proposto_completo: false` = manca nome o cognome): **non viene mai
   salvato da solo**.
@@ -590,3 +607,158 @@ Esempio reale (`--diff 1 3 --only-changes`):
   riapprovata. La storia resta intatta e il JSON è quello del copione, con in
   più `restored_from` e `versions`. Ripristinare la versione corrente dà
   `NothingToChange`.
+
+## Passo 5 · Stima e consenso
+
+| Azione | Comando | Lunga | Costa |
+|---|---|---|---|
+| Stima (costo, durata, battute da generare, voci) | `estimate.py --run-dir R` | no | no |
+| Stato del consenso di una voce | `voice_meta.py --name VOCE` | no | no |
+| "Confermo che … ha dato il consenso" | `voice_meta.py --name VOCE --consent --by U` | no | no |
+| Revoca il consenso | `voice_meta.py --name VOCE --revoke-consent --by U` | no | no |
+
+**`estimate.py --run-dir R`** legge il copione della run e funziona anche prima che le
+voci siano pronte. Per le voci già clonate le battute in cache si riconoscono dal
+registro; le battute delle voci da clonare contano tutte come da generare. Esempio reale
+(dopo una produzione, con costo di clonazione e cambio configurati):
+
+```json
+{
+  "ok": true,
+  "run": "2026-10-07_11-19_produzione",
+  "approved": true, "approved_version": 1, "approval_problem": null,
+  "turns": 6, "speakers": 2, "chars": 216, "words": 33, "spoken_chars": 216,
+  "duration_seconds": 15.8, "duration_label": "0m 00s - 0m 30s",
+  "duration_with_music_seconds": 15.8, "duration_with_music_low_seconds": 0.0, "duration_with_music_high_seconds": 30.0,
+  "cost_basis": "$10.00 / 1M caratteri", "rendered": "…",
+  "voices": [
+    {"speaker": "Mario Rossi", "azione": "reuse", "motivo": "gia' clonata, riuso il voice_id esistente",
+     "consenso": {"stato": "registrato", "da": "Utente A", "il": "2026-10-07T11:19:17", "revocato_da": null, "revocato_il": null},
+     "clonata_il": "2026-10-07T11:19:13", "file": "Mario Rossi.wav", "ruolo": null},
+    "…"
+  ],
+  "voices_to_clone": [], "consent_missing": [],
+  "turns_to_generate": 0, "turns_to_generate_list": [], "chars_to_generate": 0,
+  "cost_tts_usd": 0.0, "clone_cost_usd": 0.5, "clone_cost_known": true, "clone_cost_total_usd": 0.0,
+  "cost_usd": 0.0, "cost_complete": true,
+  "cost_eur": 0.0, "eur_per_usd": 0.9, "eur_rate_date": "2026-10-01"
+}
+```
+
+- **Costo stimato**: `cost_usd` è il costo di **questa** produzione (battute da generare
+  + voci da clonare). `cost_eur` c'è solo se `config.yaml` ha un cambio datato
+  (`currency.eur_per_usd`, `currency.rate_date`), altrimenti è `null` e la UI mostra i
+  dollari (decisione D3).
+- Il costo di una clonazione sta in `providers.<nome>.clone_cost_usd`. Se è `null`
+  (`clone_cost_known: false`) e ci sono voci da clonare, `cost_complete` è `false`: la
+  UI scrive che il costo delle clonazioni non è noto.
+- **Battute da generare**: `turns_to_generate` di `turns` ("le altre sono già pronte").
+- **Voci dell'episodio**: `voices[]`, con `azione` (`reuse` = "Già clonata il
+  `clonata_il`", `clone` = "Da clonare per la prima volta"), `ruolo` (da
+  `episodio.json`, `null` se manca) e `consenso`. La casella del consenso si mostra per
+  le voci in `consent_missing`.
+- **Copione approvato**: `approved`, `approved_version`, `approval_problem` (stessa regola
+  del gate: sha256 del copione approvato).
+
+**`voice_meta.py`** risponde
+`{"voce", "file", "consenso": {"stato", "da", "il", "revocato_da", "revocato_il"}, "consenso_revocato"}`.
+Il nome si risolve senza indovinare: esatto a meno di maiuscole e accenti, altrimenti
+exit 3 `AmbiguousName` con `candidates`. Il consenso vale per la registrazione attuale (se
+ne salva lo sha256): se il file audio viene sostituito lo stato diventa `superato`. Una
+voce con il consenso **revocato** non si clona e non si riusa.
+
+## Passo 6 · Generazione
+
+| Azione | Comando | Lunga | Costa |
+|---|---|---|---|
+| Genera l'episodio / riprendi | `produce.py --run-dir R --events output/<run>/_eventi.jsonl` | **sì** | **sì** (clonazione e sintesi) |
+| Avanzamento | *adattatore*: legge il file degli eventi mentre il comando gira | — | — |
+| Interrompi la generazione | *adattatore*: SIGTERM al processo di `produce.py` | — | — |
+| Stato "In generazione" (anche dopo aver chiuso la pagina) | `script_show.py --run-dir R` → `in_corso.operazione == "produzione"` | no | no |
+
+`produce.py` tiene il lock di lavoro della run per tutta la durata (una seconda
+produzione, scrittura o revisione sulla stessa run esce con `RunBusy`) e fa, in ordine:
+
+1. **approvazione**: il copione su disco deve essere quello approvato, altrimenti exit 1
+   `ApprovalRequired` e niente speso;
+2. **musiche**: validate prima di spendere (ffmpeg, brani, sha256);
+3. **voci**: riuso o clonazione, solo con il consenso (exit 3 `ConsentRequired`, nessuna
+   clonazione fatta), **senza retry** (un errore del provider esce con exit 2: blocco,
+   nessun "Riprova"). Due produzioni con la stessa voce nuova la clonano una volta sola;
+4. **sintesi** delle sole battute non in cache, **montaggio**, **mix** con le musiche;
+5. **chiusura**: `voci_usate.json`, copia del documento, tempi e segnali.
+
+Esempio reale (rilancio con tutto in cache):
+
+```json
+{
+  "ok": true,
+  "run": "2026-10-07_11-19_produzione",
+  "output": "output/<run>/produzione-di-prova.mp3", "file": "produzione-di-prova.mp3",
+  "format": "mp3", "duration_seconds": 6.9, "duration_label": "0m 07s",
+  "segments": 6, "generated_turns": [], "reused_turns": [1, 2, 3, 4, 5, 6], "tts_calls": 0,
+  "voices": {"riusate": ["Mario Rossi", "Giulia Bianchi"], "clonate": []},
+  "approved_version": 1, "documento": "documento_originale.txt",
+  "timings_file": "output/<run>/_tempi_turni.json", "warnings": [],
+  "events_file": "output/<run>/_eventi.jsonl"
+}
+```
+
+**Eventi** (`--events`, file dentro la cartella della run, svuotato all'inizio di ogni
+produzione): una riga JSON per evento, ognuna con `evento` e `at`. Esempio reale (con
+un'intro, voci già clonate):
+
+```
+{"evento": "iniziata", "at": "2026-10-07T11:19:22", "totale": 2, "fasi": ["preparazione_voci", "sintesi", "montaggio", "mix", "chiusura"]}
+{"evento": "fase_iniziata", "at": "…", "fase": "preparazione_voci"}
+{"evento": "voce", "at": "…", "speaker": "Mario Rossi", "azione": "riusata"}
+{"evento": "voce", "at": "…", "speaker": "Giulia Bianchi", "azione": "riusata"}
+{"evento": "fase_finita", "at": "…", "fase": "preparazione_voci", "riusate": 2, "clonate": 0}
+{"evento": "fase_iniziata", "at": "…", "fase": "sintesi"}
+{"evento": "battuta", "at": "…", "n": 1, "totale": 2, "speaker": "Mario Rossi", "cached": false, "eta_seconds": null}
+{"evento": "battuta", "at": "…", "n": 2, "totale": 2, "speaker": "Giulia Bianchi", "cached": false, "eta_seconds": 0.0}
+{"evento": "fase_finita", "at": "…", "fase": "sintesi"}
+{"evento": "fase_iniziata", "at": "…", "fase": "montaggio"}
+{"evento": "fase_finita", "at": "…", "fase": "montaggio"}
+{"evento": "fase_iniziata", "at": "…", "fase": "mix"}
+{"evento": "fase_finita", "at": "…", "fase": "mix"}
+{"evento": "fase_iniziata", "at": "…", "fase": "chiusura"}
+{"evento": "fase_finita", "at": "…", "fase": "chiusura"}
+{"evento": "finita", "at": "…", "file": "con-musica.mp3", "duration_seconds": 3.8, "tts_calls": 2}
+```
+
+| `evento` | Campi | Uso nello schermo "Generazione" |
+|---|---|---|
+| `iniziata` | `totale`, `fasi` | Quante battute, quali fasi (`mix` compare solo con musiche) |
+| `fase_iniziata` / `fase_finita` | `fase` (+ `riusate`, `clonate` alla fine di `preparazione_voci`) | Pronta / In corso / In attesa; "1 riusata · 2 clonate" |
+| `voce` | `speaker`, `azione` (`riusata`, `clonata`) | Dettaglio della preparazione voci |
+| `battuta` | `n`, `totale`, `speaker`, `cached`, `eta_seconds` | "[n] di [totale] · ~[m] min rimanenti" (`eta_seconds` è `null` finché non c'è una misura) |
+| `avviso` | `testo` | Avvisi (es. battuta sospetta, brano senza licenza) |
+| `finita` | `file`, `duration_seconds`, `tts_calls` | "Ascolta l'episodio" |
+| `interrotta` | `done`, `total`, `missing` | "Potrai riprendere dall'Archivio" |
+| `errore` | `error_type`, `error` | Lo stesso errore del JSON finale |
+
+Il file degli eventi si apre solo dopo che il lock è stato preso: un secondo lancio
+respinto con `RunBusy` non lo tocca. Un errore prima di quel punto (approvazione,
+consenso, percorsi) è solo nel JSON su stdout.
+
+**Interruzione.** SIGTERM (o Ctrl-C) ferma la produzione fra una battuta e l'altra: la
+battuta in corso finisce e si salva, una clonazione già partita finisce. Esito exit 1
+`ProductionInterrupted`:
+
+```json
+{"ok": false, "error_type": "ProductionInterrupted",
+ "error": "Produzione interrotta: 3 battute pronte su 8. Le battute pronte restano salvate: rilanciando si generano solo le mancanti.",
+ "exit_code": 1, "details": {"done": 3, "total": 8, "missing": [4, 5, 6, 7, 8]}}
+```
+
+Per riprendere si rilancia lo stesso comando: si pagano solo le battute in `missing`. Un
+secondo SIGTERM ferma subito (esito `Interrupted`), senza aspettare la battuta in corso.
+
+| exit | `produce.py` |
+|---|---|
+| 0 | episodio pronto |
+| 1 | `ApprovalRequired`, `ScriptMissing`, `RunBusy`, `ProductionInterrupted`, `Interrupted`, `PathNotAllowed` (`--events` fuori dalla run), errori delle musiche, errore di sintesi di una battuta (`AssemblyError`: si può rilanciare, si pagano solo le mancanti) |
+| 2 | errore del provider durante la **clonazione** (`ProviderQuotaError`, `ProviderAuthError`, …): blocco, nessun "Riprova" |
+| 3 | `ConsentRequired`, `MusicChangedError` (brano sostituito: si conferma con `--accept-changed-music`) |
+

@@ -75,6 +75,12 @@ providers:
         top_p: 0.7
         # >1 scoraggia le cantilene e le cadenze ripetute fra turno e turno.
         repetition_penalty: 1.2
+    # Costo di UNA clonazione di voce (USD), per la stima del passo 5. Sta qui,
+    # accanto a `options` e non dentro, perche' le opzioni vanno tali e quali
+    # al provider. null = costo non noto: la stima lo dichiara e mostra solo
+    # il costo della sintesi. Compilalo con la tariffa vera: un numero
+    # indovinato sarebbe peggio di nessun numero.
+    clone_cost_usd: null
 
   # Esempio di come si aggiunge un provider alternativo in futuro:
   # cartesia:
@@ -101,6 +107,13 @@ paths:
 # contenuto: un file enorme non deve occupare memoria e tempo (e il lock della
 # bozza) solo per sentirsi dire che e' troppo grande. Oltre un limite il
 # comando esce con exit 1, error_type DocumentTooLarge.
+# Valuta della stima (decisione D3). Il provider fattura in dollari: il costo
+# in euro si mostra solo con un cambio dichiarato E datato qui. Senza, null e
+# la stima resta in dollari.
+currency:
+  eur_per_usd: null
+  rate_date: null
+
 documents:
   # Dimensione del file (20 MB).
   max_bytes: 20971520

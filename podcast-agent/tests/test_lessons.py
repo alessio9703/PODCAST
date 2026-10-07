@@ -628,9 +628,11 @@ def test_signals_fallisce_senza_bloccare_synthesize() -> None:
             fallito = True
         check("collect_and_write fallisce senza sessione (dimostra che puo' fallire)", fallito)
 
-    synth_src = (PROJECT_ROOT / "tools" / "synthesize.py").read_text(encoding="utf-8")
+    # La sintesi (tools/synthesize.py e tools/produce.py) passa da
+    # src/production.render_episode(), che raccoglie i segnali.
+    synth_src = (PROJECT_ROOT / "src" / "production.py").read_text(encoding="utf-8")
     check(
-        "synthesize.py chiama i segnali dentro un try/except che non rilancia",
+        "la sintesi chiama i segnali dentro un try/except che non rilancia",
         "collect_and_write(run_dir" in synth_src and "except Exception" in synth_src,
     )
 

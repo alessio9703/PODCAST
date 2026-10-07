@@ -421,6 +421,7 @@ __all__ = [
     "WEB_MODE_ENV",
     "WEB_FORBIDDEN_ARGS",
     "NotAllowedInWebMode",
+    "InvalidArguments",
     "web_mode",
     "parse_args",
     "bootstrap",

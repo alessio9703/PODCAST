@@ -8,6 +8,7 @@ resoconti accanto a questo file:
 - `C1.md`
 - `C0+C1-sicurezza.md`
 - `C0+C1-correzioni.md`, `C0+C1-correzioni-sicurezza.md`
+- `C2.md`
 
 ## 1. Commit
 
@@ -21,10 +22,11 @@ resoconti accanto a questo file:
 | `b2f89ce` | sicurezza C0+C1: correzioni ALTA-1 e ALTA-2, subagent `security-reviewer` |
 | `d29ae0c` | `CLAUDE.md` e questo `STATO.md` |
 | `a6361f1` | sicurezza C0+C1: medie e basse chiuse, modalità web, python-docx installato |
-| (questo) | correzioni della revisione del diff: limiti di lavoro e tempo, `InvalidArguments`, `_redact`, divieti web |
+| `b3c6ed8` | correzioni della revisione del diff: limiti di lavoro e tempo, `InvalidArguments`, `_redact`, divieti web |
+| (questo) | **C2** produzione: consenso, stima per la run, `produce.py` con eventi e interruzione |
 
 Test all'ultimo commit, sempre con `.venv/bin/python`: smoke 68, tools_cli 183 (+2
-saltati, servono `ANTHROPIC_API_KEY`), music 73, lessons 80, web_integration 303.
+saltati, servono `ANTHROPIC_API_KEY`), music 73, lessons 80, web_integration 394.
 
 ## 2. Fasi
 
@@ -34,7 +36,7 @@ saltati, servono `ANTHROPIC_API_KEY`), music 73, lessons 80, web_integration 303
 | C1 | Copione: passi 1–4 e pannello Confronto | **fatta** (+ decisioni sui dubbi) |
 | Sicurezza C0+C1 | Revisione, rapporto, correzione delle alte | **fatta**: alte, medie e basse corrette |
 | Correzioni + modalità web | MEDIA-1, BASSA-1/2/3, `PODCAST_AGENT_WEB=1` | **fatta**; revisione del diff: 0 alte, 2 medie e 4 basse, **tutte corrette** |
-| C2 | Produzione: passi 5 (stima e consenso) e 6 (generazione) | da fare (in attesa dell'OK dell'utente) |
+| C2 | Produzione: passi 5 (stima e consenso) e 6 (generazione) | **fatta**; revisione di sicurezza da fare |
 | C3 | Episodio e correzioni: passo 7 | da fare |
 | C4 | Archivio e librerie (Documenti, Voci, Musiche), Impostazioni, verifica di Lezioni e Diagnostica | da fare |
 | C5 | Contratto completo + README/LEGENDA + riepilogo finale | da fare (il contratto è già aggiornato per C0–C1) |
@@ -253,7 +255,9 @@ musiche → copione → modifica → approva → stima → consenso → produce 
 
 ## 4. Richieste ricevute e non ancora completate
 
-1. **C2**: autorizzata dall'utente ("procedi con C2") il 2026-10-07, dopo le correzioni.
+1. **Revisione di sicurezza di C2** (`C2-sicurezza.md`), con le alte corrette prima di C3.
+2. **Dubbi aperti di C2** (`C2.md`, sezione 4): consenso per voce o per episodio.
+3. **OK per C3.**
 
 ## 5. Annotazioni per le fasi successive e per la fase finale
 

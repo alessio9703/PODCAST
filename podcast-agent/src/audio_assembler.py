@@ -60,6 +60,22 @@ class MissingSpeakerVoice(AssemblyError):
     """Uno speaker dello script non ha una voce assegnata."""
 
 
+class SynthesisStopped(AssemblyError):
+    """La sintesi si e' fermata su richiesta, fra una battuta e l'altra.
+
+    Nessun segmento resta scritto a meta' (la scrittura e' atomica): quelli
+    gia' pronti restano in cache, e rilanciando si pagano solo `missing`.
+    """
+
+    def __init__(self, done: int, total: int, missing: list[int]) -> None:
+        super().__init__(
+            f"Sintesi fermata: {done} battute pronte su {total}, ne mancano {len(missing)}."
+        )
+        self.done = done
+        self.total = total
+        self.missing = missing
+
+
 @dataclass
 class AssemblyResult:
     path: Path
@@ -362,6 +378,7 @@ class AudioAssembler:
         voice_map: dict[str, str],
         segments_dir: Path,
         progress: ProgressCallback | None = None,
+        should_stop: Callable[[], bool] | None = None,
     ) -> SynthesisResult:
         """Sintetizza solo i turni che non sono gia' in cache.
 
@@ -375,6 +392,10 @@ class AudioAssembler:
         scrittura e' atomica (vedi `_write_atomic`): un crash a meta'
         download lascia al massimo un `.tmp`, mai un wav troncato che alla
         sintesi dopo verrebbe riusato come se fosse buono.
+
+        `should_stop()` si controlla prima di ogni battuta da sintetizzare:
+        se e' vero la sintesi si ferma con SynthesisStopped, senza lasciare
+        niente a meta'. La battuta gia' partita invece finisce: e' pagata.
         """
         self.check_voice_coverage(script, voice_map)
         segments_dir.mkdir(parents=True, exist_ok=True)
@@ -399,6 +420,13 @@ class AudioAssembler:
                     progress(index, total, speaker, True)
                 reused.append(index)
             else:
+                if should_stop and should_stop():
+                    missing = [
+                        n
+                        for n, k in enumerate(keys, start=1)
+                        if not segment_path(segments_dir, k, choices.get(k, 1), extension).is_file()
+                    ]
+                    raise SynthesisStopped(total - len(missing), total, missing)
                 if progress:
                     progress(index, total, speaker, False)
                 try:

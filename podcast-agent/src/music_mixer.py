@@ -31,7 +31,7 @@ from array import array
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 from .audio_assembler import AudioAssembler, slugify
 from .ffmpeg_tool import find_ffmpeg, require_ffmpeg
@@ -222,6 +222,7 @@ def mix_episode(
     config: Any,
     accept_changed_music: bool = False,
     choice: ChosenMusic | None = None,
+    on_mix_start: Callable[[], None] | None = None,
 ) -> MixResult:
     """Rimonta la voce dai segmenti e ci sovrappone intro/outro/sottofondo.
 
@@ -253,6 +254,10 @@ def mix_episode(
     segments_dir = run_dir / "segmenti"
     voice_master_path = segments_dir / assembler.VOICE_MASTER_FILENAME
     voice_assembly = assembler.assemble_voice_master(segments, voice_master_path)
+    # Fine del montaggio della voce, inizio del mix: la UI li mostra come due
+    # fasi distinte (tools/produce.py).
+    if on_mix_start:
+        on_mix_start()
 
     with wave.open(str(voice_master_path), "rb") as handle:
         rate = handle.getframerate()

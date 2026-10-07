@@ -38,6 +38,10 @@ def _normalize(value: str) -> str:
     return " ".join(stripped.lower().replace("_", " ").replace("-", " ").split())
 
 
+#: File che stanno accanto alle registrazioni senza esserlo.
+_SIDECAR_EXTENSIONS = {".json", ".lock", ".tmp"}
+
+
 #: Parole che nei nomi dei file stanno davanti al nome della persona ("Voce
 #: Alessio Menegatto.m4a") e che non fanno parte del nome.
 _FILENAME_NOISE = {"voce", "registrazione", "audio"}
@@ -81,6 +85,10 @@ class VoiceLibrary:
         rejected: list[Path] = []
         for entry in sorted(self.dir.iterdir()):
             if not entry.is_file() or entry.name.startswith("."):
+                continue
+            # Metadati accanto alla registrazione (src/voice_meta.py) e i loro
+            # lock: non sono registrazioni, ne' file in un formato sbagliato.
+            if entry.suffix.lower() in _SIDECAR_EXTENSIONS:
                 continue
             if entry.suffix.lower() in self.accepted_extensions:
                 voices.append(AvailableVoice(name=entry.stem.strip(), path=entry))

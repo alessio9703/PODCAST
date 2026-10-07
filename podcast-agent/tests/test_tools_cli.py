@@ -205,7 +205,7 @@ def main() -> None:
     voices_json = run_dir / "voci.json"
     code, out, _ = tool(
         "voices_prepare.py", "--speakers", "Mario Rossi", "Giulia Bianchi",
-        "--out", str(voices_json), "--no-approval-gate", config=config,
+        "--out", str(voices_json), "--no-approval-gate", "--no-consent-gate", config=config,
     )
     check("exit 0", code == 0)
     check("gate saltato esplicitamente", out["approval_gate"] == "bypassed")
@@ -234,7 +234,7 @@ def main() -> None:
     make_wav(root2 / "voci" / "Mario Rossi.wav")
     config_fail = write_config(root2, fail_clone=True)
     code, out, err = tool("voices_prepare.py", "--speakers", "Mario Rossi",
-                          "--no-approval-gate", config=config_fail)
+                          "--no-approval-gate", "--no-consent-gate", config=config_fail)
     check("clonazione fallita -> exit 2 (fermati, non ritentare)", code == 2, f"exit={code}")
     check("tipo errore del provider", out["error_type"] == "ProviderQuotaError", str(out))
 
@@ -642,7 +642,7 @@ def main() -> None:
     code, out, _ = approve15()
     check("copione approvato", code == 0 and out["approved"] is True)
     code, out, _ = tool("voices_prepare.py", "--speakers", "Mario Rossi", "Giulia Bianchi",
-                        "--out", str(voices15), "--run-dir", str(rd), config=cfg)
+                        "--out", str(voices15), "--run-dir", str(rd), "--no-consent-gate", config=cfg)
     check("voci preparate col gate superato", code == 0 and out["approval_gate"] == "passed")
 
     # -- 1. prima sintesi, poi la stessa sintesi: zero chiamate nuove --------
@@ -728,7 +728,7 @@ def main() -> None:
     tool("script_approve.py", "--run-dir", str(rd2), "--current", config=cfg)
     voices2 = rd2 / "voci.json"
     tool("voices_prepare.py", "--speakers", "Mario Rossi", "Giulia Bianchi",
-         "--out", str(voices2), "--run-dir", str(rd2), config=cfg)
+         "--out", str(voices2), "--run-dir", str(rd2), "--no-consent-gate", config=cfg)
 
     code, out, _ = tool("synthesize.py", "--script", str(rd2 / "conversazione.json"),
                         "--voices", str(voices2), "--run-dir", str(rd2), config=cfg_fail)
