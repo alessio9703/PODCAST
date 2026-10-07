@@ -21,8 +21,11 @@ from .errors import AmbiguousName, DomainError
 from .fileio import file_lock, write_json_atomic
 from .music_library import CATEGORIES, MusicLibrary, MusicTrack
 
-#: Lunghezza massima di licenza e trascrizione (testi scritti dall'utente).
+#: Lunghezza massima della licenza e della trascrizione (testi scritti
+#: dall'utente; la trascrizione entra nel prompt del modello) e di --by.
 MAX_TEXT = 2000
+MAX_TRANSCRIPT = 500
+MAX_BY = 100
 
 
 class MusicMetaError(DomainError):
@@ -70,7 +73,12 @@ def update_metadata(
     who = " ".join(by.split()) if by else None
     if not who:
         raise MusicMetaError("Serve il nome di chi modifica (--by).", details={"campo": "by"})
+    if len(who) > MAX_BY:
+        raise MusicMetaError(f"--by troppo lungo (massimo {MAX_BY} caratteri).", details={"campo": "by"})
     target = track.path.with_suffix(".json")
+    if target.is_symlink():
+        # Un link al posto dei metadati non si segue (C4, BASSA-4).
+        raise MusicMetaError(f"{target.name} e' un link simbolico: non lo modifico.", details={"file": target.name})
     with file_lock(target):
         raw: dict[str, Any] = {}
         if target.is_file():
@@ -100,7 +108,12 @@ def update_metadata(
             if not parlato:
                 raw["trascrizione"] = None
         if trascrizione is not None:
-            raw["trascrizione"] = _clean_text(trascrizione, "trascrizione")
+            text = _clean_text(" ".join(str(trascrizione).split()), "trascrizione")
+            if text and len(text) > MAX_TRANSCRIPT:
+                raise MusicMetaError(
+                    f"Trascrizione troppo lunga (massimo {MAX_TRANSCRIPT} caratteri).", details={"campo": "trascrizione"}
+                )
+            raw["trascrizione"] = text
 
         if track.category == "sottofondo" and raw.get("parlato"):
             raise MusicMetaError(

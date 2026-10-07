@@ -520,6 +520,21 @@ def load_system_prompt(prompt_file: Path = PROMPT_FILE, lessons_file: Path = LES
 SYSTEM_PROMPT = load_system_prompt()
 
 
+#: Lunghezza massima della trascrizione di un brano nel prompt.
+MAX_TRANSCRIPT_CHARS = 500
+
+
+def _quoted_transcript(text: str) -> str:
+    """La trascrizione come DATO fra virgolette: una riga sola, senza virgolette
+    doppie ne' delimitatori '---', limitata. E' scritta dall'utente nella
+    libreria Musiche: non deve poter uscire dal blocco CONTESTO MUSICALE
+    (revisione di sicurezza C4, BASSA-3)."""
+    flat = " ".join(str(text).split()).replace('"', "'")
+    while "---" in flat:
+        flat = flat.replace("---", "-")
+    return flat[:MAX_TRANSCRIPT_CHARS]
+
+
 def _render_music_context(music_context: dict[str, Any] | None) -> str:
     """Il blocco --- CONTESTO MUSICALE --- del prompt, o stringa vuota.
 
@@ -540,7 +555,7 @@ def _render_music_context(music_context: dict[str, Any] | None) -> str:
         entry = music_context.get(category)
         if not entry or not entry.get("trascrizione"):
             continue
-        trascrizione = entry["trascrizione"]
+        trascrizione = _quoted_transcript(entry["trascrizione"])
         parts.append(
             f"{intro_label} che contiene gia' del parlato:\n"
             f'"{trascrizione}"\n'

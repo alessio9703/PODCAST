@@ -64,6 +64,9 @@ def meta_path(audio_path: Path | str) -> Path:
 def load_meta(audio_path: Path | str) -> dict[str, Any]:
     """Metadati della voce. File assente = metadati vuoti, non un errore."""
     path = meta_path(audio_path)
+    if path.is_symlink():
+        # Un link al posto dei metadati non si segue (C4, BASSA-4).
+        raise VoiceMetaError(f"{path.name} e' un link simbolico: non lo leggo.", details={"file": path.name})
     if not path.is_file():
         return {}
     try:
@@ -139,12 +142,18 @@ def consent_revoked(audio_path: Path | str) -> bool:
     return not meta.get("consenso") and bool(meta.get("consenso_revocato"))
 
 
-def consent_view(audio_path: Path | str, meta: dict[str, Any] | None = None) -> dict[str, Any]:
-    """Cio' che la UI mostra del consenso: stato, chi e quando."""
+def consent_view(
+    audio_path: Path | str, meta: dict[str, Any] | None = None, *, audio_sha256: str | None = None
+) -> dict[str, Any]:
+    """Cio' che la UI mostra del consenso: stato, chi e quando.
+
+    `audio_sha256`: gia' calcolato da chi chiama (l'elenco delle voci lo ha in
+    cache); senza, si calcola sul file.
+    """
     meta = load_meta(audio_path) if meta is None else meta
     consent = meta.get("consenso") or {}
     revoked = meta.get("consenso_revocato") or {}
-    current = file_hash(audio_path)
+    current = audio_sha256 or file_hash(audio_path)
     return {
         "stato": consent_state(audio_path, meta, audio_sha256=current),
         # Lo sha256 della registrazione ATTUALE: e' quello che l'interfaccia
@@ -161,7 +170,13 @@ def _now() -> str:
     return datetime.now().replace(microsecond=0).isoformat()
 
 
+#: Lunghezza massima di nome pronunciato e --by (revisione di sicurezza C4, BASSA-3).
+MAX_NAME = 100
+
+
 def _require_by(by: str | None) -> str:
+    if by and len(" ".join(by.split())) > MAX_NAME:
+        raise VoiceMetaError(f"--by troppo lungo (massimo {MAX_NAME} caratteri).", details={"campo": "by"})
     if not by or not by.strip():
         raise VoiceMetaError(
             "Serve il nome di chi registra (--by): il consenso dice chi lo ha confermato.",
@@ -219,6 +234,11 @@ def record_spoken_name(
     clean = " ".join(str(name).split())
     if not clean:
         raise VoiceMetaError("Il nome da pronunciare e' vuoto.", details={"campo": "nome_pronunciato"})
+    if len(clean) > MAX_NAME or any(ord(ch) < 32 for ch in clean):
+        raise VoiceMetaError(
+            f"Nome da pronunciare non valido (massimo {MAX_NAME} caratteri, niente caratteri di controllo).",
+            details={"campo": "nome_pronunciato"},
+        )
     if not accept_incomplete and not spoken_name_is_complete(clean):
         raise SpokenNameIncomplete(
             f"'{clean}': manca il cognome. Aggiungilo, non lo indoviniamo; se va detto proprio "
@@ -232,7 +252,7 @@ def record_spoken_name(
         meta["schema_version"] = SCHEMA_VERSION
         meta["voce"] = voice
         meta["nome_pronunciato"] = clean
-        meta["nome_pronunciato_da"] = " ".join(by.split()) if by else None
+        meta["nome_pronunciato_da"] = " ".join(by.split())[:MAX_NAME] if by else None
         meta["nome_pronunciato_il"] = _now()
         write_json_atomic(target, meta)
     return meta

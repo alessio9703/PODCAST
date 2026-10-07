@@ -83,6 +83,8 @@ def _last_progress(run_dir: Path) -> tuple[int | None, int | None]:
                 event = json.loads(line)
             except json.JSONDecodeError:
                 continue
+            if not isinstance(event, dict):
+                continue
             if event.get("evento") == "iniziata":
                 total = event.get("totale")
             elif event.get("evento") == "battuta":
@@ -141,7 +143,7 @@ def run_state(run_dir: Path, config: Any, provider: Any = None) -> dict[str, Any
             done, total = _last_progress(run_dir)
             extra["battuta"] = done
             extra["battute_totali"] = total
-    elif final is not None and script is not None and _coherent(run_dir, script, approved):
+    elif final is not None and script is not None and _coherent(run_dir, script, approved, session):
         state = "pronto"
     else:
         missing = _missing(run_dir, script, provider) if (script is not None and approved) else None
@@ -187,14 +189,17 @@ def run_state(run_dir: Path, config: Any, provider: Any = None) -> dict[str, Any
     }
 
 
-def _coherent(run_dir: Path, script: PodcastScript, approved: bool) -> bool:
+def _coherent(run_dir: Path, script: PodcastScript, approved: bool, session: ScriptSession | None) -> bool:
     """Il file finale corrisponde alla run di adesso (vedi src/episode_info.py).
 
-    Run montate prima di C3 (nessun _montaggio.json): basta che il file ci sia.
+    Run montate prima di C3 (nessun _montaggio.json): basta che il file ci sia
+    e che il copione, se c'e' una sessione, sia ancora quello approvato (C4,
+    MEDIA-1): una run vecchia con il copione cambiato dopo l'approvazione non
+    e' "pronta".
     """
     record = load_montage(run_dir)
     if record is None:
-        return True
+        return approved or session is None
     from .episode_info import _staleness  # import locale: evita un ciclo
 
     return approved and not _staleness(run_dir, record, script)
@@ -203,6 +208,16 @@ def _coherent(run_dir: Path, script: PodcastScript, approved: bool) -> bool:
 def _normalize(value: str) -> str:
     decomposed = unicodedata.normalize("NFKD", value or "")
     return "".join(c for c in decomposed if not unicodedata.combining(c)).lower()
+
+
+def filter_runs(rows: list[dict[str, Any]], *, group: str | None = None, search: str | None = None) -> list[dict[str, Any]]:
+    """Filtro e ricerca dell'Archivio su righe gia' calcolate."""
+    if group:
+        rows = [r for r in rows if r["gruppo"] == group]
+    if search:
+        needle = _normalize(search.strip())
+        rows = [r for r in rows if needle in _normalize(r.get("titolo") or "") or needle in _normalize(r.get("documento") or "")]
+    return rows
 
 
 def list_runs(config: Any, provider: Any = None, *, group: str | None = None, search: str | None = None) -> list[dict[str, Any]]:
@@ -231,13 +246,8 @@ def list_runs(config: Any, provider: Any = None, *, group: str | None = None, se
                 "aggiornato_il": _updated_at(entry),
             }
         rows.append(row)
-    if group:
-        rows = [r for r in rows if r["gruppo"] == group]
-    if search:
-        needle = _normalize(search.strip())
-        rows = [r for r in rows if needle in _normalize(r.get("titolo") or "") or needle in _normalize(r.get("documento") or "")]
     rows.sort(key=lambda r: r.get("aggiornato_il") or "", reverse=True)
-    return rows
+    return filter_runs(rows, group=group, search=search)
 
 
-__all__ = ["GROUPS", "STATES", "list_runs", "run_state"]
+__all__ = ["GROUPS", "STATES", "filter_runs", "list_runs", "run_state"]

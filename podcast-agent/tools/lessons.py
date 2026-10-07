@@ -26,7 +26,7 @@ import json
 import os
 from pathlib import Path
 
-from _common import NeedsUserInput, PROJECT_ROOT, add_config_arg, bootstrap, emit, note, parse_args, run_tool  # noqa: E402
+from _common import InvalidArguments, NeedsUserInput, PROJECT_ROOT, add_config_arg, bootstrap, emit, note, parse_args, run_tool, web_mode  # noqa: E402
 from src import lessons as lessons_mod  # noqa: E402
 from src.episode_signals import SIGNALS_FILENAME  # noqa: E402
 
@@ -140,7 +140,7 @@ def _do_propose(config, lessons_config: dict, last: int | None, dry_run: bool) -
     emit({**result, "stima": stima})
 
 
-def _do_accept(lessons_config: dict, lesson_id: str, text_override: str | None, remove_id: str | None) -> None:
+def _do_accept(lessons_config: dict, lesson_id: str, text_override: str | None, remove_id: str | None, by: str | None = None) -> None:
     lezioni_md_path = PROMPTS_DIR / lessons_mod.MD_FILENAME
     try:
         result = lessons_mod.accept(
@@ -150,6 +150,7 @@ def _do_accept(lessons_config: dict, lesson_id: str, text_override: str | None, 
             text_override=text_override,
             remove_id=remove_id,
             max_lines=int(lessons_config.get("max_lines", 20)),
+            by=by,
         )
     except lessons_mod.NeedsRemoval as exc:
         candidati = "; ".join(f"{c['id']} ({c['motivo']}): {c['testo']}" for c in exc.candidates)
@@ -162,8 +163,8 @@ def _do_accept(lessons_config: dict, lesson_id: str, text_override: str | None, 
     emit(result)
 
 
-def _do_reject(lesson_id: str, reason: str | None) -> None:
-    result = lessons_mod.reject(PROMPTS_DIR, lesson_id, reason=reason)
+def _do_reject(lesson_id: str, reason: str | None, by: str | None = None) -> None:
+    result = lessons_mod.reject(PROMPTS_DIR, lesson_id, reason=reason, by=by)
     note(f"Lezione {lesson_id} rifiutata.")
     emit(result)
 
@@ -206,10 +207,15 @@ def main() -> None:
     parser.add_argument("--text", default=None, help="Con --accept: riscrive il testo della proposta")
     parser.add_argument("--remove-id", default=None, help="Con --accept: quale lezione attiva togliere se serve spazio")
     parser.add_argument("--reason", default=None, help="Con --reject: perche' si scarta")
+    parser.add_argument("--by", default=None, help="Con --accept/--reject: chi decide (obbligatorio dall'interfaccia)")
     add_config_arg(parser)
     args = parse_args(parser)
 
     config = bootstrap(args)
+    if (args.accept or args.reject) and web_mode() and not (args.by and args.by.strip()):
+        # Una lezione entra nel prompt di tutti gli episodi: dall'interfaccia
+        # si registra chi l'ha decisa (revisione di sicurezza C4, MEDIA-2).
+        raise InvalidArguments("Serve --by: chi accetta o rifiuta la lezione.", details={"messaggio": "manca --by"})
     lessons_config = config.lessons
 
     if args.evidence:
@@ -219,9 +225,9 @@ def main() -> None:
     elif args.list:
         emit({"lezioni": lessons_mod.list_lessons(PROMPTS_DIR)})
     elif args.accept:
-        _do_accept(lessons_config, args.accept, args.text, args.remove_id)
+        _do_accept(lessons_config, args.accept, args.text, args.remove_id, args.by)
     elif args.reject:
-        _do_reject(args.reject, args.reason)
+        _do_reject(args.reject, args.reason, args.by)
     elif args.review:
         _do_review(config, lessons_config)
     elif args.trend:

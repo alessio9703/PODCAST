@@ -81,8 +81,8 @@ che servono al subagent: `run_dir`, `session_file`, `script_file`,
 `episodio_file`, `musiche_file`, `musiche_usate_file`, `output`, `path`,
 `documento.percorso`, `voices_dir`, `music_dir`, `timings_file`,
 `segnali_file`, `voci_usate`, `text_file`, `audio_file`, `events_file`. In
-`voices_list.py` non si mostrano neanche `voice_id` e `cache_reason` (dati del
-provider). **L'adattatore non
+modalità web `voices_list.py` e `music_list.py` danno le cartelle per nome e
+`voices_list.py` omette `path`, `voice_id` e `cache_reason`. **L'adattatore non
 li mostra mai all'utente.** Per la UI ci sono i nomi relativi:
 
 - `run`: il nome della cartella dell'episodio (è anche un `--run-dir` valido);
@@ -952,7 +952,7 @@ regola che vale:
 | `stato` | Quando | `gruppo` | `azione` | `passo` |
 |---|---|---|---|---|
 | `in_corso` | un'operazione lunga tiene il lock; per la produzione `battuta`/`battute_totali` dagli eventi | `in_produzione` | Segui l'avanzamento | 6 |
-| `pronto` | file finale coerente con la run (o run di prima, con il file) | `pronti` | Ascolta | 7 |
+| `pronto` | file finale coerente con la run (per le run di prima, senza registro di montaggio: il file c'è e il copione, se c'è una sessione, è ancora quello approvato) | `pronti` | Ascolta | 7 |
 | `da_aggiornare` | file finale, copione approvato, nessuna battuta da generare, ma take o musiche cambiati | `pronti` | Rimonta | 7 |
 | `interrotta` | approvato, voci pronte, battute mancanti (`battute_mancanti`, `null` se non calcolabile) | `in_produzione` | Riprendi | 6 |
 | `stima_e_consenso` | approvato | `in_produzione` | Vai alla stima | 5 |
@@ -973,7 +973,8 @@ regola che vale:
 
 | Azione | Comando | Lunga | Costa |
 |---|---|---|---|
-| Elenco | `documents_list.py [--filter mai_usati\|gia_usati\|con_problemi] [--search T]` | la prima volta, per estrarre | no |
+| Elenco | `documents_list.py [--filter mai_usati\|gia_usati\|con_problemi] [--search T]` | no (al massimo ~20 s di estrazioni nuove) | no |
+| Un documento, estratto subito | `documents_list.py --name NOME` | per un PDF lungo, fino al limite di tempo | no |
 | Carica documento | *adattatore*: salva il file in `documenti/` (vedi fondo) | — | — |
 | Anteprima | `doc_extract.py NOME` | no | no |
 | Crea episodio | `run_init.py --title T --document NOME` | no | no |
@@ -990,7 +991,12 @@ Esempio reale (una riga):
   `troppo_grande`): è la riga "Testo non estraibile" del wireframe (filtro
   `con_problemi`).
 - L'estrazione è in cache in `documenti/.estrazioni/<sha256>.json`: un file sostituito
-  con lo stesso nome si ri-estrae.
+  con lo stesso nome si ri-estrae. Le estrazioni **nuove** di una chiamata hanno un
+  budget di tempo: i documenti rimasti tornano con `in_attesa: true` (campi `null`) e
+  `in_attesa` in cima dice quanti sono; la UI richiama l'elenco, o `--name` per uno solo.
+  Gli sha256 sono in cache (`.cache_file.json`, validi finché file, dimensione e data non
+  cambiano).
+- Una riga che non si riesce a leggere ha `errore` (l'elenco non fallisce).
 - `usato_in`/`episodi`: dallo sha256 registrato nelle run; per le run di prima, dal nome.
 - `scartati[]`: file con un formato non gestito.
 
@@ -1020,7 +1026,8 @@ Esempio reale (una voce; omessi `path`, `voice_id`, `cache_reason`, che restano 
   `spoken_name` è solo una proposta dal nome del file. Il passo 2 lo propone come nome
   per il ruolo, senza salvarlo da solo.
 - Con `--spoken-name` e `--consent` insieme, un nome incompleto ferma tutto prima del
-  consenso. La voce si clona solo alla prima produzione che la usa, dopo la stima.
+  consenso. Nome e `--by`: al massimo 100 caratteri.
+- Una voce con i metadati rotti compare con `errore` (`stato: "Illeggibile"`). La voce si clona solo alla prima produzione che la usa, dopo la stima.
 
 ## Libreria Musiche
 
@@ -1041,7 +1048,8 @@ Esempio reale (un brano):
 ```
 
 - Stesse regole della libreria: un sottofondo non può avere parlato, la trascrizione vale
-  solo con parlato (`MusicMetaError`). La licenza non si verifica: si registra chi l'ha
+  solo con parlato (`MusicMetaError`). Trascrizione al massimo 500 caratteri (entra nel
+  prompt del copione, su una riga e senza virgolette doppie), licenza 2000, `--by` 100. La licenza non si verifica: si registra chi l'ha
   dichiarata e quando.
 - `usato_in`: episodi che hanno scelto il brano (`musiche.json`).
 - Le modifiche ai metadati sono atomiche e sotto lock (nessuna modifica persa con più
@@ -1061,13 +1069,18 @@ retake, valuta, lezioni, cartelle}}`. Sola lettura, solo una **whitelist** di ch
 | Lezioni attive, proposte, rifiutate | `lessons.py --list` | no | no |
 | Schemi ricorrenti | `lessons.py --evidence [--last N]` | no | no |
 | Proponi lezioni (stima prima) | `lessons.py --propose --dry-run`, poi `lessons.py --propose` | sì | **sì** (API Anthropic) |
-| Accetta / rifiuta | `lessons.py --accept ID [--text=…] [--remove-id ID]` / `--reject ID --reason=…` | no | no |
+| Accetta / rifiuta | `lessons.py --accept ID --by U [--text=…] [--remove-id ID]` / `--reject ID --by U --reason=…` | no | no |
 | Revisione, andamento | `lessons.py --review`, `lessons.py --trend` | no | no |
 
 - Il registro delle lezioni è condiviso: accetta, rifiuta, revisione e proposte si
   scrivono sotto lock e in modo atomico (anche `lezioni.md`). `lezioni_md` nel JSON è
   relativo (`prompts/lezioni.md`).
-- Una lezione accettata entra nel prompt di **tutti** gli episodi successivi.
+- Una lezione accettata entra nel prompt di **tutti** gli episodi successivi, di tutti
+  gli utenti: va riservata a chi amministra il progetto (decisione dell'adattatore). In
+  modalità web `--by` è obbligatorio (`InvalidArguments`), e resta nel registro
+  (`accettata_da`, `rifiutata_da`).
+- Testo di una lezione: al massimo 400 caratteri, nessuna riga che inizi con `#` o `---`;
+  `lezioni.md` al massimo 4000 caratteri (`LessonsError`, nulla scritto).
 - `--accept` può dare exit 3 `needs_user_input` (serve togliere una lezione: si richiama con
   `--remove-id`).
 - Da sistemare nella fase finale: gli errori dell'API in `--propose` non hanno ancora gli

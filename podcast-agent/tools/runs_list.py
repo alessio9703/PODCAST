@@ -14,7 +14,7 @@ from __future__ import annotations
 import argparse
 
 from _common import add_config_arg, bootstrap, emit, parse_args, run_tool  # noqa: E402
-from src.run_state import GROUPS, list_runs  # noqa: E402
+from src.run_state import GROUPS, filter_runs, list_runs  # noqa: E402
 
 
 def build_provider_or_none(config):  # type: ignore[no-untyped-def]
@@ -33,10 +33,13 @@ def main() -> None:
     args = parse_args(parser)
 
     config = bootstrap(args)
-    rows = list_runs(config, build_provider_or_none(config), group=args.status, search=args.search)
+    # L'Archivio si calcola UNA volta: i conteggi sono sull'intero elenco, il
+    # filtro dopo (revisione di sicurezza C4, MEDIA-3).
+    every = list_runs(config, build_provider_or_none(config))
     counts: dict[str, int] = {}
-    for row in list_runs(config, None) if (args.status or args.search) else rows:
+    for row in every:
         counts[row["gruppo"]] = counts.get(row["gruppo"], 0) + 1
+    rows = filter_runs(every, group=args.status, search=args.search)
     emit({"episodi": rows, "totale": len(rows), "conteggi": counts})
 
 

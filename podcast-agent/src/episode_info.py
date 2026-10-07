@@ -55,10 +55,17 @@ def final_file(run_dir: Path, script: Any) -> Path | None:
     if record and record.get("file"):
         candidate = Path(run_dir) / Path(str(record["file"])).name
         return candidate if candidate.is_file() else None
-    for ext in (".mp3", ".wav"):
-        candidate = Path(run_dir) / f"{slugify(script.titolo)}{ext}"
-        if candidate.is_file():
-            return candidate
+    # Senza registro: il nome dal titolo del copione (run di prima) o da quello
+    # dell'episodio (G7, se il registro e' andato perso).
+    stems = [slugify(script.titolo)]
+    episode = EpisodeConfig.load(run_dir)
+    if episode is not None and episode.titolo:
+        stems.append(slugify(episode.titolo))
+    for stem in stems:
+        for ext in (".mp3", ".wav"):
+            candidate = Path(run_dir) / f"{stem}{ext}"
+            if candidate.is_file() and not candidate.is_symlink():
+                return candidate
     return None
 
 

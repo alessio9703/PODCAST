@@ -106,7 +106,7 @@ class VoiceRegistry:
             return p.as_posix()
 
     def lookup(
-        self, name: str, audio_path: str | Path, provider: str
+        self, name: str, audio_path: str | Path, provider: str, *, audio_hash: str | None = None
     ) -> tuple[str | None, str]:
         """Ritorna (voice_id_riusabile, motivo).
 
@@ -114,7 +114,9 @@ class VoiceRegistry:
         leggibile da mostrare all'utente.
         """
         entry = self._data.get(name)
-        current_hash = file_hash(audio_path)
+        # `audio_hash` gia' calcolato da chi chiama (elenchi in cache): solo per
+        # mostrare lo stato, mai per decidere una clonazione.
+        current_hash = audio_hash or file_hash(audio_path)
 
         if entry is None:
             return None, "non presente nel registro"

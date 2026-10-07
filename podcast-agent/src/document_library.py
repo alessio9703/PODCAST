@@ -13,11 +13,19 @@ seconda trova il risultato della prima.
 "Usato in" si ricava dalle run: lo sha256 del documento registrato in
 episodio.json (o quello della copia documento_originale.*); solo per le run
 che non hanno uno sha256 si ripiega sul nome del file.
+
+Costo dell'elenco (revisione di sicurezza C4, MEDIA-3): gli sha256 sono in
+cache (src/hash_cache.py) e le estrazioni NUOVE di una chiamata hanno un
+budget di tempo; i documenti rimasti tornano con `in_attesa: true` e si
+estraggono alla chiamata dopo (o subito, chiedendo il solo documento con
+--name).
 """
 
 from __future__ import annotations
 
 import json
+import os
+import time
 import unicodedata
 from datetime import datetime
 from pathlib import Path
@@ -25,13 +33,15 @@ from typing import Any
 
 from .episode_config import EpisodeConfig
 from .fileio import file_lock, write_json_atomic
+from .hash_cache import HashCache
+from .paths import PathNotAllowed
 from .pdf_reader import (
     SUPPORTED_EXTENSIONS,
+    DocumentError,
     DocumentNotExtractable,
     DocumentTooLarge,
     extract_text,
 )
-from .registry import file_hash
 from .script_session import FILENAME as SESSION_FILENAME
 
 CACHE_DIRNAME = ".estrazioni"
@@ -39,9 +49,39 @@ CACHE_VERSION = 1
 
 FILTERS = ("mai_usati", "gia_usati", "con_problemi")
 
+#: Secondi di estrazioni NUOVE per chiamata dell'elenco (le altre restano in attesa).
+EXTRACTION_BUDGET_SECONDS = 20
+
+
+def _cache_dir(documents_dir: Path) -> Path:
+    """La cartella della cache: mai un link simbolico (C4, BASSA-4)."""
+    target = Path(documents_dir) / CACHE_DIRNAME
+    if target.is_symlink() or (target.exists() and not target.is_dir()):
+        raise PathNotAllowed(
+            f"{CACHE_DIRNAME} nella libreria Documenti non e' una cartella normale.", details={"campo": "cache"}
+        )
+    target.mkdir(exist_ok=True)
+    return target
+
 
 def _cache_target(documents_dir: Path, digest: str) -> Path:
-    return Path(documents_dir) / CACHE_DIRNAME / f"{digest.split(':', 1)[-1]}.json"
+    return _cache_dir(documents_dir) / f"{digest.split(':', 1)[-1]}.json"
+
+
+def _read_cached(target: Path) -> dict[str, Any] | None:
+    if not target.is_file() or target.is_symlink():
+        return None
+    try:
+        cached = json.loads(target.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return None
+    if isinstance(cached, dict) and cached.get("versione") == CACHE_VERSION and isinstance(cached.get("estrazione"), dict):
+        return cached["estrazione"]
+    return None
+
+
+def cached_extraction(config: Any, digest: str) -> dict[str, Any] | None:
+    return _read_cached(_cache_target(config.documents_dir, digest))
 
 
 def _extraction_summary(path: Path, config: Any) -> dict[str, Any]:
@@ -60,28 +100,28 @@ def _extraction_summary(path: Path, config: Any) -> dict[str, Any]:
     }
 
 
+def _stat_signature(path: Path) -> tuple[int, int, int]:
+    stat = os.stat(path)
+    return stat.st_size, stat.st_mtime_ns, stat.st_ino
+
+
 def extraction_info(path: Path, config: Any, digest: str) -> dict[str, Any]:
     """Pagine, parole, estraibile: dalla cache, o estraendo (sotto lock)."""
     target = _cache_target(config.documents_dir, digest)
-    target.parent.mkdir(exist_ok=True)
-    if target.is_file():
-        try:
-            cached = json.loads(target.read_text(encoding="utf-8"))
-            if cached.get("versione") == CACHE_VERSION:
-                return cached["estrazione"]
-        except (OSError, json.JSONDecodeError, KeyError):
-            pass
+    cached = _read_cached(target)
+    if cached is not None:
+        return cached
     with file_lock(target, timeout=120):
         # Rilettura dentro il lock: un'altra richiesta puo' averlo appena fatto.
-        if target.is_file():
-            try:
-                cached = json.loads(target.read_text(encoding="utf-8"))
-                if cached.get("versione") == CACHE_VERSION:
-                    return cached["estrazione"]
-            except (OSError, json.JSONDecodeError, KeyError):
-                pass
+        cached = _read_cached(target)
+        if cached is not None:
+            return cached
+        before = _stat_signature(path)
         summary = _extraction_summary(path, config)
-        write_json_atomic(target, {"versione": CACHE_VERSION, "sha256": digest, "estrazione": summary})
+        # Se il file e' cambiato durante l'estrazione, il risultato non e'
+        # dello sha256 calcolato prima: si usa, ma non si salva (C4, BASSA-1).
+        if _stat_signature(path) == before:
+            write_json_atomic(target, {"versione": CACHE_VERSION, "sha256": digest, "estrazione": summary})
     return summary
 
 
@@ -107,7 +147,12 @@ def _usage(config: Any) -> tuple[dict[str, set[str]], dict[str, set[str]]]:
         if digest is None:
             copies = [p for p in run.glob("documento_originale.*") if p.is_file() and not p.is_symlink() and not p.name.endswith(".percorso.txt")]
             if copies:
-                digest = file_hash(copies[0])
+                try:
+                    cache = HashCache(run)
+                    digest = cache.sha256(copies[0])
+                    cache.save()
+                except OSError:
+                    digest = None
         if name is None:
             session = run / SESSION_FILENAME
             if session.is_file():
@@ -127,45 +172,78 @@ def _normalize(value: str) -> str:
     return "".join(c for c in decomposed if not unicodedata.combining(c)).lower()
 
 
-def list_documents(config: Any, *, filter_: str | None = None, search: str | None = None) -> dict[str, Any]:
+_PENDING = {"estraibile": None, "motivo": None, "pagine": None, "parole": None, "caratteri": None}
+
+
+def list_documents(
+    config: Any,
+    *,
+    filter_: str | None = None,
+    search: str | None = None,
+    only: str | None = None,
+    budget_seconds: float = EXTRACTION_BUDGET_SECONDS,
+) -> dict[str, Any]:
+    """L'elenco della libreria. `only`: un solo documento, estratto senza budget."""
     root = Path(config.documents_dir)
     if not root.is_dir():
-        return {"documenti": [], "scartati": []}
+        return {"documenti": [], "scartati": [], "in_attesa": 0}
     by_hash, by_name = _usage(config)
+    hashes = HashCache(root)
+    started = time.monotonic()
     rows = []
     rejected = []
     for entry in sorted(root.iterdir(), key=lambda p: p.name.lower()):
+        if only is not None and entry.name != only:
+            continue
         if entry.name.startswith(".") or entry.is_symlink() or not entry.is_file():
             continue
         if entry.suffix.lower() not in SUPPORTED_EXTENSIONS:
             rejected.append(entry.name)
             continue
-        digest = file_hash(entry)
-        info = extraction_info(entry, config, digest)
-        runs = sorted(by_hash.get(digest, set()) | by_name.get(entry.name, set()))
-        stat = entry.stat()
-        rows.append(
-            {
-                "nome": entry.name,
-                "tipo": entry.suffix.lower().lstrip(".").upper(),
-                "dimensione_bytes": stat.st_size,
-                "caricato_il": datetime.fromtimestamp(stat.st_mtime).replace(microsecond=0).isoformat(),
-                "sha256": digest,
-                **info,
-                "usato_in": len(runs),
-                "episodi": runs,
-            }
-        )
+        try:
+            rows.append(_row(entry, config, hashes, by_hash, by_name, started, None if only else budget_seconds))
+        except FileNotFoundError:
+            continue  # sparito durante l'elenco
+        except Exception as exc:  # noqa: BLE001 - un file rotto non fa fallire l'elenco (C4, BASSA-2)
+            rows.append({"nome": entry.name, "tipo": entry.suffix.lower().lstrip(".").upper(), **_PENDING,
+                         "estraibile": False, "motivo": "errore", "errore": type(exc).__name__, "usato_in": 0, "episodi": []})
+    hashes.save()
+    if only is not None and not rows:
+        raise DocumentError(f"Documento non trovato nella libreria Documenti: '{only}'.")
     if filter_ == "mai_usati":
         rows = [r for r in rows if r["usato_in"] == 0]
     elif filter_ == "gia_usati":
         rows = [r for r in rows if r["usato_in"] > 0]
     elif filter_ == "con_problemi":
-        rows = [r for r in rows if not r["estraibile"]]
+        rows = [r for r in rows if r["estraibile"] is False]
     if search:
         needle = _normalize(search.strip())
         rows = [r for r in rows if needle in _normalize(r["nome"])]
-    return {"documenti": rows, "scartati": rejected}
+    return {"documenti": rows, "scartati": rejected, "in_attesa": sum(1 for r in rows if r.get("in_attesa"))}
+
+
+def _row(entry: Path, config: Any, hashes: HashCache, by_hash: dict, by_name: dict, started: float, budget: float | None) -> dict[str, Any]:
+    digest = hashes.sha256(entry)
+    info = cached_extraction(config, digest)
+    pending = False
+    if info is None:
+        if budget is None or time.monotonic() - started < budget:
+            info = extraction_info(entry, config, digest)
+        else:
+            info, pending = dict(_PENDING), True
+    runs = sorted(by_hash.get(digest, set()) | by_name.get(entry.name, set()))
+    stat = entry.stat()
+    return {
+        "nome": entry.name,
+        "tipo": entry.suffix.lower().lstrip(".").upper(),
+        "dimensione_bytes": stat.st_size,
+        "caricato_il": datetime.fromtimestamp(stat.st_mtime).replace(microsecond=0).isoformat(),
+        "sha256": digest,
+        **info,
+        "in_attesa": pending,
+        "usato_in": len(runs),
+        "episodi": runs,
+    }
 
 
 __all__ = ["CACHE_DIRNAME", "FILTERS", "extraction_info", "list_documents"]

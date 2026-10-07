@@ -19,7 +19,7 @@ from __future__ import annotations
 
 import argparse
 
-from _common import add_config_arg, bootstrap, emit, note, parse_args, run_tool  # noqa: E402
+from _common import add_config_arg, bootstrap, emit, note, parse_args, run_tool, web_mode  # noqa: E402
 from src.errors import AmbiguousName  # noqa: E402
 from src.music_catalog import FILTERS, keep, music_usage, track_row  # noqa: E402
 from src.music_library import CATEGORIES, MusicLibrary  # noqa: E402
@@ -51,7 +51,8 @@ def main() -> None:
 def _do_list(library: MusicLibrary, config, filter_, search) -> None:  # type: ignore[no-untyped-def]
     usage = music_usage(config)
     payload: dict[str, object] = {
-        "music_dir": str(library.dir), "available": library.available(),
+        # Dall'interfaccia la cartella per nome (revisione di sicurezza C4, BASSA-5).
+        "music_dir": library.dir.name if web_mode() else str(library.dir), "available": library.available(),
     }
     for category in CATEGORIES:
         tracks = library.tracks(category)

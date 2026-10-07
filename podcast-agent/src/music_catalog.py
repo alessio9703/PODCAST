@@ -45,7 +45,7 @@ def music_usage(config: Any) -> dict[tuple[str, str], list[str]]:
 def _raw_meta(track: MusicTrack) -> dict[str, Any]:
     path = track.path.with_suffix(".json")
     try:
-        raw = json.loads(path.read_text(encoding="utf-8")) if path.is_file() else {}
+        raw = json.loads(path.read_text(encoding="utf-8")) if (path.is_file() and not path.is_symlink()) else {}
     except (OSError, json.JSONDecodeError):
         raw = {}
     return raw if isinstance(raw, dict) else {}

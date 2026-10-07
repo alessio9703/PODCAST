@@ -32,10 +32,11 @@ resoconti accanto a questo file:
 | `711c34b` | rapporto di sicurezza C3 |
 | `db8e47d` | sicurezza C3: medie e basse corrette |
 | `7b6b434` | **C4** Archivio, librerie, impostazioni; lock delle lezioni; doctor senza percorsi |
-| (questo) | rapporto di sicurezza C4 |
+| `e13ed9f` | rapporto di sicurezza C4 |
+| (questo) | sicurezza C4: medie e basse corrette |
 
 Test all'ultimo commit, sempre con `.venv/bin/python`: smoke 68, tools_cli 183 (+2
-saltati, servono `ANTHROPIC_API_KEY`), music 73, lessons 80, web_integration 568.
+saltati, servono `ANTHROPIC_API_KEY`), music 73, lessons 80, web_integration 593.
 
 ## 2. Fasi
 
@@ -47,7 +48,7 @@ saltati, servono `ANTHROPIC_API_KEY`), music 73, lessons 80, web_integration 568
 | Correzioni + modalità web | MEDIA-1, BASSA-1/2/3, `PODCAST_AGENT_WEB=1` | **fatta**; revisione del diff: 0 alte, 2 medie e 4 basse, **tutte corrette** |
 | C2 | Produzione: passi 5 (stima e consenso) e 6 (generazione) | **fatta**; revisione: 1 alta, 4 medie, 5 basse, **tutte corrette** |
 | C3 | Episodio e correzioni: passo 7 | **fatta**; revisione (con le correzioni di C2): 0 alte, 2 medie, 6 basse, **tutte corrette** |
-| C4 | Archivio e librerie (Documenti, Voci, Musiche), Impostazioni, verifica di Lezioni e Diagnostica | **fatta**; revisione: 0 alte, 3 medie e 5 basse **in attesa di decisione** |
+| C4 | Archivio e librerie (Documenti, Voci, Musiche), Impostazioni, verifica di Lezioni e Diagnostica | **fatta**; revisione: 0 alte, 3 medie, 5 basse, **tutte corrette** |
 | C5 | Contratto completo + README/LEGENDA + riepilogo finale | da fare (il contratto è già aggiornato per C0–C1) |
 | C6 | Allineamento di `run.py` a `src/music_context.py`, fase finale dedicata | da fare |
 
@@ -272,11 +273,8 @@ musiche → copione → modifica → approva → stima → consenso → produce 
 
 ## 4. Richieste ricevute e non ancora completate
 
-1. **Decidere medie e basse della revisione C4** (`C4-sicurezza.md`): MEDIA-1 "pronto" per
-   run senza `_montaggio.json` con copione non approvato; MEDIA-2 `lessons --accept --text`
-   senza limite; MEDIA-3 costo degli elenchi (sha256, estrazioni, ffmpeg a ogni chiamata);
-   BASSA-1…5.
-2. **OK per C5.**
+1. **OK per C5** (contratto completo con la sezione "a carico dell'adattatore", README,
+   LEGENDA, riepilogo finale).
 
 ## 5. Annotazioni per le fasi successive e per la fase finale
 

@@ -19,7 +19,7 @@ from __future__ import annotations
 
 import argparse
 
-from _common import add_config_arg, bootstrap, emit, note, parse_args, run_tool  # noqa: E402
+from _common import add_config_arg, bootstrap, emit, note, parse_args, run_tool, web_mode  # noqa: E402
 from src.voice_catalog import FILTERS, filter_rows, voice_rows  # noqa: E402
 from src.voice_library import VoiceLibrary  # noqa: E402
 
@@ -65,9 +65,16 @@ def main() -> None:
                 + (f", candidati: {', '.join(c.name for c in candidates)}" if candidates else "")
             )
 
+    if web_mode():
+        # Dall'interfaccia niente percorsi del server ne' voice_id del provider
+        # (revisione di sicurezza C4, BASSA-5); il subagent li ha in locale.
+        for voice in voices:
+            voice.pop("path", None)
+            voice.pop("voice_id", None)
+            voice.pop("cache_reason", None)
     emit(
         {
-            "voices_dir": str(config.voices_dir),
+            "voices_dir": config.voices_dir.name if web_mode() else str(config.voices_dir),
             "provider": config.active_provider,
             "count": len(voices),
             "voices": voices,

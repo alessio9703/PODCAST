@@ -349,6 +349,27 @@ def _find_schema(schemi: list[dict[str, Any]], pattern: dict[str, Any]) -> dict[
 # ----------------------------------------------------------------------
 
 
+#: Limiti del testo di una lezione: entra nel prompt di TUTTI gli episodi di
+#: tutti gli utenti (revisione di sicurezza C4, MEDIA-2). Il tetto di righe di
+#: lezioni.md (lessons.max_lines) da solo non basta: una riga puo' essere enorme.
+MAX_LESSON_CHARS = 400
+MAX_LESSONS_TOTAL_CHARS = 4000
+
+
+def lesson_text_problem(testo: str) -> str | None:
+    """None = testo accettabile. Altrimenti il motivo."""
+    if len(testo) > MAX_LESSON_CHARS:
+        return f"testo troppo lungo ({len(testo)} caratteri, massimo {MAX_LESSON_CHARS})."
+    for line in testo.splitlines():
+        stripped = line.strip()
+        # Il testo non deve poter imitare intestazioni o delimitatori del prompt.
+        if stripped.startswith("#") or stripped.startswith("---"):
+            return "il testo non puo' contenere righe che iniziano con '#' o '---'."
+    if any(ord(ch) < 32 and ch not in "\n\t" for ch in testo):
+        return "il testo contiene caratteri di controllo."
+    return None
+
+
 def validate_proposal(item: dict[str, Any], schemi: list[dict[str, Any]]) -> str | None:
     """None = proposta valida. Altrimenti il motivo, esplicito, del rifiuto."""
     pattern = item.get("pattern") or {}
@@ -374,7 +395,7 @@ def validate_proposal(item: dict[str, Any], schemi: list[dict[str, Any]]) -> str
         return "testo della lezione vuoto."
     if _FORBIDDEN_TOPICS.search(testo):
         return "la lezione tocca costi, approvazione o consenso vocale: non e' materia di una lezione di stile."
-    return None
+    return lesson_text_problem(testo)
 
 
 def _duplicate_of_rejected(item: dict[str, Any], entries: list[dict[str, Any]]) -> bool:
@@ -631,6 +652,7 @@ def _accept(
     text_override: str | None,
     remove_id: str | None,
     max_lines: int,
+    by: str | None = None,
 ) -> dict[str, Any]:
     entries = load_db(prompts_dir)
     entry = next((e for e in entries if e.get("id") == lesson_id), None)
@@ -640,6 +662,9 @@ def _accept(
         raise LessonsError(f"La lezione '{lesson_id}' non e' in stato 'proposta' (e': {entry.get('stato')}).")
 
     testo_finale = (text_override or entry["testo"]).strip()
+    problem = lesson_text_problem(testo_finale)
+    if problem:
+        raise LessonsError(f"Lezione non accettata: {problem}")
     if _FORBIDDEN_TOPICS.search(testo_finale):
         raise LessonsError(
             "Il testo tocca costi, approvazione o consenso vocale: una lezione non puo' allentare quelle regole."
@@ -659,10 +684,16 @@ def _accept(
     candidate_md = render_lezioni_md(trial)
     if _line_count(candidate_md) > max_lines and not remove_id:
         raise NeedsRemoval(_removal_candidates(entries))
+    if len(candidate_md) > MAX_LESSONS_TOTAL_CHARS:
+        raise LessonsError(
+            f"Con questa lezione lezioni.md supererebbe {MAX_LESSONS_TOTAL_CHARS} caratteri: "
+            "togline una (--remove-id) o accorcia il testo."
+        )
 
     accettata_il = _now()
     entry["stato"] = "attiva"
     entry["accettata_il"] = accettata_il
+    entry["accettata_da"] = " ".join(by.split())[:100] if by else None
     entry["testo"] = testo_finale
     if text_override:
         entry["testo_riscritto_da_utente"] = True
@@ -689,13 +720,13 @@ def accept(prompts_dir: Path, lezioni_md_path: Path, lesson_id: str, **kwargs: A
         return _accept(prompts_dir, lezioni_md_path, lesson_id, **kwargs)
 
 
-def reject(prompts_dir: Path, lesson_id: str, *, reason: str | None) -> dict[str, Any]:
+def reject(prompts_dir: Path, lesson_id: str, *, reason: str | None, by: str | None = None) -> dict[str, Any]:
     """Scarta una proposta: sotto il lock del registro (vedi _db_lock)."""
     with _db_lock(prompts_dir):
-        return _reject(prompts_dir, lesson_id, reason=reason)
+        return _reject(prompts_dir, lesson_id, reason=reason, by=by)
 
 
-def _reject(prompts_dir: Path, lesson_id: str, *, reason: str | None) -> dict[str, Any]:
+def _reject(prompts_dir: Path, lesson_id: str, *, reason: str | None, by: str | None = None) -> dict[str, Any]:
     entries = load_db(prompts_dir)
     entry = next((e for e in entries if e.get("id") == lesson_id), None)
     if entry is None:
@@ -704,7 +735,8 @@ def _reject(prompts_dir: Path, lesson_id: str, *, reason: str | None) -> dict[st
         raise LessonsError(f"La lezione '{lesson_id}' non e' in stato 'proposta' (e': {entry.get('stato')}).")
     entry["stato"] = "rifiutata"
     entry["rifiutata_il"] = _now()
-    entry["motivo_rifiuto"] = reason or ""
+    entry["motivo_rifiuto"] = (reason or "")[:MAX_LESSON_CHARS]
+    entry["rifiutata_da"] = " ".join(by.split())[:100] if by else None
     save_db(prompts_dir, entries)
     return {"id": lesson_id, "stato": "rifiutata", "motivo_rifiuto": entry["motivo_rifiuto"]}
 

@@ -88,6 +88,8 @@ class MusicTrack:
 def _load_metadata(track_path: Path, category: str) -> tuple[TrackMetadata, str | None]:
     """Legge <nome>.json accanto al brano. Assente = metadati vuoti, non errore."""
     meta_path = track_path.with_suffix(".json")
+    if meta_path.is_symlink():
+        return TrackMetadata(), f"{meta_path.name} e' un link simbolico: non lo leggo."
     if not meta_path.is_file():
         return TrackMetadata(), None
 

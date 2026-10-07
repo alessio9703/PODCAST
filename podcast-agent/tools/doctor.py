@@ -134,6 +134,11 @@ def check_paths() -> list[dict[str, Any]]:
         config = load_config()
     except ConfigError as exc:
         return [_check("config.yaml", False, str(exc), True)]
+    # Le cartelle configurate fuori dal progetto si accorciano al loro nome
+    # nell'output (revisione di sicurezza C4, BASSA-5).
+    from src.redaction import register_roots
+
+    register_roots(config)
 
     results = [_check("config.yaml", True, str(config.path), True)]
     # documents_dir/voices_dir/output_dir sono di fatto obbligatori per un

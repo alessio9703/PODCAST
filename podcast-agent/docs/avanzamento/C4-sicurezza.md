@@ -272,3 +272,36 @@ delle librerie. `tests/test_web_integration.py`: 568 controlli superati.
   stessa regola anche per le run montate dal flusso del subagent, che non scrive
   `_montaggio.json`.
 - **Ancora aperte da C0+C1**: BASSA-1 e BASSA-3, come da `C3-sicurezza.md`.
+
+
+---
+
+## Esito delle correzioni (aggiunto da chi ha implementato, non dal revisore)
+
+Data: 2026-10-07. Nessuna alta. L'utente ha deciso di correggere tutte le medie e le basse
+prima di C5.
+
+- **MEDIA-1**: `run_state._coherent` per le run senza `_montaggio.json` richiede che il
+  copione sia ancora quello approvato (se c'è una sessione). In più `final_file` cerca il
+  file finale anche con il titolo dell'episodio (G7), se il registro manca.
+- **MEDIA-2**: testo di una lezione al massimo 400 caratteri, niente righe che iniziano con
+  `#` o `---`, niente caratteri di controllo, `lezioni.md` al massimo 4000 caratteri (anche
+  per le proposte del modello); `--by` registrato (`accettata_da`, `rifiutata_da`) e
+  obbligatorio in modalità web.
+- **MEDIA-3**: `src/hash_cache.py` (sha256 e durate in `.cache_file.json` per cartella,
+  validi per nome, dimensione, data in ns e inode); budget di 20 s di estrazioni nuove per
+  elenco (`in_attesa`, `--name` per un documento); `runs_list` calcola l'Archivio una volta
+  e filtra dopo.
+- **BASSA-1**: la cache delle estrazioni si scrive solo se il file non è cambiato durante
+  l'estrazione.
+- **BASSA-2**: righe con `errore` per documenti e voci rotti; cache non-oggetto ignorata;
+  righe di `_eventi.jsonl` non-oggetto ignorate.
+- **BASSA-3**: trascrizione nel prompt su una riga, senza virgolette doppie né `---`, al
+  massimo 500 caratteri (anche alla scrittura); nome pronunciato e `--by` al massimo 100
+  caratteri, senza caratteri di controllo.
+- **BASSA-4**: `.estrazioni`, `<brano>.json` e `<voce>.json` come link simbolici non si
+  seguono (`PathNotAllowed`/errori dedicati, nulla scritto fuori).
+- **BASSA-5**: in modalità web `voices_list`/`music_list` danno le cartelle per nome e
+  `voices_list` omette `path`, `voice_id`, `cache_reason`; `doctor` registra le cartelle
+  configurate (accorciate al nome).
+
