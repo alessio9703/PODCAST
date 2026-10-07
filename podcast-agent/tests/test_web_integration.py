@@ -1414,7 +1414,9 @@ def test_web_mode(root: Path, config: Path, run_dir: str) -> None:
 
 def write_c2_config(root: Path, name: str, *, clone_cost: float | None = None, eur: tuple[float, str] | None = None, **options: object) -> Path:
     """Config con il provider finto, le opzioni date e i costi del passo 5."""
-    opts = {"seconds_per_100_chars": 2.0, "voices_file": str(root / "fake_voices.json"), "clone_log_file": str(root / "clonazioni.log"), **options}
+    # tts_log_file: i test contano le battute davvero arrivate al TTS finto, non
+    # i contatori che il codice calcola da se' (revisione finale, N12).
+    opts = {"seconds_per_100_chars": 2.0, "voices_file": str(root / "fake_voices.json"), "clone_log_file": str(root / "clonazioni.log"), "tts_log_file": str(root / "tts.log"), **options}
     text = (root / "config-web.yaml").read_text(encoding="utf-8")
     head, _, rest = text.partition("paths:")
     provider = "active_provider: fake\nproviders:\n  fake:\n    class: tests.fake_provider:FakeProvider\n    options:\n"
@@ -1549,9 +1551,11 @@ def test_c2_estimate_and_produce(root: Path, config: Path) -> str:
     wav.write_bytes(original)
 
     print("\n[C2] passo 6: produzione completa con eventi")
+    sent = len(tts_texts(root))
     code, out, err = tool("produce.py", "--run-dir", run_dir, "--events", config=config)
     check("produce: exit 0", code == 0, err[-500:] + str(out)[:300])
     check("due voci clonate, tutte le battute sintetizzate", sorted(out["voices"]["clonate"]) == ["Giulia Bianchi", "Mario Rossi"] and out["tts_calls"] == 6 and out["reused_turns"] == [], str(out)[:400])
+    check("...e al TTS sono arrivati davvero i 6 testi del copione", tts_texts(root)[sent:] == [t["testo"] for t in SCRIPT_C2["turni"]], str(tts_texts(root)[sent:]))
     check("una clonazione per voce", sorted(clone_attempts(root)) == ["Giulia Bianchi", "Mario Rossi"], str(clone_attempts(root)))
     check(
         "file finale nella run, percorsi relativi per la UI (output/<run>/...)",
@@ -1582,8 +1586,10 @@ def test_c2_estimate_and_produce(root: Path, config: Path) -> str:
     check("eta: null alla prima, poi un numero", turns_ev[0]["eta_seconds"] is None and all(isinstance(r["eta_seconds"], (int, float)) for r in turns_ev[1:]), str([r["eta_seconds"] for r in turns_ev]))
     check("ogni evento ha l'ora", all(r.get("at") for r in rows))
 
+    sent = len(tts_texts(root))
     code, out, _ = tool("produce.py", "--run-dir", run_dir, "--events", config=config)
     check("rilancio: niente da pagare, voci riusate", code == 0 and out["tts_calls"] == 0 and sorted(out["voices"]["riusate"]) == ["Giulia Bianchi", "Mario Rossi"], str(out)[:300])
+    check("...nessun testo arrivato al TTS", len(tts_texts(root)) == sent, str(tts_texts(root)[sent:]))
     check("rilancio: nessuna nuova clonazione", len(clone_attempts(root)) == 2)
     check("il file eventi riparte da capo a ogni produzione", read_events(events)[0]["evento"] == "iniziata" and sum(1 for r in read_events(events) if r["evento"] == "iniziata") == 1)
     code, out, _ = tool("estimate.py", "--run-dir", run_dir, config=config)
@@ -1664,9 +1670,11 @@ def test_c2_interrupt(root: Path) -> None:
     code, out2, _ = tool("script_show.py", "--run-dir", run_dir, config=slow)
     check("dopo l'interruzione il lock e' libero (nessuna operazione in corso)", out2["in_corso"] is None)
 
+    sent = len(tts_texts(root))
     code, out2, err = tool("produce.py", "--run-dir", run_dir, config=slow)
     check("ripresa: exit 0", code == 0, err[-300:])
     check("ripresa: paga solo le battute mancanti", out2["generated_turns"] == details.get("missing") and out2["tts_calls"] == len(details.get("missing", [])), str((out2.get("generated_turns"), details.get("missing"))))
+    check("...al TTS sono arrivati solo i testi delle battute mancanti", tts_texts(root)[sent:] == [script["turni"][n - 1]["testo"] for n in details.get("missing", [])], str(tts_texts(root)[sent:]))
 
 
 def test_c2_clone_errors(root: Path, config: Path) -> None:
@@ -1870,8 +1878,10 @@ def test_c2_fixes(root: Path, config: Path) -> None:
     )
     check("evento 'errore' ConsentRequired scritto ancora sotto il lock", read_events(events)[-1]["evento"] == "errore" and read_events(events)[-1]["error_type"] == "ConsentRequired")
     tool("voice_meta.py", "--name", "Giulia Bianchi", "--consent", "--by", "Utente A", config=config)
+    sent = len(tts_texts(root))
     code, out, _ = tool("produce.py", "--run-dir", run_dir, config=slow)
     check("riconfermato il consenso, la ripresa paga solo le mancanti", code == 0 and out["generated_turns"] == details.get("missing"), str(out.get("generated_turns")))
+    check("...al TTS sono arrivate solo le mancanti", len(tts_texts(root)) - sent == len(details.get("missing") or []), str(tts_texts(root)[sent:]))
 
     print("\n[sicurezza C2] file finali scritti in modo atomico, ffmpeg con timeout")
     proc = run_python(
@@ -2669,8 +2679,10 @@ def test_full_flow(web: bool = False) -> None:
     check("   interrotta: battute pronte e mancanti", proc.returncode == 1 and out["error_type"] == "ProductionInterrupted" and out["details"]["missing"], str(out)[:300])
     missing = out["details"]["missing"]
     check("   l'Archivio dice 'interrotta'", tool("run_status.py", "--run-dir", run, config=config)[1]["stato"] == "interrotta")
+    sent = len(tts_texts(root))
     code, out, err = tool("produce.py", "--run-dir", run, "--events", config=config)
     check("   ripresa: paga solo le mancanti, voci gia' clonate riusate", code == 0 and out["generated_turns"] == missing and sorted(out["voices"]["riusate"]) == sorted([PRESENTER, INTERVIEWER, GUEST]), err[-300:] + str(out)[:300])
+    check("   ...al TTS sono arrivate solo le mancanti", len(tts_texts(root)) - sent == len(missing), str(tts_texts(root)[sent:]))
     check("   file dal titolo dell'episodio", out["file"] == "il-trimestre-finale.mp3", out.get("file"))
 
     code, info, _ = tool("episode_info.py", "--run-dir", run, config=config)
@@ -3167,11 +3179,122 @@ def test_c7_doctor() -> None:
     check("senza --web: nessun controllo della modalita' (uso locale invariato)", code == 0 and not any(c["name"] == "web_mode" for c in out["checks"]), str(out)[:300])
 
 
+def test_c7_gaps(root: Path) -> None:
+    """N8, N9, N10: garanzie che nessun test copriva."""
+    print("\n[C7] N8 · nessun retry HTTP sulla clonazione Fish Audio")
+    proc = run_python(
+        f"""
+        import requests
+        import src.providers.fish_audio_provider as fish
+        from pathlib import Path
+        fish.time.sleep = lambda seconds: None
+        provider = fish.FishAudioProvider("chiave-finta", max_retries=3)
+        calls = []
+        def answer(status):
+            def request(method, url, timeout=None, **kwargs):
+                calls.append((method, url.rsplit("/", 1)[-1]))
+                response = requests.Response()
+                response.status_code = status
+                response._content = b'{{"message": "occupato"}}'
+                response.headers["content-type"] = "application/json"
+                return response
+            return request
+        audio = Path({str(root / "voci" / "Mario Rossi.wav")!r})
+        provider._session.request = answer(503)
+        try:
+            provider.clone_voice("Mario Rossi", str(audio))
+        except fish.VoiceProviderError:
+            pass
+        print("clonazione", len(calls))
+        calls.clear()
+        def timeout(method, url, timeout=None, **kwargs):
+            calls.append(method)
+            raise requests.Timeout()
+        provider._session.request = timeout
+        try:
+            provider.clone_voice("Mario Rossi", str(audio))
+        except fish.VoiceProviderError:
+            pass
+        print("timeout", len(calls))
+        calls.clear()
+        provider._session.request = answer(503)
+        try:
+            provider._request("POST", "/v1/tts")
+        except fish.VoiceProviderError:
+            pass
+        print("sintesi", len(calls))
+        """
+    )
+    counts = dict(line.split() for line in proc.stdout.strip().splitlines() if len(line.split()) == 2)
+    check("HTTP 503 sulla clonazione: una sola richiesta", counts.get("clonazione") == "1", proc.stdout + proc.stderr)
+    check("timeout sulla clonazione: una sola richiesta", counts.get("timeout") == "1", proc.stdout + proc.stderr)
+    check("controllo: la sintesi invece ritenta (3 richieste), quindi il test vede un retry", counts.get("sintesi") == "3", proc.stdout + proc.stderr)
+
+    print("\n[C7] N9 · un segmento o c'e' intero o non c'e'")
+    segments = root / "segmenti-n9"
+    proc = run_python(
+        f"""
+        import os
+        from pathlib import Path
+        from src.audio_assembler import AudioAssembler
+        from src.script_writer import PodcastScript
+        from tests.fake_provider import FakeProvider
+        segments = Path({str(segments)!r})
+        assembler = AudioAssembler.from_config(FakeProvider(seconds_per_100_chars=2.0), {{}})
+        script = PodcastScript.from_dict({{"titolo": "T", "turni": [{{"speaker": "Mario Rossi", "testo": "Una battuta che si interrompe."}}]}})
+        def crash(src, dst):
+            raise OSError("processo ucciso fra la scrittura e il rename")
+        os.replace = crash
+        try:
+            assembler.synthesize(script, {{"Mario Rossi": "fake-0001"}}, segments)
+            print("nessun errore")
+        except OSError as exc:
+            print("errore")
+        """
+    )
+    left = sorted(p.name for p in segments.rglob("*") if p.is_file()) if segments.exists() else []
+    check("crash a meta' della scrittura: l'errore arriva al chiamante", proc.stdout.strip() == "errore", proc.stdout + proc.stderr)
+    check("...e non resta un segmento (che la cache riuserebbe) ne' un .tmp", not [n for n in left if n.endswith((".wav", ".tmp"))], str(left))
+
+    print("\n[C7] N10 · avviso: copione scritto per un'intro diversa")
+    project, run = c7_project()
+    for speaker in ("Mario Rossi", "Giulia Bianchi"):
+        run("voice_meta.py", "--name", speaker, "--consent", "--by", "Utente A", web=False)
+    # Solo le musiche CON PARLATO entrano nella fotografia del copione
+    # (capture_music_context): sono quelle che il copione non deve ripetere.
+    (project / "musiche" / "intro" / "Piano calmo.json").write_text(json.dumps({"parlato": True, "trascrizione": "Benvenuti a LIL"}), encoding="utf-8")
+    (project / "musiche" / "intro" / "Piano forte.json").write_text(json.dumps({"parlato": True, "trascrizione": "Ecco LIL"}), encoding="utf-8")
+    (project / "musiche" / "outro").mkdir()
+    make_wav(project / "musiche" / "outro" / "Chiusura.wav", 0.5, 300)
+    name = run("run_init.py", "--title", "Intro cambiata", "--document", "report.txt", web=False)[1]["run"]
+    run("music_set.py", "--run-dir", name, "--intro=Piano calmo", "--outro=Chiusura")
+    draft = project / "output" / name / "bozza.json"
+    draft.write_text(json.dumps(SCRIPT_C2, ensure_ascii=False), encoding="utf-8")
+    run("script_save.py", "--run-dir", name, "--script-json", str(draft), "--speakers", "Giulia Bianchi", "Mario Rossi", web=False)
+    run("script_approve.py", "--run-dir", name, "--version", "1", "--by=Utente A")
+    code, out, err = run("produce.py", "--run-dir", name)
+    warning = "scritto per un intro diverso"
+    check("produce con l'intro del copione: nessun avviso", code == 0 and not any(warning in w for w in out["warnings"]), err[-300:] + str(out.get("warnings")))
+    run("music_set.py", "--run-dir", name, "--intro=Piano forte")
+    code, out, err = run("mix.py", "--run-dir", name)
+    check("intro cambiata dopo il copione: mix avvisa, non blocca", code == 0 and any(warning in w and "Piano forte" in w for w in out["warnings"]), err[-300:] + str(out.get("warnings")))
+    make_wav(project / "musiche" / "intro" / "Piano calmo.wav", 0.5, 660)
+    run("music_set.py", "--run-dir", name, "--intro=Piano calmo")
+    code, out, err = run("mix.py", "--run-dir", name, "--accept-changed-music")
+    check("stesso nome ma brano sostituito (sha256 diverso): avvisa lo stesso", code == 0 and any(warning in w for w in out["warnings"]), err[-300:] + str(out.get("warnings")))
+    run("music_set.py", "--run-dir", name, "--none", "intro")
+    code, out, err = run("mix.py", "--run-dir", name)
+    check("intro tolta: avvisa che il copione ne teneva conto", code == 0 and any("non ne e' stato scelto nessuno" in w for w in out["warnings"]), err[-300:] + str(out.get("warnings")))
+
+
 def test_c7() -> None:
     test_c7_consent()
     test_c7_run_py()
     test_c7_music()
     test_c7_doctor()
+    gaps = Path(tempfile.mkdtemp(prefix="podcast-web-c7-gaps-"))
+    setup(gaps)
+    test_c7_gaps(gaps)
 
 
 def test_ffmpeg_input_confined() -> None:
