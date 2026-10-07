@@ -1,7 +1,7 @@
 # Contratto d'interfaccia · podcast-agent per l'adattatore web
 
 > Versione completa (fase C5, 2026-10-07). Copre tutte le schermate del wireframe in
-> `docs/wireframe/`: per ogni azione il comando, gli argomenti, un esempio reale di JSON,
+> `docs/wireframe/wireframe/`: per ogni azione il comando, gli argomenti, un esempio reale di JSON,
 > gli exit code, se è lunga e se costa. In fondo: cosa resta a carico dell'adattatore e
 > cosa non è supportato, con il motivo. Lo storico delle fasi è in `docs/avanzamento/`.
 >
@@ -347,7 +347,7 @@ lunghe sono accorciate con `"…"`.
 
 ### Indice: schermata del wireframe → comandi
 
-| Schermata (`docs/wireframe/`) | Comandi | Sezione |
+| Schermata (`docs/wireframe/wireframe/`) | Comandi | Sezione |
 |---|---|---|
 | Menu laterale (`Sidebar`): Nuovo episodio | `run_init.py` | Passo 1 |
 | Archivio (`Main`) | `runs_list.py`, `run_status.py` | Archivio |

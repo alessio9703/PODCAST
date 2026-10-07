@@ -6,7 +6,7 @@ Questo file vale per ogni sessione. Lo stato del lavoro in corso è in
 ## Obiettivo in corso: integrazione web
 
 Rendere `podcast-agent` integrabile con un'interfaccia web: ogni funzione del wireframe
-in `docs/wireframe/` deve essere eseguibile con i comandi in `tools/`, senza terminale
+in `docs/wireframe/wireframe/` deve essere eseguibile con i comandi in `tools/`, senza terminale
 interattivo e senza Claude Code nel mezzo.
 
 Server web, autenticazione, upload HTTP, coda dei lavori e frontend **non** fanno parte
@@ -17,7 +17,7 @@ all'adattatore e documentarlo in `docs/CONTRATTO_INTERFACCIA.md`.
 Da leggere prima di toccare il codice:
 - `README.md`, `LEGENDA.md`, `.claude/agents/podcast-agent.md`, `prompts/copione.md`;
 - `tools/_common.py` e `tools/_approval.py` (il contratto);
-- `docs/wireframe/`: un `.dc.html` per schermata. `Flusso.dc.html` è la mappa,
+- `docs/wireframe/wireframe/`: un `.dc.html` per schermata. `Flusso.dc.html` è la mappa,
   `Stati.dc.html` dice come la UI tratta gli exit code, `canvas.json` dà i titoli.
 
 ## Regole non negoziabili

@@ -28,6 +28,7 @@ sys.path.insert(0, str(PROJECT_ROOT))
 
 from src.ffmpeg_tool import find_ffmpeg  # noqa: E402
 from src.music_library import MusicLibrary  # noqa: E402
+from src.registry import file_hash  # noqa: E402
 from src.script_session import ScriptSession  # noqa: E402
 
 PYTHON = str(PROJECT_ROOT / ".venv" / "bin" / "python")
@@ -429,6 +430,7 @@ def main() -> None:
     # ------------------------------------------------------------------
     piano_path = root / "musiche" / "sottofondo" / "Piano.wav"
     original_piano = piano_path.read_bytes()
+    sha256_before_swap = file_hash(piano_path)
     make_wav(piano_path, 2.0, 700, amp=6500)  # stesso nome, contenuto diverso -> sha256 diverso
 
     code, out, err = tool("mix.py", "--run-dir", str(run_dir), "--no-approval-gate", config=config)
@@ -441,9 +443,10 @@ def main() -> None:
     check("--accept-changed-music -> exit 0", code == 0, err)
     usate_after = json.loads(Path(out["musiche_usate_file"]).read_text(encoding="utf-8"))
     check(
-        "musiche_usate.json aggiornato con il nuovo sha256",
-        usate_after["sottofondo"]["sha256"] != usate.get("sottofondo", {}).get("sha256", "diverso-di-default")
-        or True,  # il valore esatto non conta, conta che non sollevi piu' l'errore
+        "musiche_usate.json aggiornato con lo sha256 del brano nuovo",
+        usate_after["sottofondo"]["sha256"] == file_hash(piano_path)
+        and usate_after["sottofondo"]["sha256"] != sha256_before_swap,
+        f"{usate_after['sottofondo']} contro {file_hash(piano_path)}",
     )
     piano_path.write_bytes(original_piano)  # ripristino
     tool("mix.py", "--run-dir", str(run_dir), "--no-approval-gate", "--accept-changed-music", config=config)

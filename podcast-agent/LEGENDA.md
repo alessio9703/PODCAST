@@ -1074,8 +1074,11 @@ code**. Copre anche i tre vincoli che devono sopravvivere al passaggio a subagen
 *prima* della sintesi. Piu' il round-trip di `ScriptSession` (salva → ricarica → le
 istruzioni precedenti sono ancora nel contesto), senza chiamare l'API.
 
-I due tool che parlano con Claude vengono saltati con uno skip esplicito se manca
-`ANTHROPIC_API_KEY`, per non spendere in CI.
+I due tool che parlano con Claude (`script_write.py`, `script_revise.py`) girano con il
+client finto `tests/fake_anthropic.py`, e le chiavi API vengono tolte dall'ambiente dei
+tool. La prova contro l'API vera parte solo con `PODCAST_E2E_REALE=1` (e la chiave
+presente): senza quel flag è saltata anche se `ANTHROPIC_API_KEY` è esportata, perché
+spende.
 
 La sezione `[15]` copre la correzione di una battuta end-to-end, contando le
 chiamate al TTS finte una per una: seconda sintesi identica a zero chiamate,

@@ -392,7 +392,7 @@ Il flusso è:
 
 ## Uso dall'interfaccia web
 
-Il progetto è pronto per un'interfaccia web (le schermate sono in `docs/wireframe/`).
+Il progetto è pronto per un'interfaccia web (le schermate sono in `docs/wireframe/wireframe/`).
 Server, accessi, caricamenti e coda dei lavori stanno in un **adattatore separato**, che
 chiama i comandi di `tools/` come sottoprocessi e legge il loro JSON. Il contratto
 completo, schermata per schermata, è in
