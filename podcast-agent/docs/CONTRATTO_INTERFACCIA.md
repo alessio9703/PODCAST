@@ -317,6 +317,7 @@ copione e mostra la versione nuova, non riprova da sola.
 | `RecordingChanged` | **3** | `voice_meta.py --consent --expect-sha256 H`: la registrazione non è più quella che l'utente ha visto. Niente registrato | `voce`, `atteso`, `attuale` |
 | `ConsentByRequired` | 1 | `voice_meta.py --consent`/`--revoke-consent` senza `--by` | `campo: "by"` |
 | `RevokedMeanwhile` | **3** | (C7) `voice_meta.py --consent` su uno stato in cui la revoca non c'era ancora (`--expect-revision` superata) o mentre la voce veniva revocata: **vince la revoca**, il consenso non è registrato. La UI ricarica lo stato | `voce` |
+| `RevocationIncomplete` | 1 | (C7) `voice_meta.py --revoke-consent` non è riuscita per tutto (metadati di un doppione illeggibili, registro illeggibile): **si revoca tutto il possibile**, poi si riporta cosa no. I file vanno corretti a mano, non cancellati, e la revoca ripetuta | `revocati` (file), `non_revocati: [{file, errore, solo_registro?}]`, `revoche_registro` |
 | `RegistryCorrupt` | 1 | (C7) Le revoche (`__revoche__`) o lo storico (`__storico__`) di `voices_registry.json` non sono ben formati: ci si ferma (stima, produzione, consenso, revoca) **prima di spendere**, invece di ignorarli. Va corretto a mano (errore dell'amministratore) | `file`, `campo` |
 | `VoiceMetaError` | 1 | File dei metadati di una voce illeggibile | `file` |
 | `ApprovalRequired` | 1 | `produce.py` su un copione non approvato, o diverso da quello approvato; oppure (C7, N2) approvazione ritirata **a produzione in corso**: ci si ferma alla battuta successiva | `approval_problem`; a produzione in corso anche `done`, `total`, `missing` |
@@ -851,11 +852,15 @@ maiuscole, accenti, `_` e `-`): tutti i file della libreria (doppioni compresi, 
 e `.mp3`) e tutti i nomi del registro che si normalizzano uguale, anche di voci già
 cancellate (es. `Mario_Rossi` cancellata, `Mario Rossi.mp3` in libreria). Una revoca non
 si sceglie e non si restringe. La risposta aggiunge `files` (file revocati),
-`nomi_registro` (voci cancellate revocate nel registro) e `revoche_registro`; con un solo
+`nomi_registro` (voci cancellate revocate nel registro) e `revoche_registro` (quante
+revoche sono state scritte nel registro, in tutto); con un solo
 file è la vista solita della voce, altrimenti un riepilogo con `file: null`. Un nome
 simile ma diverso (`Mario Ross`) non revoca niente: exit 3 `AmbiguousName`. Un nuovo
 `--consent` toglie anche le revoche delle varianti del nome, ma solo per gli **stessi byte**
-(stesso sha256) della registrazione confermata. Una clonazione che si chiude dopo la revoca della sua registrazione
+(stesso sha256) della registrazione confermata. `--revoke-consent` non si combina con
+`--spoken-name` (exit 1 `InvalidArguments`): sono due richieste separate. Se una parte
+della revoca non riesce (es. metadati di un doppione illeggibili) il resto si revoca lo
+stesso e l'esito è exit 1 `RevocationIncomplete` con il dettaglio file per file. Una clonazione che si chiude dopo la revoca della sua registrazione
 entra nella revoca. I nomi `__revoche__` e
 `__storico__` sono riservati: una registrazione con quel nome è fra i file scartati e non
 si clona. Consenso e revoca della stessa voce passano da un lock comune: se arrivano

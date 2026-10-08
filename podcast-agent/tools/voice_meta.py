@@ -86,6 +86,13 @@ def main() -> None:
             details={"messaggio": "manca --expect-revision"},
         )
     if args.revoke_consent:
+        if args.spoken_name is not None:
+            # Una revoca non si combina con altro: il nome pronunciato verrebbe
+            # ignorato (sicurezza C7, quinta revisione, BASSA-4).
+            raise InvalidArguments(
+                "--revoke-consent non si combina con --spoken-name: sono due richieste separate.",
+                details={"messaggio": "--revoke-consent con --spoken-name"},
+            )
         _revoke(config, args)
         return
     voice = resolve_library_voice(config, args.name)

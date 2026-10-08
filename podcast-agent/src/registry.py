@@ -125,8 +125,9 @@ class VoiceRegistry:
             raw = json.loads(self.path.read_text(encoding="utf-8"))
         except json.JSONDecodeError as exc:
             raise RuntimeError(
-                f"{self.path} non e' un JSON valido ({exc}). "
-                "Correggilo o cancellalo: verra' ricreato (le voci saranno riclonate)."
+                f"{self.path.name} non e' un JSON valido ({exc}). Correggilo a mano; NON cancellarlo: "
+                "conserva le revoche del consenso e lo storico delle clonazioni, che andrebbero persi "
+                "(e le voci verrebbero riclonate a pagamento)."
             ) from exc
         if not isinstance(raw, dict):
             raise RuntimeError(f"{self.path} deve contenere un oggetto JSON.")

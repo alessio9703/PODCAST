@@ -48,11 +48,11 @@ resoconti accanto a questo file:
 | `39c1178` | revisione finale: controllo automatico su ffmpeg/ffprobe con `-i` |
 | `d61ee5e` | **revisione finale** dell'intero branch (3 bloccanti, 32 non bloccanti) |
 | `400b781` … `269b7a6` | **C7** correzioni della revisione finale, blocchi A–G (dettaglio in `C7.md`) |
-| (questo) | C7: resoconto, `STATO.md`, rapporto di sicurezza C7, correzioni di ALTA-1, MEDIA-1, MEDIA-2 |
+| `06acc06` … (questo) | C7: rapporti di sicurezza 1–5 e correzioni, seconda tornata di decisioni, basse della quinta revisione, chiusura |
 
 Test all'ultimo commit, sempre con `.venv/bin/python`: smoke 68, tools_cli 190 (+1
 saltato: il test reale con Anthropic, solo con `PODCAST_E2E_REALE=1`), music 73,
-lessons 80, web_integration 850.
+lessons 80, web_integration 860.
 
 ## 2. Fasi
 
@@ -334,6 +334,42 @@ piano della fase che le attua). **Fatto** (`C7.md` §7):
 2. **C8 · rifinitura** (piano qui sopra): N28 subito, poi stop in attesa dell'OK per
    N29–N32.
 3. Interpretazioni di C7 e basse della sicurezza: decise e attuate (`C7.md` §7, D12).
+
+## Da rivedere prima della produzione
+
+Il ciclo delle revisioni di sicurezza sul consenso è stato chiuso dall'utente il
+2026-10-08 (scadenza della demo). Restano aperte, **tutte di gravità bassa**, queste
+segnalazioni di C7 (dettagli e proposte in `C7.md` e nei rapporti `C7-sicurezza-*.md`):
+
+| Origine | Problema | Proposta |
+|---|---|---|
+| `C7-sicurezza-2` BASSA-1 | Le voci di `__revoche__`/`__storico__` non sono validate campo per campo (es. un `audio_sha256` in forma di lista viene ignorato) | validare tipo per tipo, `RegistryCorrupt` altrimenti |
+| `C7-sicurezza-2` BASSA-2 | `_read_sample`: su Windows manca `O_BINARY`; una cartella delle voci collegata è rifiutata solo in produzione; manca il controllo "file regolare" (FIFO) | `O_BINARY`, controllo della cartella già in stima, `S_ISREG` |
+| `C7-sicurezza-2` BASSA-3 | `_clones_in_runs` legge solo `voci_usate.json` (non le run interrotte); un JSON molto annidato dà `RecursionError` non catturato; l'hash viene dal registro alla chiusura della run | leggere anche `voci.json`, catturare `RecursionError` |
+| `C7-sicurezza-2` BASSA-4 | `run.py`: un `RegistryCorrupt` al passo 6 esce con un traceback | catturarlo come gli altri errori del passo |
+| `C7-sicurezza-2` BASSA-5 | Dal web un brano con un nome numerico (`2024.mp3`) non si può scegliere | accettare il numero se è il nome esatto di un brano |
+| `C7-sicurezza-3` BASSA-1 | Flusso "Nuova voce" del contratto: la revisione del consenso non viene da uno stato mostrato; con gli stessi byte di una registrazione revocata il consenso toglie la revoca senza che la UI l'abbia mostrata | non concatenare il consenso al caricamento, o un flag esplicito |
+| `C7-sicurezza-3` (da verificare) | I `details` di `ConsentRequired` non contengono `revisione` (la UI la prende da stima o `voice_meta.py`) | aggiungerla, o dirlo nel contratto |
+| `C7-sicurezza-4` (nota) | Il campo `provider` di una revoca è letto fuori dal lock (solo informativo) | leggerlo dentro il lock |
+| `C7.md` §8 | Il test del flusso completo in modalità web è sensibile ai tempi sotto carico | reso deterministico in C8 |
+
+**Proposta per dopo la demo: un ID stabile per ogni voce.** Oggi una voce è il suo **nome
+di file** (`Mario Rossi.wav`): consenso, revoche, registro e cast la identificano così.
+Gran parte dei problemi di C7 è nata da qui: doppioni con estensioni diverse, varianti
+dello stesso nome (`Mario_Rossi`), file cancellati e ricaricati, nomi simili, nomi di sole
+cifre. La revoca per nome normalizzato li copre, ma è una regola difensiva sopra un
+identificatore debole. Proposta:
+
+- al **caricamento** (adattatore + un comando nuovo, es. `voice_add.py`) ogni voce riceve un
+  ID stabile e opaco (es. `voc_7f3a…`), scritto nei suoi metadati insieme al nome da
+  mostrare e allo sha256 della registrazione;
+- consenso, revoche, registro (`voice_id` del provider), `episodio.json` e `voci.json`
+  usano l'ID; il nome del file e il nome pronunciato diventano solo etichette;
+- sostituire la registrazione mantiene l'ID ma azzera il consenso (nuovo sha256); una
+  persona diversa è un ID diverso anche con lo stesso nome; cancellare una voce lascia
+  l'ID nelle revoche, che non dipendono più da come si scrive il nome;
+- migrazione: un ID per ogni file esistente, con le revoche per nome tradotte in revoche
+  per ID; da pianificare come fase a sé, con revisione di sicurezza.
 
 ## 5. Annotazioni per le fasi successive e per la fase finale
 

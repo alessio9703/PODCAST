@@ -42,7 +42,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Callable, Iterator
 
-from .errors import AmbiguousName, NeedsUserDecision
+from .errors import AmbiguousName, DomainError, NeedsUserDecision
 from .fileio import file_lock, write_json_atomic
 from .registry import VoiceRegistry, file_hash
 from .voice_library import AvailableVoice, VoiceLibrary, VoiceLibraryError
@@ -437,30 +437,66 @@ def revoke_by_name(config: Any, name: str, *, by: str | None) -> dict[str, Any]:
     Una revoca non si sceglie e non si restringe: e' la direzione sicura
     (sicurezza C7, terza e quarta revisione). Nessun nome simile ma diverso:
     `Mario Ross` non revoca `Mario Rossi`.
-    """
-    from .voice_library import _normalize
 
+    Si revoca tutto il possibile: un file con i metadati rotti, o un registro
+    illeggibile, non ferma la revoca degli altri. Per un file con i metadati
+    rotti la revoca si scrive almeno nel registro. Se qualcosa non riesce, alla
+    fine exit 1 RevocationIncomplete con, in `details`, cosa e' stato revocato e
+    cosa no (sicurezza C7, BASSA-1 della quarta e della quinta revisione).
+    """
+    from .registry import RegistryCorrupt
+    from .voice_library import _normalize
+    from .voice_meta import _now, _require_by
+
+    who = _require_by(by)
     target = _normalize(name)
     files = same_name_voices(config, name)
-    # Prima i file della libreria: la revoca nei metadati si scrive anche se poi
-    # il registro risulta illeggibile (RegistryCorrupt): si sbaglia verso la revoca.
     previous: dict[str, Any] = {}
+    revoked: list[str] = []
+    failed: list[dict[str, str]] = []
+    registry_items = 0
     for voice in files:
-        _, previous[voice.path.name] = revoke_voice_consent(config, voice, by=by)
-    registry_names = sorted(n for n in _registry(config).known_names() if _normalize(n) == target)
-    if not files and not registry_names:
+        try:
+            _, previous[voice.path.name], written = _revoke_file(config, voice, by=who)
+            revoked.append(voice.path.name)
+            registry_items += written
+        except (VoiceMetaError, RegistryCorrupt) as exc:
+            failed.append({"file": voice.path.name, "errore": type(exc).__name__})
+            if isinstance(exc, VoiceMetaError):
+                # Metadati illeggibili: la revoca va almeno nel registro.
+                try:
+                    with file_lock(_consent_lock_target(config, voice.name)):
+                        registry_items += len(_record_revocation(config, _registry(config), voice.name, [file_hash(voice.path)], who, _now()))
+                    failed[-1]["solo_registro"] = "si"
+                except RegistryCorrupt:
+                    pass
+    try:
+        registry_names = sorted(n for n in _registry(config).known_names() if _normalize(n) == target)
+    except RegistryCorrupt:
+        registry_names = []
+        failed.append({"file": "voices_registry.json", "errore": "RegistryCorrupt"})
+    if not files and not registry_names and not failed:
         resolve_library_voice(config, name)  # rilancia l'errore originale (nome incerto o sconosciuto)
         raise VoiceLibraryError(f"'{name}' non e' nella libreria ne' nel registro delle voci.")
     covered = {voice.name for voice in files}
-    registry_items = 0
-    for other in registry_names:
-        if other not in covered:
-            registry_items += len(revoke_missing_voice(config, other, by=by))
+    extra_names = [n for n in registry_names if n not in covered]
+    for other in extra_names:
+        try:
+            registry_items += len(revoke_missing_voice(config, other, by=who))
+        except RegistryCorrupt:
+            failed.append({"file": "voices_registry.json", "errore": "RegistryCorrupt", "voce": other})
+    if failed:
+        raise RevocationIncomplete(
+            f"Revoca di '{name}' non completa: revocati {', '.join(revoked) or 'nessun file'}; non riusciti: "
+            + ", ".join(f["file"] for f in failed)
+            + ". Correggi i file indicati (a mano, senza cancellarli) e ripeti la revoca.",
+            details={"revocati": revoked, "non_revocati": failed, "revoche_registro": registry_items},
+        )
     return {
-        "files": [voice.path.name for voice in files],
+        "files": revoked,
         "voices": files,
         "previous": previous,
-        "registry_names": [n for n in registry_names if n not in covered],
+        "registry_names": extra_names,
         "registry_items": registry_items,
     }
 
@@ -485,14 +521,25 @@ def revoke_voice_consent(config: Any, voice: AvailableVoice, *, by: str | None) 
     piu' nessuno di quei voice_id (revisione finale N1; sicurezza C7, ALTA-1 e
     MEDIA-1).
     """
+    meta, previous, _ = _revoke_file(config, voice, by=by)
+    return meta, previous
+
+
+def _revoke_file(config: Any, voice: AvailableVoice, *, by: str | None) -> tuple[dict[str, Any], dict[str, Any] | None, int]:
+    """Revoca una registrazione: metadati e registro. Ritorna anche quante revoche
+    sono state scritte nel registro."""
     with file_lock(_consent_lock_target(config, voice.name)):
         meta, previous = revoke_consent(voice.path, voice=voice.name, by=by)
         revocation = meta["consenso_revocato"]
-        _record_revocation(
+        items = _record_revocation(
             config, _registry(config), voice.name, [file_hash(voice.path), (previous or {}).get("audio_sha256")],
             revocation["da"], revocation["il"],
         )
-    return meta, previous
+    return meta, previous, len(items)
+
+
+class RevocationIncomplete(DomainError):
+    """Una revoca per nome non e' riuscita per tutto: `details` dice cosa si' e cosa no."""
 
 
 def revoke_missing_voice(config: Any, name: str, *, by: str | None) -> list[dict[str, Any]]:
@@ -727,6 +774,7 @@ __all__ = [
     "ACTION_REUSE",
     "CloneOutcomeUnknown",
     "ConsentRequired",
+    "RevocationIncomplete",
     "RevokedMeanwhile",
     "confirm_clone_retry",
     "pending_clone",

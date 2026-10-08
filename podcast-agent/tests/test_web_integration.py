@@ -3627,7 +3627,9 @@ def test_c7_followup() -> None:
     meta = json.loads((root / "voci" / "Mario Rossi.json").read_text(encoding="utf-8"))
     check(
         "storico malformato: la revoca esce con errore, ma nei metadati e' gia' scritta (si sbaglia verso la revoca)",
-        code == 1 and out["error_type"] == "RegistryCorrupt" and not meta.get("consenso") and meta.get("consenso_revocato"),
+        code == 1 and out["error_type"] == "RevocationIncomplete" and out["details"]["revocati"] == []
+        and any(f["errore"] == "RegistryCorrupt" for f in out["details"]["non_revocati"])
+        and not meta.get("consenso") and meta.get("consenso_revocato"),
         str(out)[:300],
     )
     registry_file.unlink()
@@ -3874,6 +3876,47 @@ def test_c7_security_fixes_4() -> None:
     check("...e nel registro non resta una revoca per quei byte", not any(r.get("audio_sha256") == seen["audio_sha256"] for r in revocations), str(revocations))
 
 
+def test_c7_lows_5() -> None:
+    """Basse della quinta revisione di sicurezza C7 (e BASSA-1 della quarta)."""
+    print("\n[sicurezza C7, basse] BASSA-1 · doppioni con un .json rotto: si revoca tutto il possibile")
+    root, run = c7_project()
+    import shutil as _shutil
+    make_wav(root / "voci" / "Anna-Neri.wav", 1.0, 377)  # doppione con byte suoi
+    from src.voice_meta import record_consent as _record_consent
+    _record_consent(root / "voci" / "Anna-Neri.wav", voice="Anna-Neri", by="Utente A")
+    (root / "voci" / "Anna Neri.json").write_text("{rotto", encoding="utf-8")  # il primo in ordine
+    code, out, _ = run("voice_meta.py", "--name", "Anna Neri", "--revoke-consent", "--by=Utente B")
+    details = out.get("details") or {}
+    healthy = json.loads((root / "voci" / "Anna-Neri.json").read_text(encoding="utf-8"))
+    revocations = json.loads((root / "voices_registry.json").read_text(encoding="utf-8")).get("__revoche__", []) if (root / "voices_registry.json").exists() else []
+    check(
+        "exit 1 RevocationIncomplete: il file sano e' revocato, quello rotto e' elencato e revocato nel registro",
+        code == 1 and out["error_type"] == "RevocationIncomplete" and details["revocati"] == ["Anna-Neri.wav"]
+        and details["non_revocati"][0]["file"] == "Anna Neri.wav" and details["non_revocati"][0].get("solo_registro") == "si"
+        and not healthy.get("consenso") and any(r["voce"] == "Anna Neri" for r in revocations),
+        str(out)[:400],
+    )
+
+    print("\n[sicurezza C7, basse] BASSA-2 · registro illeggibile: il messaggio dice di non cancellarlo")
+    registry_file = root / "voices_registry.json"
+    saved_registry = registry_file.read_text(encoding="utf-8")
+    run("voice_meta.py", "--name", "Giulia Bianchi", "--consent", "--by", "Utente A", web=False)
+    estimate_run = c7_approved_run(root, run, "Registro", {"titolo": "R", "turni": [{"speaker": "Giulia Bianchi", "testo": "Una battuta."}]})
+    registry_file.write_text("{non json", encoding="utf-8")
+    code, out, _ = run("estimate.py", "--run-dir", estimate_run)
+    check("il messaggio dice di correggerlo a mano e di NON cancellarlo", "NON cancellarlo" in json.dumps(out, ensure_ascii=False) and "cancellalo" not in json.dumps(out, ensure_ascii=False), str(out)[:300])
+    registry_file.write_text(saved_registry, encoding="utf-8")
+
+    print("\n[sicurezza C7, basse] BASSA-3 · revoche_registro conta tutte le revoche scritte")
+    code, out, _ = run("voice_meta.py", "--name", "Mario Rossi", "--revoke-consent", "--by=Utente B")
+    check("un solo file senza varianti: revoche_registro >= 1", code == 0 and out["revoche_registro"] >= 1 and out["files"] == ["Mario Rossi.wav"], str(out)[:300])
+
+    print("\n[sicurezza C7, basse] BASSA-4 · --revoke-consent con --spoken-name: rifiutato")
+    code, out, _ = run("voice_meta.py", "--name", "Giulia Bianchi", "--revoke-consent", "--spoken-name=Giulia Bianchi", "--by=Utente B")
+    state = run("voice_meta.py", "--name", "Giulia Bianchi")[1]["consenso"]["stato"]
+    check("exit 1 InvalidArguments, niente revocato", code == 1 and out["error_type"] == "InvalidArguments" and state != "revocato", str(out)[:200] + state)
+
+
 def test_c7() -> None:
     test_c7_consent()
     test_c7_run_py()
@@ -3888,6 +3931,7 @@ def test_c7() -> None:
     test_c7_security_fixes_2()
     test_c7_security_fixes_3()
     test_c7_security_fixes_4()
+    test_c7_lows_5()
 
 
 def test_ffmpeg_input_confined() -> None:
