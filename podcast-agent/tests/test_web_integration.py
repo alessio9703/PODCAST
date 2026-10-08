@@ -3855,6 +3855,24 @@ def test_c7_security_fixes_4() -> None:
     code, out, _ = run("voice_meta.py", "--name", "Mario Ross", "--revoke-consent", "--by=Utente B")
     check("un nome simile ma diverso non revoca niente (AmbiguousName)", code == 3 and out["error_type"] == "AmbiguousName", str(out)[:200])
 
+    print("\n[sicurezza C7 quinquies] MEDIA-1 · un consenso sugli stessi byte di una variante sblocca la voce")
+    root, run = c7_project()
+    variant = root / "voci" / "Mario_Rossi.wav"
+    (root / "voci" / "Mario Rossi.wav").rename(variant)
+    run("voice_meta.py", "--name", "Mario_Rossi", "--consent", "--by", "Utente A", web=False)
+    run("voices_prepare.py", "--speakers", "Mario_Rossi", "--no-approval-gate", web=False)
+    same_bytes = variant.read_bytes()
+    variant.unlink()
+    (root / "voci" / "Mario_Rossi.json").unlink()
+    (root / "voci" / "Mario Rossi.wav").write_bytes(same_bytes)  # stessa registrazione, nome scritto diverso
+    run("voice_meta.py", "--name", "Mario Rossi", "--revoke-consent", "--by=Utente B")
+    seen = run("voice_meta.py", "--name", "Mario Rossi")[1]["consenso"]
+    check("dopo la revoca: revocata", seen["stato"] == "revocato", str(seen))
+    code, out, _ = run("voice_meta.py", "--name", "Mario Rossi", "--consent", f"--expect-sha256={seen['audio_sha256']}", f"--expect-revision={seen['revisione']}", "--by=Utente A")
+    check("nuovo consenso sugli stessi byte: la voce torna 'registrato' (revoca della variante tolta)", code == 0 and out["consenso"]["stato"] == "registrato", str(out)[:300])
+    revocations = json.loads((root / "voices_registry.json").read_text(encoding="utf-8")).get("__revoche__", [])
+    check("...e nel registro non resta una revoca per quei byte", not any(r.get("audio_sha256") == seen["audio_sha256"] for r in revocations), str(revocations))
+
 
 def test_c7() -> None:
     test_c7_consent()

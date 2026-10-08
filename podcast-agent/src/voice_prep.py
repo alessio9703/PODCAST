@@ -338,8 +338,14 @@ def check_not_revoked(
 
 
 def _consent_lock_target(config: Any, name: str) -> Path:
-    """Lock per voce comune a consenso e revoca (metadati + registro insieme)."""
-    digest = hashlib.sha256(name.encode("utf-8")).hexdigest()[:16]
+    """Lock per voce comune a consenso e revoca (metadati + registro insieme).
+
+    Dal nome normalizzato: le varianti dello stesso nome (`Mario_Rossi`, `Mario
+    Rossi`) si revocano insieme, quindi condividono il lock (C7, quinta revisione).
+    """
+    from .voice_library import _normalize
+
+    digest = hashlib.sha256(_normalize(name).encode("utf-8")).hexdigest()[:16]
     return config.registry_file.parent / f".consenso-{digest}"
 
 
@@ -383,7 +389,12 @@ def grant_consent(
                 details={"voce": voice.name},
             )
         meta = record_consent(voice.path, voice=voice.name, by=by, expect_sha256=expect_sha256)
-        _registry(config).lift_revocations(voice.name, meta["consenso"]["audio_sha256"])
+        registry = _registry(config)
+        from .voice_library import _normalize
+
+        target = _normalize(voice.name)
+        variants = {str(r.get("voce")) for r in registry.revocations() if _normalize(str(r.get("voce", ""))) == target}
+        registry.lift_revocations(voice.name, meta["consenso"]["audio_sha256"], variants=variants)
     return meta
 
 

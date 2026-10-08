@@ -322,11 +322,15 @@ class VoiceRegistry:
             write_json_atomic(self.path, self._data)
         return items
 
-    def lift_revocations(self, voice: str, audio_hash: str) -> list[dict[str, Any]]:
+    def lift_revocations(self, voice: str, audio_hash: str, *, variants: set[str] | None = None) -> list[dict[str, Any]]:
         """Toglie le revoche di questa voce per QUESTA registrazione e basta.
 
         Si chiama solo quando il consenso viene registrato di nuovo per la
         stessa registrazione: tornano usabili lei e i voice_id clonati da lei.
+        `variants`: gli altri nomi esatti della stessa voce (stesso nome a meno di
+        maiuscole, accenti, `_`, `-`), revocati insieme da revoke_by_name: la
+        revoca di una variante con GLI STESSI BYTE si toglie anche lei (sicurezza
+        C7, quinta revisione, MEDIA-1). Mai revoche di byte diversi.
         Le revoche di registrazioni diverse (un altro file con lo stesso nome)
         e i loro voice_id restano (revisione di sicurezza C7, ALTA-1).
         """
@@ -334,7 +338,8 @@ class VoiceRegistry:
             self._data = self._load()
             kept, lifted = [], []
             for item in self.revocations():
-                (lifted if item.get("voce") == voice and item.get("audio_sha256") == audio_hash else kept).append(item)
+                same_voice = item.get("voce") == voice or item.get("voce") in (variants or set())
+                (lifted if same_voice and item.get("audio_sha256") == audio_hash else kept).append(item)
             if lifted:
                 if kept:
                     self._data[REVOCATIONS_KEY] = kept

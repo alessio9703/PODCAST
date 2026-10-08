@@ -175,7 +175,11 @@ def revocation_token(registry: Any, voice: str, meta: dict[str, Any]) -> str:
     consenso confermato su uno stato in cui la revoca non c'era ancora non vale
     (vince sempre la revoca; sicurezza C7 seconda tornata, MEDIA-1).
     """
-    items = sorted(json.dumps(r, sort_keys=True) for r in registry.revocations() if r.get("voce") == voice)
+    from .voice_library import _normalize
+
+    target = _normalize(voice)
+    # Anche le revoche delle varianti del nome: revoke_by_name le scrive insieme.
+    items = sorted(json.dumps(r, sort_keys=True) for r in registry.revocations() if _normalize(str(r.get("voce", ""))) == target)
     payload = json.dumps([items, meta.get("consenso_revocato")], sort_keys=True, ensure_ascii=False)
     return "rev:" + hashlib.sha256(payload.encode("utf-8")).hexdigest()[:16]
 

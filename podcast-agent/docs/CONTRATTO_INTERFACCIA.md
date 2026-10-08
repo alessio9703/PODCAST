@@ -853,7 +853,9 @@ cancellate (es. `Mario_Rossi` cancellata, `Mario Rossi.mp3` in libreria). Una re
 si sceglie e non si restringe. La risposta aggiunge `files` (file revocati),
 `nomi_registro` (voci cancellate revocate nel registro) e `revoche_registro`; con un solo
 file è la vista solita della voce, altrimenti un riepilogo con `file: null`. Un nome
-simile ma diverso (`Mario Ross`) non revoca niente: exit 3 `AmbiguousName`. Una clonazione che si chiude dopo la revoca della sua registrazione
+simile ma diverso (`Mario Ross`) non revoca niente: exit 3 `AmbiguousName`. Un nuovo
+`--consent` toglie anche le revoche delle varianti del nome, ma solo per gli **stessi byte**
+(stesso sha256) della registrazione confermata. Una clonazione che si chiude dopo la revoca della sua registrazione
 entra nella revoca. I nomi `__revoche__` e
 `__storico__` sono riservati: una registrazione con quel nome è fra i file scartati e non
 si clona. Consenso e revoca della stessa voce passano da un lock comune: se arrivano
