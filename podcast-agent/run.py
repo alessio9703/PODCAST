@@ -397,7 +397,10 @@ def step_prepare_voices(
         while not by:
             by = " ".join(ask("  Chi conferma il consenso (nome e cognome)").split())
         try:
-            grant_consent(config, plan.voice, by=by, expect_sha256=plan.consent["audio_sha256"])
+            grant_consent(
+                config, plan.voice, by=by, expect_sha256=plan.consent["audio_sha256"],
+                expect_revision=plan.consent["revisione"],
+            )
         except (DomainError, NeedsUserDecision) as exc:
             fail(str(exc))
         print(f"  Consenso di {plan.speaker} registrato (confermato da {by}).")

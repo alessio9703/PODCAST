@@ -46,6 +46,7 @@ from src.voice_prep import (  # noqa: E402
     revoke_missing_voice,
     revoke_voice_consent,
 )
+from src.errors import AmbiguousName  # noqa: E402
 from src.voice_library import VoiceLibraryError  # noqa: E402
 
 
@@ -62,6 +63,9 @@ def main() -> None:
     )
     parser.add_argument("--by", default=None, help="Chi registra o revoca il consenso")
     parser.add_argument("--expect-sha256", default=None, help="sha256 della registrazione che l'utente ha visto")
+    parser.add_argument(
+        "--expect-revision", default=None, help="consenso.revisione mostrata all'utente: una revoca successiva vince"
+    )
     parser.add_argument("--spoken-name", default=None, help="Nome e cognome come vanno pronunciati")
     parser.add_argument(
         "--accept-incomplete-name", action="store_true", help="Conferma un nome pronunciato senza cognome"
@@ -78,10 +82,19 @@ def main() -> None:
             "registrazione che l'utente ha visto.",
             details={"messaggio": "manca --expect-sha256"},
         )
+    if args.consent and web_mode() and not args.expect_revision:
+        raise InvalidArguments(
+            "Dall'interfaccia il consenso si registra solo con --expect-revision: la consenso.revisione "
+            "dello stato che l'utente ha visto (una revoca arrivata dopo vince).",
+            details={"messaggio": "manca --expect-revision"},
+        )
     try:
         voice = resolve_library_voice(config, args.name)
-    except VoiceLibraryError:
-        if not args.revoke_consent:
+    except (VoiceLibraryError, AmbiguousName):
+        # Una voce gia' cancellata si revoca per il nome ESATTO che il registro
+        # conosce, anche se in libreria c'e' un nome simile: proporre quello
+        # vorrebbe dire revocare un'altra persona (sicurezza C7 bis, MEDIA-3).
+        if not (args.revoke_consent and VoiceRegistry(config.registry_file, project_root=config.registry_file.parent).knows(args.name)):
             raise
         # La registrazione e' gia' stata cancellata: la revoca si scrive lo
         # stesso nel registro, per il nome esatto che il registro conosce
@@ -113,7 +126,7 @@ def main() -> None:
         )
         note(f"Nome pronunciato di {voice.name}: {' '.join(args.spoken_name.split())}.")
     if args.consent:
-        grant_consent(config, voice, by=args.by, expect_sha256=args.expect_sha256)
+        grant_consent(config, voice, by=args.by, expect_sha256=args.expect_sha256, expect_revision=args.expect_revision)
         note(f"Consenso registrato per {voice.name}.")
     elif args.confirm_clone_retry:
         if not args.by or not args.by.strip():
@@ -140,7 +153,7 @@ def main() -> None:
             "voce": voice.name,
             "file": voice.path.name,
             "nome_pronunciato": meta.get("nome_pronunciato"),
-            "consenso": with_registry(consent_view(voice.path, meta), registry, voice_id=voice_id),
+            "consenso": with_registry(consent_view(voice.path, meta), registry, voice_id=voice_id, voice=voice.name, meta=meta),
             "consenso_revocato": revoked,
             "clonazione_incerta": pending_clone(config, voice.name),
             "clonazione_incerta_tolta": cleared,

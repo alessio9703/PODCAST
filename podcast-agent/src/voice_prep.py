@@ -54,6 +54,7 @@ from .voice_meta import (
     VoiceMetaError,
     load_meta,
     record_consent,
+    revocation_token,
     revoke_consent,
     with_registry,
 )
@@ -215,6 +216,7 @@ def plan_voices(
     plans = []
     for name in speakers:
         voice = by_name[name]
+        meta = load_meta(voice.path)
         voice_id, reason = registry.lookup(name, voice.path, config.active_provider)
         entry = registry.get(name) or {}
         plans.append(
@@ -224,7 +226,7 @@ def plan_voices(
                 action=ACTION_REUSE if voice_id else ACTION_CLONE,
                 voice_id=voice_id,
                 reason=reason,
-                consent=with_registry(consent_view(voice.path), registry, voice_id=voice_id),
+                consent=with_registry(consent_view(voice.path, meta), registry, voice_id=voice_id, voice=name, meta=meta),
                 cloned_at=entry.get("cloned_at") if voice_id else None,
                 pending=None if voice_id else pending_clone(config, name),
                 reuse_requires_consent=reuse_requires_consent,
@@ -341,33 +343,43 @@ def _consent_lock_target(config: Any, name: str) -> Path:
     return config.registry_file.parent / f".consenso-{digest}"
 
 
-def _revocation_marks(config: Any, name: str, audio_path: Path | None) -> tuple[Any, ...]:
-    """Le tracce delle revoche di una voce: se cambiano, qualcuno ha revocato."""
-    revocations = tuple(sorted(json.dumps(r, sort_keys=True) for r in _registry(config).revocations() if r.get("voce") == name))
-    meta_mark: Any = None
-    if audio_path is not None:
-        try:
-            meta_mark = json.dumps(load_meta(audio_path).get("consenso_revocato"), sort_keys=True)
-        except VoiceMetaError:
-            meta_mark = "illeggibile"
-    return revocations, meta_mark
+def _current_token(config: Any, voice: AvailableVoice) -> str:
+    """L'impronta delle revoche della voce ora (vedi voice_meta.revocation_token)."""
+    try:
+        meta = load_meta(voice.path)
+    except VoiceMetaError:
+        meta = {"consenso_revocato": "illeggibile"}
+    return revocation_token(_registry(config), voice.name, meta)
 
 
-def grant_consent(config: Any, voice: AvailableVoice, *, by: str | None, expect_sha256: str | None = None) -> dict[str, Any]:
+def grant_consent(
+    config: Any,
+    voice: AvailableVoice,
+    *,
+    by: str | None,
+    expect_sha256: str | None = None,
+    expect_revision: str | None = None,
+) -> dict[str, Any]:
     """Registra il consenso (metadati accanto all'audio) e toglie dal registro
     la revoca di QUESTA registrazione: la persona ha dato di nuovo il consenso.
 
-    Consenso e revoca della stessa voce passano dallo stesso lock. Se mentre
-    questa richiesta aspettava e' arrivata una revoca, vince la revoca: exit 3
-    RevokedMeanwhile, niente registrato (sicurezza C7, BASSA-1).
+    Vince sempre la revoca (decisione dell'utente). Il consenso vale solo sullo
+    stato delle revoche che l'utente ha visto: `expect_revision` e' la
+    `consenso.revisione` mostrata (la UI la ripassa con --expect-revision,
+    run.py la prende prima di chiedere). Se nel frattempo la voce e' stata
+    revocata, anche un istante prima di questa chiamata, exit 3
+    RevokedMeanwhile e niente registrato. Senza `expect_revision` (uso locale da
+    riga di comando) vale lo stato all'ingresso. Consenso e revoca della stessa
+    voce passano dallo stesso lock (sicurezza C7, BASSA-1; seconda tornata,
+    MEDIA-1).
     """
-    before = _revocation_marks(config, voice.name, voice.path)
+    expected = expect_revision or _current_token(config, voice)
     with file_lock(_consent_lock_target(config, voice.name)):
-        if _revocation_marks(config, voice.name, voice.path) != before:
+        if _current_token(config, voice) != expected:
             raise RevokedMeanwhile(
-                f"Mentre registravo il consenso di {voice.name} qualcuno lo ha revocato: vale la "
-                "revoca, il consenso non e' stato registrato. Ricarica e, se la persona lo conferma "
-                "di nuovo, registralo ancora.",
+                f"Il consenso di {voice.name} e' stato revocato dopo che lo stato e' stato mostrato: "
+                "vale la revoca, il consenso non e' stato registrato. Ricarica e, se la persona lo "
+                "conferma di nuovo, registralo ancora.",
                 details={"voce": voice.name},
             )
         meta = record_consent(voice.path, voice=voice.name, by=by, expect_sha256=expect_sha256)

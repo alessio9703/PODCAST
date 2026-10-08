@@ -26,6 +26,7 @@ momento (src/fileio.py).
 
 from __future__ import annotations
 
+import hashlib
 import json
 from datetime import datetime
 from pathlib import Path
@@ -166,7 +167,22 @@ def consent_view(
     }
 
 
-def with_registry(view: dict[str, Any], registry: Any, *, voice_id: str | None) -> dict[str, Any]:
+def revocation_token(registry: Any, voice: str, meta: dict[str, Any]) -> str:
+    """Un'impronta delle revoche di una voce (registro + metadati).
+
+    Cambia ogni volta che la voce viene revocata. La UI la riceve con lo stato
+    del consenso (`consenso.revisione`) e la ripassa con --expect-revision: un
+    consenso confermato su uno stato in cui la revoca non c'era ancora non vale
+    (vince sempre la revoca; sicurezza C7 seconda tornata, MEDIA-1).
+    """
+    items = sorted(json.dumps(r, sort_keys=True) for r in registry.revocations() if r.get("voce") == voice)
+    payload = json.dumps([items, meta.get("consenso_revocato")], sort_keys=True, ensure_ascii=False)
+    return "rev:" + hashlib.sha256(payload.encode("utf-8")).hexdigest()[:16]
+
+
+def with_registry(
+    view: dict[str, Any], registry: Any, *, voice_id: str | None, voice: str, meta: dict[str, Any]
+) -> dict[str, Any]:
     """La vista del consenso completata con cio' che sa il registro delle voci.
 
     - Una revoca registrata nel registro (`__revoche__`) per questo voice_id o
@@ -177,8 +193,11 @@ def with_registry(view: dict[str, Any], registry: Any, *, voice_id: str | None) 
       non e' registrato. Sono le voci clonate prima del consenso, o fuori dal
       gate: niente migrazione automatica, si confermano una volta
       dall'interfaccia con voice_meta.py --consent (revisione finale, N1).
+    - `revisione`: l'impronta delle revoche (revocation_token) da ripassare con
+      --expect-revision quando si registra il consenso.
     """
     view = dict(view)
+    view["revisione"] = revocation_token(registry, voice, meta)
     item = registry.revocation_for(voice_id=voice_id, audio_hash=view.get("audio_sha256"))
     view["revoca_nel_registro"] = item is not None
     if item is not None:
@@ -316,5 +335,6 @@ __all__ = [
     "record_consent",
     "record_spoken_name",
     "revoke_consent",
+    "revocation_token",
     "with_registry",
 ]

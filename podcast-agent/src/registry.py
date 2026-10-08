@@ -76,6 +76,19 @@ class RegistryCorrupt(DomainError):
     """
 
 
+def _check_reserved(path: Path, key: str, data: dict[str, Any]) -> None:
+    """RegistryCorrupt se la chiave riservata c'e' ma non e' una lista di oggetti."""
+    if key not in data:
+        return
+    raw = data[key]
+    if not isinstance(raw, list) or not all(isinstance(r, dict) for r in raw):
+        raise RegistryCorrupt(
+            f"{path.name}: '{key}' non e' una lista di oggetti. Mi fermo invece di ignorarla "
+            "(potrebbe contenere revoche del consenso): va corretta a mano.",
+            details={"file": path.name, "campo": key},
+        )
+
+
 @dataclass(frozen=True)
 class RegistryEntry:
     name: str
@@ -117,6 +130,12 @@ class VoiceRegistry:
             ) from exc
         if not isinstance(raw, dict):
             raise RuntimeError(f"{self.path} deve contenere un oggetto JSON.")
+        # Le chiavi riservate si validano SUBITO, alla lettura: una revoca o uno
+        # storico illeggibili fermano anche la stima e la produzione prima di
+        # spendere, non solo la scrittura dopo una clonazione pagata
+        # (sicurezza C7 bis, MEDIA-2).
+        for key in RESERVED_NAMES:
+            _check_reserved(self.path, key, raw)
         return raw
 
     def save(self) -> None:
@@ -176,16 +195,8 @@ class VoiceRegistry:
 
     def _reserved_list(self, key: str) -> list[dict[str, Any]]:
         """La lista sotto una chiave riservata; RegistryCorrupt se non e' ben formata."""
-        if key not in self._data:
-            return []
-        raw = self._data[key]
-        if not isinstance(raw, list) or not all(isinstance(r, dict) for r in raw):
-            raise RegistryCorrupt(
-                f"{self.path.name}: '{key}' non e' una lista di oggetti. Mi fermo invece di ignorarla "
-                "(potrebbe contenere revoche del consenso): va corretta a mano.",
-                details={"file": self.path.name, "campo": key},
-            )
-        return list(raw)
+        _check_reserved(self.path, key, self._data)
+        return list(self._data.get(key) or [])
 
     def revocations(self) -> list[dict[str, Any]]:
         return self._reserved_list(REVOCATIONS_KEY)
@@ -255,6 +266,11 @@ class VoiceRegistry:
                 *self.history(),
                 {"voce": name, "audio_sha256": entry.audio_hash, "voice_id": voice_id, "provider": provider, "cloned_at": entry.cloned_at},
             ]
+            # Una revoca di QUESTA registrazione scritta mentre la clonazione era in
+            # corso comprende anche il voice_id appena nato (sicurezza C7 bis, MEDIA-4).
+            for item in self.revocations():
+                if item.get("voce") == name and item.get("audio_sha256") == entry.audio_hash and voice_id not in (item.get("voice_id") or []):
+                    item["voice_id"] = sorted({*(item.get("voice_id") or []), voice_id})
             write_json_atomic(self.path, self._data)
         return entry
 

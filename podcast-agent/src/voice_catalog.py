@@ -97,7 +97,7 @@ def _voice_row(voice: Any, config: Any, registry: VoiceRegistry, usage: dict, ca
     meta = load_meta(voice.path)
     proposed, complete = spoken_name_guess(voice.name)
     confirmed = meta.get("nome_pronunciato")
-    consent = with_registry(consent_view(voice.path, meta, audio_sha256=digest), registry, voice_id=voice_id)
+    consent = with_registry(consent_view(voice.path, meta, audio_sha256=digest), registry, voice_id=voice_id, voice=voice.name, meta=meta)
     entry = registry.get(voice.name) or {}
     runs = usage.get(voice.name, [])
     duration = cache.value(voice.path, "durata", _duration)

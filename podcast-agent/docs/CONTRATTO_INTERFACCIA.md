@@ -316,8 +316,8 @@ copione e mostra la versione nuova, non riprova da sola.
 | `CloneOutcomeUnknown` | **3** | Una clonazione precedente della stessa voce è finita con un errore o è stata interrotta: la voce potrebbe esistere sul provider. **Non si ritenta da soli** | `speaker`, `dal`, `provider` |
 | `RecordingChanged` | **3** | `voice_meta.py --consent --expect-sha256 H`: la registrazione non è più quella che l'utente ha visto. Niente registrato | `voce`, `atteso`, `attuale` |
 | `ConsentByRequired` | 1 | `voice_meta.py --consent`/`--revoke-consent` senza `--by` | `campo: "by"` |
-| `RevokedMeanwhile` | **3** | (C7) `voice_meta.py --consent` mentre la stessa voce veniva revocata: **vince la revoca**, il consenso non è registrato. La UI ricarica lo stato | `voce` |
-| `RegistryCorrupt` | 1 | (C7) Le revoche (`__revoche__`) o lo storico (`__storico__`) di `voices_registry.json` non sono ben formati: ci si ferma invece di ignorarli. Va corretto a mano (errore dell'amministratore) | `file`, `campo` |
+| `RevokedMeanwhile` | **3** | (C7) `voice_meta.py --consent` su uno stato in cui la revoca non c'era ancora (`--expect-revision` superata) o mentre la voce veniva revocata: **vince la revoca**, il consenso non è registrato. La UI ricarica lo stato | `voce` |
+| `RegistryCorrupt` | 1 | (C7) Le revoche (`__revoche__`) o lo storico (`__storico__`) di `voices_registry.json` non sono ben formati: ci si ferma (stima, produzione, consenso, revoca) **prima di spendere**, invece di ignorarli. Va corretto a mano (errore dell'amministratore) | `file`, `campo` |
 | `VoiceMetaError` | 1 | File dei metadati di una voce illeggibile | `file` |
 | `ApprovalRequired` | 1 | `produce.py` su un copione non approvato, o diverso da quello approvato; oppure (C7, N2) approvazione ritirata **a produzione in corso**: ci si ferma alla battuta successiva | `approval_problem`; a produzione in corso anche `done`, `total`, `missing` |
 | `ScriptMissing` | 1 | Stima o produzione di una run senza copione | — |
@@ -762,7 +762,7 @@ Esempio reale (`--diff 1 3 --only-changes`):
 |---|---|---|---|
 | Stima (costo, durata, battute da generare, voci) | `estimate.py --run-dir R` | no | no |
 | Stato del consenso di una voce | `voice_meta.py --name VOCE` | no | no |
-| "Confermo che … ha dato il consenso" | `voice_meta.py --name VOCE --consent --by U --expect-sha256 H` | no | no |
+| "Confermo che … ha dato il consenso" | `voice_meta.py --name VOCE --consent --by U --expect-sha256 H --expect-revision R` | no | no |
 | Clonazione dall'esito incerto: "ho controllato, ritenta" | `voice_meta.py --name VOCE --confirm-clone-retry --by U` | no | no |
 | Revoca il consenso | `voice_meta.py --name VOCE --revoke-consent --by U` | no | no |
 
@@ -813,9 +813,16 @@ registro; le battute delle voci da clonare contano tutte come da generare. Esemp
   del gate: sha256 del copione approvato).
 
 **`voice_meta.py`** risponde
-`{"voce", "file", "nome_pronunciato", "consenso": {"stato", "audio_sha256", "da", "il", "revocato_da", "revocato_il", "revoca_nel_registro", "da_confermare"}, "consenso_revocato", "clonazione_incerta", "clonazione_incerta_tolta"}`.
+`{"voce", "file", "nome_pronunciato", "consenso": {"stato", "audio_sha256", "da", "il", "revocato_da", "revocato_il", "revoca_nel_registro", "da_confermare", "revisione"}, "consenso_revocato", "clonazione_incerta", "clonazione_incerta_tolta"}`.
 `--consent` senza `--expect-sha256` dal web dà exit 1 `InvalidArguments`
 (`details.messaggio: "manca --expect-sha256"`; C7, N20).
+**`--expect-revision`** (C7, sicurezza): anch'esso obbligatorio dal web con `--consent`
+(`details.messaggio: "manca --expect-revision"`). È `consenso.revisione`, un'impronta delle
+revoche della voce, presente ovunque si mostri lo stato del consenso (stima,
+`voice_meta.py`, `voices_list.py`). Se fra il momento in cui la pagina ha mostrato lo stato
+e la conferma la voce è stata revocata, exit 3 `RevokedMeanwhile` e niente registrato:
+**vince sempre la revoca**. La UI ricarica lo stato e, se la persona conferma di nuovo,
+ripassa la revisione nuova.
 **`--expect-sha256`** è obbligatorio in modalità web con `--consent`: la UI ripassa il
 `consenso.audio_sha256` che ha mostrato (dalla stima o da `voice_meta.py`). Se la
 registrazione è cambiata nel frattempo, exit 3 `RecordingChanged` e il consenso non si
@@ -837,8 +844,10 @@ nuovo `--consent` toglie solo la revoca di **quella** registrazione (e dei voice
 da lei); le altre restano. Per cancellare una voce **prima** si revoca, poi si cancellano
 i file. Se i file sono già stati cancellati, `voice_meta.py --name VOCE --revoke-consent
 --by U` funziona lo stesso per il **nome esatto** che il registro conosce (risposta con
-`file: null` e `revoche_registro`, il numero di revoche scritte); un nome che il registro
-non conosce, o incompleto, è un errore (non si indovina). I nomi `__revoche__` e
+`file: null` e `revoche_registro`, il numero di revoche scritte), anche se in libreria c'è
+una voce dal nome simile; un nome che il registro non conosce, o incompleto, è un errore
+(non si indovina). Una clonazione che si chiude dopo la revoca della sua registrazione
+entra nella revoca. I nomi `__revoche__` e
 `__storico__` sono riservati: una registrazione con quel nome è fra i file scartati e non
 si clona. Consenso e revoca della stessa voce passano da un lock comune: se arrivano
 insieme vince la revoca (un consenso in attesa mentre la voce viene revocata esce con
@@ -1190,8 +1199,8 @@ Esempio reale (una riga):
 | Azione | Comando | Lunga | Costa |
 |---|---|---|---|
 | Elenco | `voices_list.py [--filter clonate\|da_clonare\|consenso_da_confermare] [--search T]` | no | no |
-| Nuova voce | *adattatore*: salva la registrazione in `voci_disponibili/`, poi `voice_meta.py --name VOCE --spoken-name "Nome Cognome" --consent --expect-sha256 H --by U` | no | no |
-| Registra il consenso | `voice_meta.py --name VOCE --consent --expect-sha256 H --by U` | no | no |
+| Nuova voce | *adattatore*: salva la registrazione in `voci_disponibili/`, poi `voice_meta.py --name VOCE --spoken-name "Nome Cognome" --consent --expect-sha256 H --expect-revision R --by U` | no | no |
+| Registra il consenso | `voice_meta.py --name VOCE --consent --expect-sha256 H --expect-revision R --by U` | no | no |
 | Revoca il consenso | `voice_meta.py --name VOCE --revoke-consent --by U` (prima di cancellare i file: vedi "Revoche nel registro", passo 5) | no | no |
 | Ascolta il campione | *adattatore*: serve il file della voce (vedi "Download") | no | no |
 | Menu "⋯" di una voce | Rinomina il nome pronunciato (`voice_meta.py --spoken-name`), Revoca il consenso; Sostituisci e Elimina sono dell'adattatore (vedi "Caricamenti" e "Non supportato") | no | no |
@@ -1204,7 +1213,8 @@ Esempio reale (una voce; omessi `path`, `voice_id`, `cache_reason`, che restano 
  "durata_campione_seconds": 1.5, "cached": false, "stato": "Da clonare", "clonata_il": null,
  "caricata_il": "2026-10-07T11:19:02",
  "consenso": {"stato": "mancante", "audio_sha256": "sha256:d83f…350f", "da": null, "il": null,
-              "revocato_da": null, "revocato_il": null, "revoca_nel_registro": false, "da_confermare": false},
+              "revocato_da": null, "revocato_il": null, "revoca_nel_registro": false, "da_confermare": false,
+              "revisione": "rev:5c1d…a07e"},
  "usata_in": 0, "episodi": []}
 ```
 
