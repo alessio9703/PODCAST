@@ -72,7 +72,7 @@ lessons 80, web_integration 871.
 | C6 | Fase finale: `run.py` su `src/music_context.py`, `lessons --propose`, ffmpeg, sha256 dei documenti, flusso in modalità web, pulizia | **fatta**; revisione: 0 alte, 0 medie, 3 basse, **tutte corrette** |
 | Revisione finale | Revisione indipendente dell'intero branch (`REVISIONE-FINALE.md`) | **fatta**: 3 bloccanti, 32 non bloccanti |
 | C7 | Correzioni della revisione finale: B1–B3, N1, §8.6, N2–N6, N8–N12, N14–N27, percorso dei wireframe | **fatta** e in `main`; cinque revisioni di sicurezza, alte e medie corrette, ciclo chiuso dall'utente; basse aperte in "Da rivedere prima della produzione" |
-| C8 | Rifinitura: N28 e test deterministico | **fatta** (`C8.md`); revisione di sicurezza: vedi `C8-sicurezza.md` |
+| C8 | Rifinitura: N28 e test deterministico | **fatta** (`C8.md`); revisione di sicurezza: 0 alte, 0 medie, 4 basse (in "Da rivedere prima della produzione") |
 
 A fine di **ogni** fase: revisione di sicurezza (`<fase>-sicurezza.md`), alte corrette
 prima della fase successiva.
@@ -356,7 +356,12 @@ segnalazioni di C7 (dettagli e proposte in `C7.md` e nei rapporti `C7-sicurezza-
 | `C7-sicurezza-3` BASSA-1 | Flusso "Nuova voce" del contratto: la revisione del consenso non viene da uno stato mostrato; con gli stessi byte di una registrazione revocata il consenso toglie la revoca senza che la UI l'abbia mostrata | non concatenare il consenso al caricamento, o un flag esplicito |
 | `C7-sicurezza-3` (da verificare) | I `details` di `ConsentRequired` non contengono `revisione` (la UI la prende da stima o `voice_meta.py`) | aggiungerla, o dirlo nel contratto |
 | `C7-sicurezza-4` (nota) | Il campo `provider` di una revoca è letto fuori dal lock (solo informativo) | leggerlo dentro il lock |
-| `C7.md` §8 | Il test del flusso completo in modalità web è sensibile ai tempi sotto carico | reso deterministico in C8 |
+| `C7.md` §8 | Il test del flusso completo in modalità web era sensibile ai tempi sotto carico | **fatto** in C8 (fermo nel provider finto) |
+| `C8-sicurezza` BASSA-1 | Un esito 2 o 3 **non** messo nell'elenco degli `error_type` uscirebbe come `InternalError` exit 1 ("riprovabile"); oggi non succede | il nome di ripiego si sceglie dal codice calcolato da `_classify`; ricordarlo in N30 quando si aggiungono nomi nuovi |
+| `C8-sicurezza` BASSA-2 | L'evento `errore` di `produce.py` riporta il nome grezzo della classe (es. `MusicChangedError`) mentre il JSON finale dice `MusicChanged` | far passare anche l'evento da `_stable`/dall'elenco |
+| `C8-sicurezza` BASSA-3 | `InternalError` toglie il nome della classe Python anche da stderr: si perde un'informazione per il debug | scrivere `type(exc).__name__` su stderr per i soli errori di ripiego |
+| `C8-sicurezza` BASSA-4 | Il contratto indica ancora `InvalidArguments` per `--by` mancante in `lessons.py` (ora `ByRequired`) | correggere la riga nella sezione Lezioni |
+| `C8-sicurezza` (nota) | Verificare che il provider Fish traduca ogni eccezione di rete in un errore del provider (oggi una esce con exit 1; precedente a C8) | da controllare con N30 |
 
 **Proposta per dopo la demo: un ID stabile per ogni voce.** Oggi una voce è il suo **nome
 di file** (`Mario Rossi.wav`): consenso, revoche, registro e cast la identificano così.
