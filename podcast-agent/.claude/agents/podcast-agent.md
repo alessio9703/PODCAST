@@ -128,7 +128,7 @@ Gli exit code sono informazione, non rumore:
 |---|---|---|
 | `0` | ok | vai avanti |
 | `1` | errore di dominio (file mancante, nome sbagliato, speaker scoperto) | leggi `error`, correggi, richiama |
-| `2` | **errore del provider vocale** | **ti fermi e riporti.** Non ritentare |
+| `2` | **errore di un servizio esterno a pagamento** (provider vocale; anche il modello del copione con chiave non valida o credito esaurito) | **ti fermi e riporti.** Non ritentare |
 | `3` | serve un'informazione dall'utente | chiedi con `AskUserQuestion`, poi richiama |
 
 **`tools/music_list.py --resolve`** ha una convenzione diversa da `voices_list.py`: l'esito

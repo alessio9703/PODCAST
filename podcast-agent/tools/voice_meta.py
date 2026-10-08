@@ -36,6 +36,7 @@ from __future__ import annotations
 import argparse
 
 from _common import InvalidArguments, add_config_arg, bootstrap, emit, note, parse_args, require_by_in_web, run_tool, web_mode  # noqa: E402
+from src.errors import DomainError  # noqa: E402
 from src.registry import VoiceRegistry  # noqa: E402
 from src.voice_meta import consent_view, load_meta, record_spoken_name, with_registry  # noqa: E402
 from src.voice_prep import (  # noqa: E402
@@ -112,7 +113,7 @@ def main() -> None:
         note(f"Consenso registrato per {voice.name}.")
     elif args.confirm_clone_retry:
         if not args.by or not args.by.strip():
-            raise InvalidArguments("Serve --by: chi ha controllato sul provider.", details={"messaggio": "manca --by"})
+            raise DomainError("Serve --by: chi ha controllato sul provider.", error_type="ByRequired", details={"campo": "by"})
         cleared = confirm_clone_retry(config, voice.name)
         note(
             f"{voice.name}: la prossima produzione potra' clonare di nuovo (confermato da {args.by.strip()})."

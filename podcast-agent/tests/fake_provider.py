@@ -48,8 +48,16 @@ class FakeProvider(VoiceProvider):
         clone_delay_seconds: float = 0.0,
         clone_log_file: str | None = None,
         tts_log_file: str | None = None,
+        hold_file: str | None = None,
+        hold_after: int = 0,
     ) -> None:
         self._fail_clone = fail_clone
+        #: Un "fermo" per i test di interruzione (C8): dopo `hold_after` sintesi
+        #: in questo processo, la successiva aspetta finche' `hold_file` esiste.
+        #: Cosi' un test puo' mandare SIGTERM mentre una battuta e' sicuramente
+        #: in corso, qualunque sia il carico della macchina.
+        self._hold_file = Path(hold_file) if hold_file else None
+        self._hold_after = int(hold_after)
         # Le voci clonate vivono sul provider, non nel processo: con
         # `voices_file` sopravvivono fra un'invocazione di un tool e l'altra,
         # che e' quello che serve per provare i percorsi in cui una voce deve
@@ -135,6 +143,10 @@ class FakeProvider(VoiceProvider):
                 log.write(json.dumps({"voice_id": voice_id, "text": text}, ensure_ascii=False) + "\n")
         if self._tts_delay:
             time.sleep(self._tts_delay)
+        if self._hold_file is not None and len(self.tts_calls) >= self._hold_after:
+            deadline = time.monotonic() + 120
+            while self._hold_file.exists() and time.monotonic() < deadline:
+                time.sleep(0.05)
         freq = 180 + 40 * (int(voice_id.split("-")[-1]) % 6) + len(self.tts_calls)
         self.tts_calls.append((voice_id, text))
         seconds = max(0.4, len(text) / 100 * self._seconds_per_100)

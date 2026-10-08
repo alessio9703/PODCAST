@@ -226,7 +226,7 @@ def _require_by(by: str | None) -> str:
     if not by or not by.strip():
         raise VoiceMetaError(
             "Serve il nome di chi registra (--by): il consenso dice chi lo ha confermato.",
-            error_type="ConsentByRequired",
+            error_type="ByRequired",
             details={"campo": "by"},
         )
     return " ".join(by.split())

@@ -30,6 +30,7 @@ import argparse
 import json
 
 from _common import PROJECT_ROOT, add_config_arg, add_trusted_paths_arg, bootstrap, emit, file_arg, note, parse_args, run_dir_arg, run_tool  # noqa: E402
+from src.errors import DomainError  # noqa: E402
 from src.episode_config import EpisodeConfig  # noqa: E402
 from src.lessons import active_lessons_summary  # noqa: E402
 from src.music_context import capture_music_context  # noqa: E402
@@ -165,9 +166,11 @@ def main() -> None:
             session.participants,
         )
         if errors:
-            raise ValueError(
+            raise DomainError(
                 "Il copione non e' valido e NON e' stato salvato:\n  - "
-                + "\n  - ".join(errors)
+                + "\n  - ".join(errors),
+                error_type="ScriptInvalid",
+                details={"errors": errors},
             )
 
         script = PodcastScript.from_dict(payload)

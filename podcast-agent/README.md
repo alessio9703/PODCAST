@@ -491,8 +491,10 @@ utilizzabile anche a mano:
 ```
 
 Gli exit code distinguono i casi che l'agente deve trattare diversamente:
-`0` ok · `1` errore di dominio (correggi e richiama) · `2` errore del provider
-(**fermati, non ritentare**) · `3` serve una risposta dall'utente.
+`0` ok · `1` errore di dominio (correggi e richiama) · `2` errore di un servizio esterno
+a pagamento, provider vocale o modello del copione (**fermati, non ritentare**) · `3` serve
+una risposta dall'utente. Gli `error_type` possibili sono un elenco chiuso
+(`src/error_catalog.py`, §3 di `docs/CONTRATTO_INTERFACCIA.md`).
 
 I vincoli del progetto sono scritti come regole non negoziabili nel prompt dell'agente
 (`.claude/agents/podcast-agent.md`): niente nomi di voce indovinati su corrispondenza
@@ -824,7 +826,7 @@ podcast-agent/
 │   ├── test_tools_cli.py         # 190 controlli sui CLI del subagent
 │   ├── test_music.py             # 73 controlli su intro/outro/sottofondo
 │   ├── test_lessons.py           # 80 controlli su segnali e lezioni
-│   └── test_web_integration.py   # 860 controlli sull'integrazione web (C0-C7)
+│   └── test_web_integration.py   # 871 controlli sull'integrazione web (C0-C8)
 ├── docs/
 │   ├── CONTRATTO_INTERFACCIA.md  # il contratto per l'adattatore web
 │   ├── wireframe/                # le schermate dell'interfaccia

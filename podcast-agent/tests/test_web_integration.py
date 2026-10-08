@@ -1482,7 +1482,7 @@ def test_c2_consent(root: Path, config: Path) -> None:
     code, out, _ = tool("voice_meta.py", "--name", "1", config=config)
     check("indice numerico non vale come nome", code != 0, str(out))
     code, out, _ = tool("voice_meta.py", "--name", "Mario Rossi", "--consent", config=config)
-    check("consenso senza --by -> exit 1 ConsentByRequired", code == 1 and out.get("error_type") == "ConsentByRequired", str(out))
+    check("consenso senza --by -> exit 1 ByRequired", code == 1 and out.get("error_type") == "ByRequired" and out["details"]["campo"] == "by", str(out))
     code, out, _ = tool("voice_meta.py", "--name", "Mario Rossi", "--consent", "--by", "Utente A", config=config)
     check("consenso registrato con chi e quando", code == 0 and out["consenso"]["stato"] == "registrato" and out["consenso"]["da"] == "Utente A" and out["consenso"]["il"], str(out))
     meta = json.loads((root / "voci" / "Mario Rossi.json").read_text(encoding="utf-8"))
@@ -1708,7 +1708,7 @@ def test_c2_clone_errors(root: Path, config: Path) -> None:
     code, out, _ = tool("estimate.py", "--run-dir", run_dir, config=config)
     check("la stima segnala la clonazione incerta", {v["speaker"]: v["clonazione_incerta"] for v in out["voices"]}["Anna Neri"] is True, str(out["voices"]))
     code, out, _ = tool("voice_meta.py", "--name", "Anna Neri", "--confirm-clone-retry", config=config)
-    check("conferma senza --by -> InvalidArguments", code == 1 and out.get("error_type") == "InvalidArguments", str(out))
+    check("conferma senza --by -> ByRequired", code == 1 and out.get("error_type") == "ByRequired" and out["details"]["campo"] == "by", str(out))
     code, out, _ = tool("voice_meta.py", "--name", "Anna Neri", "--confirm-clone-retry", "--by", "Utente A", config=config)
     check("conferma: marcatore tolto", code == 0 and out["clonazione_incerta_tolta"] and out["clonazione_incerta"] is None, str(out))
 
@@ -2306,7 +2306,7 @@ def test_c4_music(root: Path, config: Path) -> None:
     (root / "musiche" / "sottofondo").mkdir(exist_ok=True)
     make_wav(root / "musiche" / "sottofondo" / "Tappeto.wav", 1.0, 200)
     code, out, _ = tool("music_meta.py", "--category", "intro", "--name", "piano calmo", "--licenza", "CC-BY 4.0, Autore X", config=config)
-    check("senza --by -> MusicMetaError", code == 1 and out.get("error_type") == "MusicMetaError", str(out))
+    check("senza --by -> ByRequired", code == 1 and out.get("error_type") == "ByRequired" and out["details"]["campo"] == "by", str(out))
     code, out, _ = tool("music_meta.py", "--category", "intro", "--name", "piano calmo", "--licenza", "CC-BY 4.0, Autore X", "--by", "Utente A", config=config)
     check("licenza registrata con chi e quando", code == 0 and out["licenza"] == "CC-BY 4.0, Autore X" and out["licenza_da"] == "Utente A" and out["licenza_il"] and out["has_licenza"], str(out))
     code, out, _ = tool("music_meta.py", "--category", "intro", "--name", "Piano", "--no-licenza", "--by", "Utente A", config=config)
@@ -2411,7 +2411,7 @@ def test_c4_fixes(root: Path, config: Path) -> None:
     check("testo troppo lungo, intestazione '#' e delimitatore '---' rifiutati", lines[:3] == ["RIFIUTATA"] * 3, proc.stdout + proc.stderr)
     check("chi accetta resta registrato", lines[3:5] == ["Utente", "A"], proc.stdout)
     code, out, _ = run_tool_env("lessons.py", ["--accept", "L1"], web=True)
-    check("dall'interfaccia --accept senza --by -> InvalidArguments", code == 1 and out.get("error_type") == "InvalidArguments", str(out))
+    check("dall'interfaccia --accept senza --by -> ByRequired", code == 1 and out.get("error_type") == "ByRequired" and out["details"]["campo"] == "by", str(out))
 
     print("\n[sicurezza C4] costo degli elenchi")
     docs = root / "documenti"
@@ -2610,10 +2610,13 @@ def test_full_flow(web: bool = False) -> None:
     print(f"\n[finale · {mode}] documento -> cast -> musiche -> copione -> modifica -> approva -> stima -> consenso -> produce interrotto e ripreso -> episodio -> forma d'onda -> retake -> scegli -> rimonta -> archivio")
     if web:
         root, config = web_project_copy()
+        hold = root / "fermo-sintesi"
+        config = write_c2_config(root, "config.yaml", tts_delay_seconds=0.4, hold_file=str(hold), hold_after=2)
     else:
         root = Path(tempfile.mkdtemp(prefix="podcast-web-finale-"))
         setup(root)
-        config = write_c2_config(root, "config-finale.yaml", tts_delay_seconds=0.4)
+        hold = root / "fermo-sintesi"
+        config = write_c2_config(root, "config-finale.yaml", tts_delay_seconds=0.4, hold_file=str(hold), hold_after=2)
     responses = root / "anthropic_risposte.json"
     project = root if web else PROJECT_ROOT
 
@@ -2668,21 +2671,28 @@ def test_full_flow(web: bool = False) -> None:
         check(f"   consenso di {voice['speaker']} registrato sulla registrazione vista", code == 0 and meta["consenso"]["stato"] == "registrato")
 
     events = Path(root / "output" / run / "_eventi.jsonl")
+    # Deterministico (C8): la terza sintesi resta ferma finche' esiste il file
+    # `hold`; il SIGTERM arriva mentre la battuta 3 e' sicuramente in corso, poi
+    # il fermo si toglie. Prima dipendeva dai tempi e sotto carico la
+    # produzione poteva finire prima del segnale.
+    hold.write_text("fermo", encoding="utf-8")
     proc = subprocess.Popen(
         command("produce.py", "--run-dir", run, "--events"),
         stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, cwd=str(project), env=environment(),
     )
-    deadline = time.monotonic() + 60
-    while time.monotonic() < deadline and not any(r["evento"] == "battuta" and r["n"] >= 2 for r in read_events(events)):
+    deadline = time.monotonic() + 120
+    while time.monotonic() < deadline and not any(r["evento"] == "battuta" and r["n"] >= 3 and not r["cached"] for r in read_events(events)):
         time.sleep(0.1)
     with_progress = tool("run_status.py", "--run-dir", run, config=config)[1]
     import signal as _signal
 
     proc.send_signal(_signal.SIGTERM)
+    time.sleep(0.3)
+    hold.unlink()
     stdout, _ = proc.communicate(timeout=60)
     out = json.loads(stdout)
     check("6. durante la produzione l'Archivio dice 'in corso'", with_progress["stato"] == "in_corso" and with_progress["operazione"] == "produzione", str(with_progress))
-    check("   interrotta: battute pronte e mancanti", proc.returncode == 1 and out["error_type"] == "ProductionInterrupted" and out["details"]["missing"], str(out)[:300])
+    check("   interrotta durante la battuta 3: pronte 1-3, mancanti esattamente 4 e 5", proc.returncode == 1 and out["error_type"] == "ProductionInterrupted" and out["details"]["missing"] == [4, 5] and out["details"]["done"] == 3, str(out)[:300])
     missing = out["details"]["missing"]
     check("   l'Archivio dice 'interrotta'", tool("run_status.py", "--run-dir", run, config=config)[1]["stato"] == "interrotta")
     sent = len(tts_texts(root))
@@ -3422,7 +3432,7 @@ def test_c7_security() -> None:
     session_before = (root / "output" / name / "_script_session.json").read_text(encoding="utf-8")
     for tool_name, args in cases:
         code, out, _ = run(tool_name, *args)
-        check(f"{tool_name} {args[2] if len(args) > 2 else ''} senza --by: exit 1 InvalidArguments campo 'by'", code == 1 and out.get("error_type") == "InvalidArguments" and out["details"].get("campo") == "by", str(out)[:200])
+        check(f"{tool_name} {args[2] if len(args) > 2 else ''} senza --by: exit 1 ByRequired campo 'by'", code == 1 and out.get("error_type") == "ByRequired" and out["details"].get("campo") == "by", str(out)[:200])
     check("...e niente e' cambiato nella sessione del copione", (root / "output" / name / "_script_session.json").read_text(encoding="utf-8") == session_before)
     code, out, _ = run("retake.py", "--run-dir", name, "--turn", "1", "--dry-run")
     check("retake --dry-run (non firma, non spende) senza --by: ammesso", code == 0, str(out)[:200])
@@ -3965,6 +3975,115 @@ def test_ffmpeg_input_confined() -> None:
 
 
 # ----------------------------------------------------------------------
+# C8 · rifinitura
+# ----------------------------------------------------------------------
+
+
+#: Eccezioni che non arrivano mai nel JSON con il loro nome: basi, o catturate
+#: e tradotte prima di run_tool (vedi src/error_catalog.py).
+INTERNAL_EXCEPTIONS = {
+    "DomainError", "NeedsUserDecision", "NeedsRemoval", "SynthesisStopped",
+    "ModelAccessError", "ModelTemporarilyUnavailable", "MusicChangedError",
+}
+
+
+def test_c8_error_catalog() -> None:
+    """N28: codice, elenco unico (src/error_catalog.py) e contratto §3 coincidono."""
+    import ast
+    import re
+    from src.error_catalog import CATALOG
+
+    print("\n[C8] N28 · error_type: elenco unico, codice e contratto allineati")
+    classes: dict[str, list[str]] = {}
+    explicit: dict[str, str] = {}
+    files = [*sorted((PROJECT_ROOT / "src").rglob("*.py")), *sorted((PROJECT_ROOT / "tools").glob("*.py"))]
+    for path in files:
+        tree = ast.parse(path.read_text(encoding="utf-8"))
+        for node in ast.walk(tree):
+            if isinstance(node, ast.ClassDef):
+                classes[node.name] = [getattr(b, "id", getattr(b, "attr", "")) for b in node.bases]
+            if isinstance(node, ast.keyword) and node.arg == "error_type" and isinstance(node.value, ast.Constant):
+                explicit[node.value.value] = str(path.relative_to(PROJECT_ROOT))
+    roots = {"Exception", "RuntimeError", "ValueError", "OSError", "DomainError", "NeedsUserDecision"}
+    exceptions = set()
+    grew = True
+    while grew:
+        grew = False
+        for name, bases in classes.items():
+            if name not in exceptions and name not in roots and any(b in roots | exceptions for b in bases):
+                exceptions.add(name)
+                grew = True
+    missing = sorted(exceptions - set(CATALOG) - INTERNAL_EXCEPTIONS)
+    check("ogni classe d'errore del codice e' nell'elenco (o e' interna)", not missing, str(missing))
+    unknown = sorted(set(explicit) - set(CATALOG))
+    check("ogni error_type esplicito del codice e' nell'elenco", not unknown, str({k: explicit[k] for k in unknown}))
+    check("nessun nome in snake_case o con spazi", all(re.fullmatch(r"[A-Z][A-Za-z0-9]+", n) for n in CATALOG), str([n for n in CATALOG if not re.fullmatch(r"[A-Z][A-Za-z0-9]+", n)]))
+
+    contract = (PROJECT_ROOT / "docs" / "CONTRATTO_INTERFACCIA.md").read_text(encoding="utf-8")
+    section = contract[contract.index("## 3. `error_type`"):contract.index("## 4. Concorrenza")]
+    table = section[section.index("| error_type | exit |"):]
+    rows = dict(re.findall(r"^\| `([A-Za-z]+)` \| \**(\d)\** \|", table, flags=re.M))
+    check("il contratto §3 elenca esattamente i nomi dell'elenco", set(rows) == set(CATALOG), str(sorted(set(rows) ^ set(CATALOG))))
+    wrong_exit = sorted(n for n in CATALOG if n in rows and int(rows[n]) != CATALOG[n][0])
+    check("...con gli stessi exit code", not wrong_exit, str(wrong_exit))
+
+    proc = run_python(
+        """
+        import sys, inspect, importlib, pkgutil
+        sys.path.insert(0, "tools")
+        import _common
+        import src
+        from src.error_catalog import CATALOG
+        from src.errors import DomainError, NeedsUserDecision
+        from src.voice_provider import VoiceProviderError
+        for mod in pkgutil.iter_modules(src.__path__):
+            importlib.import_module("src." + mod.name)
+        wrong = []
+        for module in list(sys.modules.values()):
+            if not getattr(module, "__name__", "").startswith("src."):
+                continue
+            for name, cls in inspect.getmembers(module, inspect.isclass):
+                if name in CATALOG and issubclass(cls, BaseException) and cls.__module__ == module.__name__:
+                    expected = 3 if issubclass(cls, NeedsUserDecision) else 2 if issubclass(cls, VoiceProviderError) else None
+                    if expected and CATALOG[name][0] != expected:
+                        wrong.append(name)
+        print("ESITI", sorted(set(wrong)))
+        cases = [ValueError("x"), FileNotFoundError("x"), KeyError("x"), DomainError("x", error_type="NomeInventato"), NeedsUserDecision("x", error_type="AmbiguousName")]
+        for exc in cases:
+            print("MAPPA", type(exc).__name__, *_common._stable(*_common._classify(exc), exc))
+        """
+    )
+    lines = proc.stdout.strip().splitlines()
+    check("le classi a esito 3 e 2 hanno quell'exit code nell'elenco", "ESITI []" in lines, proc.stdout + proc.stderr[-300:])
+    check(
+        "un'eccezione imprevista esce con un nome dell'elenco: ValueError -> InvalidInput, FileNotFoundError -> NotFound, altro -> InternalError",
+        lines[-5:] == [
+            "MAPPA ValueError 1 InvalidInput", "MAPPA FileNotFoundError 1 NotFound", "MAPPA KeyError 1 InternalError",
+            "MAPPA DomainError 1 InternalError", "MAPPA NeedsUserDecision 3 AmbiguousName",
+        ],
+        proc.stdout + proc.stderr[-300:],
+    )
+
+    print("\n[C8] N28 · i nomi rinominati, dai comandi veri")
+    root, run = c7_project()
+    code, out, _ = run("voice_meta.py", "--name", "Mario Rossi", "--consent", "--by", "", web=False)
+    check("--by vuoto nel consenso: ByRequired", code == 1 and out["error_type"] == "ByRequired" and out["details"]["campo"] == "by", str(out)[:200])
+    code, out, _ = run("music_meta.py", "--category", "intro", "--name", "Piano calmo", "--licenza=CC-BY", web=False)
+    check("--by mancante nei metadati di un brano: ByRequired", code == 1 and out["error_type"] == "ByRequired", str(out)[:200])
+    code, out, _ = run("script_show.py", "--run-dir", "non-esiste")
+    check("run inesistente: un nome dell'elenco, mai un nome Python", out["error_type"] in CATALOG and out["error_type"] not in ("FileNotFoundError", "ValueError"), str(out)[:200])
+    name = run("run_init.py", "--title", "Copione rotto", web=False)[1]["run"]
+    draft = root / "output" / name / "bozza.json"
+    draft.write_text(json.dumps({"titolo": "T", "turni": [{"speaker": "Mario Rossi", "testo": "Ciao."}]}), encoding="utf-8")
+    code, out, _ = run("script_save.py", "--run-dir", name, "--script-json", str(draft), "--speakers", "Mario Rossi", "Giulia Bianchi", web=False)
+    check("script_save con un copione non valido: ScriptInvalid con gli errori in details", code == 1 and out["error_type"] == "ScriptInvalid" and out["details"]["errors"], str(out)[:300])
+
+
+def test_c8() -> None:
+    test_c8_error_catalog()
+
+
+# ----------------------------------------------------------------------
 
 
 def main() -> None:
@@ -4004,6 +4123,7 @@ def main() -> None:
     test_c6()
     test_ffmpeg_input_confined()
     test_c7()
+    test_c8()
 
     from tests.test_tools_cli import PASSED
 
