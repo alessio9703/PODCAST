@@ -1,6 +1,6 @@
 # Stato dell'integrazione web
 
-Ultimo aggiornamento: 2026-10-08 (fase C8: rifinitura, N28). `integrazione-web` è in `main` (`e67f7b0`); C8 sul branch `rifinitura`.
+Ultimo aggiornamento: 2026-10-08 (fase C8 chiusa, tag `v1.0-web`). `integrazione-web` (C0–C7) e `rifinitura` (C8) sono in `main`.
 
 Il metodo di lavoro e le regole sono in `CLAUDE.md`. I dettagli di ogni fase sono nei
 resoconti accanto a questo file:
@@ -51,11 +51,13 @@ resoconti accanto a questo file:
 | `400b781` … `269b7a6` | **C7** correzioni della revisione finale, blocchi A–G (dettaglio in `C7.md`) |
 | `06acc06` … `2e03b3c` | C7: rapporti di sicurezza 1–5 e correzioni, seconda tornata di decisioni, basse della quinta revisione, chiusura |
 | `e67f7b0` | **merge in `main`**: "Integrazione web: C0-C7" (`--no-ff`) |
-| (questo, branch `rifinitura`) | **C8**: N28 (elenco unico degli `error_type`) e test del flusso completo deterministico |
+| `87f694c`, `d361ac4` | **C8**: N28 (elenco unico degli `error_type`), test del flusso completo deterministico, rapporto di sicurezza |
+| (questo, branch `rifinitura`) | C8: basse della revisione di sicurezza corrette (richiesta dell'utente, prima del tag) |
+| merge in `main` + tag `v1.0-web` | "Rifinitura: C8" (`--no-ff`); il primo merge `bf176dc` e il tag messo lì sono stati superati da questo (tag spostato, mai pubblicato) |
 
 Test all'ultimo commit, sempre con `.venv/bin/python`: smoke 68, tools_cli 190 (+1
 saltato: il test reale con Anthropic, solo con `PODCAST_E2E_REALE=1`), music 73,
-lessons 80, web_integration 871.
+lessons 80, web_integration 875.
 
 ## 2. Fasi
 
@@ -72,7 +74,7 @@ lessons 80, web_integration 871.
 | C6 | Fase finale: `run.py` su `src/music_context.py`, `lessons --propose`, ffmpeg, sha256 dei documenti, flusso in modalità web, pulizia | **fatta**; revisione: 0 alte, 0 medie, 3 basse, **tutte corrette** |
 | Revisione finale | Revisione indipendente dell'intero branch (`REVISIONE-FINALE.md`) | **fatta**: 3 bloccanti, 32 non bloccanti |
 | C7 | Correzioni della revisione finale: B1–B3, N1, §8.6, N2–N6, N8–N12, N14–N27, percorso dei wireframe | **fatta** e in `main`; cinque revisioni di sicurezza, alte e medie corrette, ciclo chiuso dall'utente; basse aperte in "Da rivedere prima della produzione" |
-| C8 | Rifinitura: N28 e test deterministico | **fatta** (`C8.md`); revisione di sicurezza: 0 alte, 0 medie, 4 basse (in "Da rivedere prima della produzione") |
+| C8 | Rifinitura: N28 e test deterministico | **fatta** e in `main`, tag `v1.0-web` (`C8.md`); revisione di sicurezza: 0 alte, 0 medie, 4 basse, **corrette** prima del tag |
 
 A fine di **ogni** fase: revisione di sicurezza (`<fase>-sicurezza.md`), alte corrette
 prima della fase successiva.
@@ -336,8 +338,8 @@ piano della fase che le attua). **Fatto** (`C7.md` §7):
 ## 4. Richieste ricevute e non ancora completate
 
 1. Merge di `integrazione-web` in `main`: **fatto** (`e67f7b0`).
-2. **C8**: merge di `rifinitura` in `main` e tag `v1.0-web` dopo la revisione di sicurezza;
-   poi stop in attesa dell'OK per N29–N32.
+2. **C8**: fatta, in `main` con il tag `v1.0-web`. **Stop**: N29–N32 aspettano l'OK
+   dell'utente.
 3. Interpretazioni di C7 e basse della sicurezza: decise e attuate (`C7.md` §7, D12).
 
 ## Da rivedere prima della produzione
@@ -357,10 +359,7 @@ segnalazioni di C7 (dettagli e proposte in `C7.md` e nei rapporti `C7-sicurezza-
 | `C7-sicurezza-3` (da verificare) | I `details` di `ConsentRequired` non contengono `revisione` (la UI la prende da stima o `voice_meta.py`) | aggiungerla, o dirlo nel contratto |
 | `C7-sicurezza-4` (nota) | Il campo `provider` di una revoca è letto fuori dal lock (solo informativo) | leggerlo dentro il lock |
 | `C7.md` §8 | Il test del flusso completo in modalità web era sensibile ai tempi sotto carico | **fatto** in C8 (fermo nel provider finto) |
-| `C8-sicurezza` BASSA-1 | Un esito 2 o 3 **non** messo nell'elenco degli `error_type` uscirebbe come `InternalError` exit 1 ("riprovabile"); oggi non succede | il nome di ripiego si sceglie dal codice calcolato da `_classify`; ricordarlo in N30 quando si aggiungono nomi nuovi |
-| `C8-sicurezza` BASSA-2 | L'evento `errore` di `produce.py` riporta il nome grezzo della classe (es. `MusicChangedError`) mentre il JSON finale dice `MusicChanged` | far passare anche l'evento da `_stable`/dall'elenco |
-| `C8-sicurezza` BASSA-3 | `InternalError` toglie il nome della classe Python anche da stderr: si perde un'informazione per il debug | scrivere `type(exc).__name__` su stderr per i soli errori di ripiego |
-| `C8-sicurezza` BASSA-4 | Il contratto indica ancora `InvalidArguments` per `--by` mancante in `lessons.py` (ora `ByRequired`) | correggere la riga nella sezione Lezioni |
+| `C8-sicurezza` BASSA-1..4 | Ripiego che perdeva l'exit 2/3, evento `errore` con il nome grezzo, nome della classe tolto da stderr, `InvalidArguments` nel contratto delle lezioni | **fatte** prima del tag (`C8.md` §5) |
 | `C8-sicurezza` (nota) | Verificare che il provider Fish traduca ogni eccezione di rete in un errore del provider (oggi una esce con exit 1; precedente a C8) | da controllare con N30 |
 
 **Proposta per dopo la demo: un ID stabile per ogni voce.** Oggi una voce è il suo **nome

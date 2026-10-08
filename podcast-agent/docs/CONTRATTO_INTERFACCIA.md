@@ -196,7 +196,11 @@ N28). La fonte è `src/error_catalog.py`; un test controlla che codice, elenco e
 tabella coincidano, exit code compresi. `run_tool` garantisce che nel JSON finisca solo
 un nome di questo elenco: un'eccezione imprevista non arriva mai con il nome di una
 classe Python (`ValueError`, `KeyError`, …) ma come `InvalidInput`, `NotFound` o
-`InternalError`, con il testo che spiega.
+`InternalError`, con il testo che spiega. Il ripiego **conserva l'exit code**: un esito 2
+fuori elenco esce come `ExternalServiceError`, un esito 3 come `UserDecisionRequired`, mai
+come un 1 "riprovabile" (sicurezza C8). Per un nome di ripiego, stderr riporta anche la
+classe Python, per il debug. L'evento `errore` di `produce.py --events` usa lo stesso nome
+del JSON finale.
 
 **Convenzione dei nomi**: CamelCase; senza suffisso = una situazione precisa
 (`ConsentRequired`, `VersionConflict`); con il suffisso `Error` = l'errore generico di un
@@ -218,6 +222,8 @@ cosa fare e, dove serve, `details.campo`.
 | `InvalidInput` | 1 | Valore non valido passato al comando (il testo dice quale e perché) | — |
 | `NotFound` | 1 | Un file o una cartella richiesti non esistono (run, copione, documento…) | — |
 | `InternalError` | 1 | Errore imprevisto: da registrare nei log e segnalare | — |
+| `ExternalServiceError` | **2** | Errore imprevisto di un servizio esterno a pagamento: nessun "Riprova" automatico | — |
+| `UserDecisionRequired` | **3** | Serve una scelta dell'utente non ancora descritta nell'elenco: il testo dice quale | come da messaggio |
 | `Interrupted` | 1 | Comando fermato da SIGTERM o Ctrl-C; nessun file lasciato a metà | — |
 | `InvalidArguments` | 1 | Argomenti non validi per il comando (errore dell'adattatore) | `messaggio` |
 | `NotAllowedInWebMode` | 1 | Argomento o comando riservato all'uso locale, in modalità web (errore dell'adattatore) | `argomenti`, `comando` |
@@ -1328,7 +1334,7 @@ retake, valuta, lezioni, cartelle}}`. Sola lettura, solo una **whitelist** di ch
   relativo (`prompts/lezioni.md`).
 - Una lezione accettata entra nel prompt di **tutti** gli episodi successivi, di tutti
   gli utenti: va riservata a chi amministra il progetto (decisione dell'adattatore). In
-  modalità web `--by` è obbligatorio (`InvalidArguments`), e resta nel registro
+  modalità web `--by` è obbligatorio (`ByRequired`), e resta nel registro
   (`accettata_da`, `rifiutata_da`).
 - Testo di una lezione: al massimo 400 caratteri, nessuna riga che inizi con `#` o `---`;
   `lezioni.md` al massimo 4000 caratteri (`LessonsError`, nulla scritto).

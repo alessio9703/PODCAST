@@ -29,6 +29,8 @@ CATALOG: dict[str, tuple[int, str, str]] = {
     "InvalidInput": (1, "Valore non valido passato al comando (il testo dice quale e perché)", "—"),
     "NotFound": (1, "Un file o una cartella richiesti non esistono (run, copione, documento…)", "—"),
     "InternalError": (1, "Errore imprevisto: da registrare nei log e segnalare", "—"),
+    "ExternalServiceError": (2, "Errore imprevisto di un servizio esterno a pagamento: nessun \"Riprova\" automatico", "—"),
+    "UserDecisionRequired": (3, "Serve una scelta dell'utente non ancora descritta nell'elenco: il testo dice quale", "come da messaggio"),
     "Interrupted": (1, "Comando fermato da SIGTERM o Ctrl-C; nessun file lasciato a metà", "—"),
     "InvalidArguments": (1, "Argomenti non validi per il comando (errore dell'adattatore)", "`messaggio`"),
     "NotAllowedInWebMode": (1, "Argomento o comando riservato all'uso locale, in modalità web (errore dell'adattatore)", "`argomenti`, `comando`"),
@@ -109,4 +111,58 @@ def exit_code(name: str) -> int:
     return CATALOG[name][0]
 
 
-__all__ = ["CATALOG", "exit_code"]
+def _classify(exc: BaseException) -> tuple[int, str]:
+    """Exit code e nome "grezzo" di un'eccezione, dalla sua classe."""
+    from .errors import NeedsUserDecision
+    from .music_mixer import MusicChangedError
+    from .script_writer import ModelAccessError
+    from .voice_provider import VoiceProviderError
+
+    if isinstance(exc, NeedsUserDecision):
+        return 3, exc.kind
+    # MusicChangedError e' una MusicMixerError: va riconosciuta prima del ramo
+    # generico, altrimenti perderebbe il segnale "serve una risposta esplicita".
+    if isinstance(exc, MusicChangedError):
+        return 3, "MusicChanged"
+    if isinstance(exc, VoiceProviderError):
+        return 2, type(exc).__name__
+    # Chiave del modello non valida o credito esaurito: come il provider vocale,
+    # non si risolve riprovando (exit 2). Rate limit e rete restano exit 1.
+    if isinstance(exc, ModelAccessError):
+        return 2, exc.kind
+    return 1, getattr(exc, "kind", None) or type(exc).__name__
+
+
+#: Nome di ripiego per un esito fuori dall'elenco, a parita' di exit code: un
+#: esito 2 o 3 non diventa mai un 1 "riprovabile" (sicurezza C8, BASSA-1).
+_FALLBACK_BY_CODE = {2: "ExternalServiceError", 3: "UserDecisionRequired"}
+
+
+def public_error(exc: BaseException) -> tuple[int, str, bool]:
+    """(exit code, error_type, ripiego) di un'eccezione, come la vede l'adattatore.
+
+    Solo nomi dell'elenco. Un nome fuori elenco non esce mai: si sceglie il
+    ripiego DALL'EXIT CODE calcolato sulla classe (2 -> ExternalServiceError,
+    3 -> UserDecisionRequired), e per gli errori 1 `FileNotFoundError` ->
+    `NotFound`, `ValueError` -> `InvalidInput`, il resto `InternalError`.
+    `ripiego` e' vero quando il nome e' di ripiego: chi chiama scrive allora
+    su stderr anche il nome della classe Python, per il debug (C8, BASSA-3).
+    Usata da tools/_common.run_tool e dagli eventi di produce (C8, BASSA-2).
+    """
+    if isinstance(exc, KeyboardInterrupt):
+        return 1, "Interrupted", False
+    code, kind = _classify(exc)
+    if kind in CATALOG:
+        return CATALOG[kind][0], kind, False
+    if code in _FALLBACK_BY_CODE:
+        kind = _FALLBACK_BY_CODE[code]
+    elif isinstance(exc, FileNotFoundError):
+        kind = "NotFound"
+    elif isinstance(exc, ValueError):
+        kind = "InvalidInput"
+    else:
+        kind = "InternalError"
+    return CATALOG[kind][0], kind, True
+
+
+__all__ = ["CATALOG", "exit_code", "public_error"]

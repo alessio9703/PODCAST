@@ -43,6 +43,7 @@ from .audio_assembler import (
 from .cost_estimate import Estimate, estimate
 from .episode_config import EpisodeConfig
 from .episode_signals import collect_and_write, record_synthesis_event
+from .error_catalog import public_error
 from .errors import DomainError
 from .fileio import write_json_atomic
 from .music_context import music_durations
@@ -715,7 +716,9 @@ def produce(
             raise
         except BaseException as exc:
             if events.opened:
-                kind = "Interrupted" if isinstance(exc, KeyboardInterrupt) else getattr(exc, "kind", None) or type(exc).__name__
+                # Lo stesso error_type del JSON finale, dall'elenco unico
+                # (sicurezza C8, BASSA-2): mai il nome grezzo di una classe.
+                _, kind, _ = public_error(exc)
                 events.emit("errore", error_type=kind, error=redact(str(exc)))
             raise
         finally:

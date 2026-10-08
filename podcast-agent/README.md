@@ -826,7 +826,7 @@ podcast-agent/
 │   ├── test_tools_cli.py         # 190 controlli sui CLI del subagent
 │   ├── test_music.py             # 73 controlli su intro/outro/sottofondo
 │   ├── test_lessons.py           # 80 controlli su segnali e lezioni
-│   └── test_web_integration.py   # 871 controlli sull'integrazione web (C0-C8)
+│   └── test_web_integration.py   # 875 controlli sull'integrazione web (C0-C8)
 ├── docs/
 │   ├── CONTRATTO_INTERFACCIA.md  # il contratto per l'adattatore web
 │   ├── wireframe/                # le schermate dell'interfaccia
