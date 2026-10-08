@@ -1780,7 +1780,11 @@ def test_c2_consent_during_clone(root: Path, config: Path) -> None:
     for name, freq in (("Bruno Verdi", 410), ("Carla Neri", 420), ("Dario Gialli", 430), ("Elena Rosa", 440)):
         make_wav(root / "voci" / f"{name}.wav", 1.0, freq)
         tool("voice_meta.py", "--name", name, "--consent", "--by", "Utente A", config=config)
-    slow_clone = write_c2_config(root, "config-c2-clone-lento2.yaml", clone_delay_seconds=1.5)
+    # Deterministico (C8): ogni clonazione resta ferma finche' esiste `hold`.
+    # La modifica (revoca, sostituzione) si fa mentre la PRIMA clonazione e'
+    # ferma, poi il fermo si toglie: prima dipendeva da 1,5 s di attesa.
+    hold = root / "fermo-clonazione"
+    slow_clone = write_c2_config(root, "config-c2-clone-lento2.yaml", clone_hold_file=str(hold))
 
     def start(*speakers: str) -> subprocess.Popen:
         return subprocess.Popen(
@@ -1794,26 +1798,32 @@ def test_c2_consent_during_clone(root: Path, config: Path) -> None:
             time.sleep(0.05)
 
     before = len(clone_attempts(root))
+    hold.write_text("fermo", encoding="utf-8")
     proc = start("Bruno Verdi", "Carla Neri")
     wait_for_clone("Bruno Verdi")
     tool("voice_meta.py", "--name", "Carla Neri", "--revoke-consent", "--by", "Utente B", config=config)
+    hold.unlink()
     out = json.loads(proc.communicate(timeout=60)[0])
     check("revoca durante la clonazione di un'altra voce -> exit 3, stato revocato", proc.returncode == 3 and out["details"]["voci"][0]["speaker"] == "Carla Neri" and out["details"]["voci"][0]["stato"] == "revocato", str(out))
     check("la voce revocata non viene clonata", clone_attempts(root)[before:] == ["Bruno Verdi"], str(clone_attempts(root)[before:]))
 
     before = len(clone_attempts(root))
+    hold.write_text("fermo", encoding="utf-8")
     proc = start("Dario Gialli", "Elena Rosa")
     wait_for_clone("Dario Gialli")
     make_wav(root / "voci" / "Elena Rosa.wav", 1.3, 999)
+    hold.unlink()
     out = json.loads(proc.communicate(timeout=60)[0])
     check("registrazione sostituita durante un'altra clonazione -> exit 3, stato superato", proc.returncode == 3 and out["details"]["voci"][0]["stato"] == "superato", str(out))
     check("la voce sostituita non viene clonata", clone_attempts(root)[before:] == ["Dario Gialli"], str(clone_attempts(root)[before:]))
 
     tool("voice_meta.py", "--name", "Elena Rosa", "--consent", "--by", "Utente A", config=config)
     consented = file_hash(root / "voci" / "Elena Rosa.wav")
+    hold.write_text("fermo", encoding="utf-8")
     proc = start("Elena Rosa")
     wait_for_clone("Elena Rosa")
     make_wav(root / "voci" / "Elena Rosa.wav", 1.1, 777)
+    hold.unlink()
     out = json.loads(proc.communicate(timeout=60)[0])
     registry = json.loads((root / "voices_registry.json").read_text(encoding="utf-8"))
     check("file sostituito DURANTE la clonazione: il registro tiene lo sha256 dei byte clonati", proc.returncode == 0 and registry["Elena Rosa"]["audio_hash"] == consented, str(out)[:300])
@@ -4048,21 +4058,65 @@ def test_c8_error_catalog() -> None:
                     if expected and CATALOG[name][0] != expected:
                         wrong.append(name)
         print("ESITI", sorted(set(wrong)))
-        cases = [ValueError("x"), FileNotFoundError("x"), KeyError("x"), DomainError("x", error_type="NomeInventato"), NeedsUserDecision("x", error_type="AmbiguousName")]
+        from src.error_catalog import public_error
+        class NuovaDomanda(NeedsUserDecision):
+            pass
+        class NuovoGuasto(VoiceProviderError):
+            pass
+        cases = [ValueError("x"), FileNotFoundError("x"), KeyError("x"), DomainError("x", error_type="NomeInventato"), NeedsUserDecision("x", error_type="AmbiguousName"), NuovaDomanda("x"), NuovoGuasto("x")]
         for exc in cases:
-            print("MAPPA", type(exc).__name__, *_common._stable(*_common._classify(exc), exc))
+            print("MAPPA", type(exc).__name__, *public_error(exc)[:2])
         """
     )
     lines = proc.stdout.strip().splitlines()
     check("le classi a esito 3 e 2 hanno quell'exit code nell'elenco", "ESITI []" in lines, proc.stdout + proc.stderr[-300:])
     check(
         "un'eccezione imprevista esce con un nome dell'elenco: ValueError -> InvalidInput, FileNotFoundError -> NotFound, altro -> InternalError",
-        lines[-5:] == [
+        lines[-7:-2] == [
             "MAPPA ValueError 1 InvalidInput", "MAPPA FileNotFoundError 1 NotFound", "MAPPA KeyError 1 InternalError",
             "MAPPA DomainError 1 InternalError", "MAPPA NeedsUserDecision 3 AmbiguousName",
         ],
         proc.stdout + proc.stderr[-300:],
     )
+
+    check(
+        "BASSA-1: un esito 3 o 2 fuori elenco resta 3 o 2 (UserDecisionRequired, ExternalServiceError), mai un 1 'riprovabile'",
+        lines[-2:] == ["MAPPA NuovaDomanda 3 UserDecisionRequired", "MAPPA NuovoGuasto 2 ExternalServiceError"],
+        proc.stdout + proc.stderr[-300:],
+    )
+    proc = run_python(
+        """
+        import sys
+        sys.path.insert(0, "tools")
+        from _common import run_tool
+        def main():
+            raise KeyError("chiave inattesa")
+        run_tool(main)
+        """
+    )
+    check("BASSA-3: per un nome di ripiego stderr dice anche la classe Python", proc.returncode == 1 and "InternalError / KeyError" in proc.stderr and json.loads(proc.stdout)["error_type"] == "InternalError", proc.stderr[-300:])
+    events_file = Path(tempfile.mkdtemp(prefix="podcast-c8-eventi-")) / "_eventi.jsonl"
+    proc = run_python(
+        f"""
+        from pathlib import Path
+        import src.production as production
+        from src.music_mixer import MusicChangedError
+        def fallisce(*args, events, **kwargs):
+            events.emit("iniziata", totale=1, fasi=[])
+            raise MusicChangedError("brano sostituito durante la sintesi")
+        production._produce_locked = fallisce
+        run_dir = Path({str(events_file.parent)!r})
+        try:
+            production.produce(run_dir, None, events=production.EventLog(Path({str(events_file)!r})))
+        except MusicChangedError:
+            pass
+        """
+    )
+    last = read_events(events_file)[-1] if events_file.exists() else {}
+    check("BASSA-2: l'evento 'errore' ha lo stesso error_type del JSON finale (MusicChanged, non il nome della classe)", last.get("evento") == "errore" and last.get("error_type") == "MusicChanged", str(last) + proc.stderr[-300:])
+    contract = (PROJECT_ROOT / "docs" / "CONTRATTO_INTERFACCIA.md").read_text(encoding="utf-8")
+    lessons_section = contract[contract.index("## Lezioni"):contract.index("## Diagnostica")]
+    check("BASSA-4: il contratto dice ByRequired per --by mancante in lessons.py", "(`ByRequired`)" in lessons_section and "(`InvalidArguments`)" not in lessons_section)
 
     print("\n[C8] N28 · i nomi rinominati, dai comandi veri")
     root, run = c7_project()

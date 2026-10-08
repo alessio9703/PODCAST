@@ -50,6 +50,7 @@ class FakeProvider(VoiceProvider):
         tts_log_file: str | None = None,
         hold_file: str | None = None,
         hold_after: int = 0,
+        clone_hold_file: str | None = None,
     ) -> None:
         self._fail_clone = fail_clone
         #: Un "fermo" per i test di interruzione (C8): dopo `hold_after` sintesi
@@ -58,6 +59,9 @@ class FakeProvider(VoiceProvider):
         #: in corso, qualunque sia il carico della macchina.
         self._hold_file = Path(hold_file) if hold_file else None
         self._hold_after = int(hold_after)
+        #: Lo stesso fermo per la clonazione: ogni clonazione aspetta finche'
+        #: `clone_hold_file` esiste (test di revoca "durante un'altra clonazione").
+        self._clone_hold_file = Path(clone_hold_file) if clone_hold_file else None
         # Le voci clonate vivono sul provider, non nel processo: con
         # `voices_file` sopravvivono fra un'invocazione di un tool e l'altra,
         # che e' quello che serve per provare i percorsi in cui una voce deve
@@ -116,6 +120,10 @@ class FakeProvider(VoiceProvider):
                 log.write(name + "\n")
         if self._clone_delay:
             time.sleep(self._clone_delay)
+        if self._clone_hold_file is not None:
+            deadline = time.monotonic() + 120
+            while self._clone_hold_file.exists() and time.monotonic() < deadline:
+                time.sleep(0.05)
         if self._fail_clone:
             raise ProviderQuotaError(
                 f"Credito esaurito: impossibile clonare '{name}' (simulato)."

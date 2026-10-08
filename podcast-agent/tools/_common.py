@@ -54,7 +54,7 @@ for _stream in (sys.stdout, sys.stderr):
 from src.audio_assembler import AssemblyError  # noqa: E402
 from src.config import Config, ConfigError, load_config, load_dotenv  # noqa: E402
 from src.episode_signals import SignalsError  # noqa: E402
-from src.error_catalog import CATALOG as ERROR_CATALOG  # noqa: E402
+from src.error_catalog import public_error  # noqa: E402
 from src.errors import DomainError, NeedsUserDecision, error_details  # noqa: E402
 from src.ffmpeg_tool import FfmpegNotFoundError  # noqa: E402
 from src.lessons import LessonsError  # noqa: E402
@@ -271,64 +271,9 @@ def note(message: str) -> None:
 
 
 def _classify(exc: Exception) -> tuple[int, str]:
-    if isinstance(exc, NeedsUserDecision):
-        return EXIT_NEEDS_USER, exc.kind
-    # MusicChangedError e' una MusicMixerError: va controllata PRIMA, altrimenti
-    # ricadrebbe nel ramo generico qui sotto con lo stesso exit code di un
-    # qualunque altro errore di dominio, perdendo il segnale "serve una
-    # risposta esplicita" (--accept-changed-music).
-    if isinstance(exc, MusicChangedError):
-        return EXIT_NEEDS_USER, "MusicChanged"
-    if isinstance(exc, VoiceProviderError):
-        return EXIT_PROVIDER, type(exc).__name__
-    # Chiave Anthropic non valida o credito esaurito: come un errore del
-    # provider vocale, non si risolve riprovando (exit 2). Rate limit,
-    # sovraccarico e rete restano exit 1 (ModelTemporarilyUnavailable).
-    if isinstance(exc, ModelAccessError):
-        return EXIT_PROVIDER, exc.kind
-    if isinstance(
-        exc,
-        (
-            ConfigError,
-            DocumentError,
-            VoiceLibraryError,
-            ScriptWriterError,
-            ScriptSessionError,
-            AssemblyError,
-            MusicLibraryError,
-            MusicMixerError,
-            FfmpegNotFoundError,
-            FileNotFoundError,
-            ValueError,
-            SignalsError,
-            LessonsError,
-        ),
-    ):
-        return EXIT_DOMAIN, _kind(exc)
-    return EXIT_DOMAIN, _kind(exc)
-
-
-def _stable(code: int, kind: str, exc: Exception) -> tuple[int, str]:
-    """Solo nomi dell'elenco unico (src/error_catalog.py) arrivano nel JSON.
-
-    Un'eccezione imprevista non esce con il nome di una classe Python: un
-    `ValueError` diventa `InvalidInput`, un `FileNotFoundError` `NotFound`, il
-    resto `InternalError`. L'exit code e' quello dell'elenco, cosi' contratto e
-    comportamento non possono divergere (fase C8, N28).
-    """
-    if kind not in ERROR_CATALOG:
-        if isinstance(exc, FileNotFoundError):
-            kind = "NotFound"
-        elif isinstance(exc, ValueError):
-            kind = "InvalidInput"
-        else:
-            kind = "InternalError"
-    return ERROR_CATALOG[kind][0], kind
-
-
-def _kind(exc: Exception) -> str:
-    """error_type esplicito se l'errore lo dichiara, altrimenti il nome della classe."""
-    return getattr(exc, "kind", None) or type(exc).__name__
+    """(exit code, error_type) dall'elenco unico: vedi src/error_catalog.public_error."""
+    code, kind, _ = public_error(exc)
+    return code, kind
 
 
 def _emit_error(kind: str, message: str, code: int, details: dict[str, Any] | None) -> None:
@@ -364,9 +309,11 @@ def run_tool(main: Callable[[], None]) -> None:
         note(f"ERRORE [{INTERRUPTED}] {message}")
         raise SystemExit(EXIT_DOMAIN)
     except Exception as exc:  # noqa: BLE001 - tradotte deliberatamente
-        code, kind = _stable(*_classify(exc), exc)
+        code, kind, fallback = public_error(exc)
         _emit_error(kind, str(exc), code, error_details(exc))
-        note(f"ERRORE [{kind}] {exc}")
+        # Per un nome di ripiego, stderr dice anche la classe Python: e' il
+        # dettaglio che serve per il debug (sicurezza C8, BASSA-3).
+        note(f"ERRORE [{kind}{' / ' + type(exc).__name__ if fallback else ''}] {exc}")
         raise SystemExit(code)
 
 
