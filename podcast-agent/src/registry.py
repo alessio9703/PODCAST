@@ -231,6 +231,10 @@ class VoiceRegistry:
             pairs.append((entry.get("audio_hash"), entry["voice_id"]))
         return list(dict.fromkeys(pairs))
 
+    def known_names(self) -> set[str]:
+        """Tutti i nomi esatti di voce che il registro conosce (righe e storico)."""
+        return set(self._voices()) | {h["voce"] for h in self.history() if isinstance(h.get("voce"), str)}
+
     def knows(self, voice: str) -> bool:
         """La voce e' (o e' stata) nel registro con questo nome esatto."""
         return self.get(voice) is not None or any(h.get("voce") == voice for h in self.history())

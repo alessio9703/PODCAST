@@ -3822,6 +3822,40 @@ def test_c7_security_fixes_3() -> None:
     check("revocation_for: un voice_id dello storico legato a una registrazione revocata e' revocato", proc.stdout.strip() == "True", proc.stdout + proc.stderr)
 
 
+def test_c7_security_fixes_4() -> None:
+    """Revisione di sicurezza C7, quarta: MEDIA-1 (varianti del nome rimaste nel registro)."""
+    print("\n[sicurezza C7 quater] MEDIA-1 · la revoca per nome comprende le varianti rimaste solo nel registro")
+    root, run = c7_project()
+    variant = root / "voci" / "Mario_Rossi.wav"
+    (root / "voci" / "Mario Rossi.wav").rename(variant)
+    run("voice_meta.py", "--name", "Mario_Rossi", "--consent", "--by", "Utente A", web=False)
+    run("voice_meta.py", "--name", "Giulia Bianchi", "--consent", "--by", "Utente A", web=False)
+    script = {"titolo": "Variante", "turni": [{"speaker": "Mario_Rossi" if t["speaker"] == "Mario Rossi" else t["speaker"], "testo": t["testo"]} for t in SCRIPT_C2["turni"]]}
+    name = c7_approved_run(root, run, "Variante", script)
+    code, out, err = run("produce.py", "--run-dir", name)
+    check("run con la registrazione 'Mario_Rossi' prodotta", code == 0, err[-300:])
+    id_x = json.loads((root / "output" / name / "voci.json").read_text(encoding="utf-8"))["Mario_Rossi"]
+    variant.unlink()
+    (root / "voci" / "Mario_Rossi.json").unlink()
+    make_wav(root / "voci" / "Mario Rossi.mp3", 1.0, 590)
+    code, out, _ = run("voice_meta.py", "--name", "Mario Rossi", "--revoke-consent", "--by=Utente B")
+    revocations = json.loads((root / "voices_registry.json").read_text(encoding="utf-8")).get("__revoche__", [])
+    check(
+        "revoca di 'Mario Rossi' (file in libreria): comprende la variante cancellata 'Mario_Rossi' e il suo voice_id",
+        code == 0 and out["nomi_registro"] == ["Mario_Rossi"] and any(id_x in r["voice_id"] for r in revocations),
+        str(out)[:300] + str(revocations),
+    )
+    (root / "voci" / "Mario Rossi.mp3").unlink()
+    (root / "voci" / "Mario Rossi.json").unlink(missing_ok=True)
+    make_wav(variant, 1.0, 615)  # la variante ricaricata, con byte nuovi e consenso nuovo
+    run("voice_meta.py", "--name", "Mario_Rossi", "--consent", "--by", "Utente A", web=False)
+    tts_before = len(tts_texts(root))
+    code, out, _ = run("retake.py", "--run-dir", name, "--turn", "1", "--by=Utente A")
+    check("retake della run vecchia con il voice_id revocato: exit 3, nessuna sintesi", code == 3 and len(tts_texts(root)) == tts_before, str(out)[:300])
+    code, out, _ = run("voice_meta.py", "--name", "Mario Ross", "--revoke-consent", "--by=Utente B")
+    check("un nome simile ma diverso non revoca niente (AmbiguousName)", code == 3 and out["error_type"] == "AmbiguousName", str(out)[:200])
+
+
 def test_c7() -> None:
     test_c7_consent()
     test_c7_run_py()
@@ -3835,6 +3869,7 @@ def test_c7() -> None:
     test_c7_followup()
     test_c7_security_fixes_2()
     test_c7_security_fixes_3()
+    test_c7_security_fixes_4()
 
 
 def test_ffmpeg_input_confined() -> None:

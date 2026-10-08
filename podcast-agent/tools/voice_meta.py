@@ -43,12 +43,8 @@ from src.voice_prep import (  # noqa: E402
     grant_consent,
     pending_clone,
     resolve_library_voice,
-    revoke_missing_voice,
-    revoke_voice_consent,
-    same_name_voices,
+    revoke_by_name,
 )
-from src.errors import AmbiguousName  # noqa: E402
-from src.voice_library import VoiceLibraryError  # noqa: E402
 
 
 def main() -> None:
@@ -89,13 +85,10 @@ def main() -> None:
             "dello stato che l'utente ha visto (una revoca arrivata dopo vince).",
             details={"messaggio": "manca --expect-revision"},
         )
-    try:
-        voice = resolve_library_voice(config, args.name)
-    except (VoiceLibraryError, AmbiguousName):
-        if not args.revoke_consent:
-            raise
-        _revoke_without_single_voice(config, args)
+    if args.revoke_consent:
+        _revoke(config, args)
         return
+    voice = resolve_library_voice(config, args.name)
 
     revoked = None
     cleared = None
@@ -119,13 +112,6 @@ def main() -> None:
             if cleared is not None
             else f"{voice.name}: nessuna clonazione dall'esito incerto."
         )
-    elif args.revoke_consent:
-        _, revoked = revoke_voice_consent(config, voice, by=args.by)
-        note(
-            f"Consenso revocato per {voice.name}: la voce non verra' piu' clonata ne' riusata."
-            if revoked
-            else f"Per {voice.name} non c'era un consenso registrato: segnata come revocata."
-        )
 
     meta = load_meta(voice.path)
     registry = VoiceRegistry(config.registry_file, project_root=config.registry_file.parent)
@@ -143,42 +129,46 @@ def main() -> None:
     )
 
 
-def _revoke_without_single_voice(config, args) -> None:  # type: ignore[no-untyped-def]
-    """--revoke-consent quando il nome non da' UNA voce della libreria.
+def _revoke(config, args) -> None:  # type: ignore[no-untyped-def]
+    """--revoke-consent: revoca per nome (src/voice_prep.revoke_by_name).
 
-    - Ci sono registrazioni con esattamente quel nome (doppioni, es. .wav e .mp3):
-      si revocano TUTTE, metadati e registro (sicurezza C7, terza revisione,
-      MEDIA-1). Una revoca non e' una scelta da indovinare: vale per ognuna.
-    - Nessuna registrazione con quel nome, ma il registro lo conosce
-      esattamente: la registrazione e' stata cancellata, la revoca si scrive nel
-      registro (C7, MEDIA-1 e MEDIA-3 della seconda revisione).
-    - Altrimenti l'errore originale (nome incerto o sconosciuto): non si indovina.
+    Si revoca tutto cio' che porta quel nome: le registrazioni della libreria
+    (doppioni compresi) e i nomi del registro che si normalizzano uguale, anche
+    di voci gia' cancellate. Con una sola registrazione la risposta e' la vista
+    solita della voce; altrimenti un riepilogo con `files`.
     """
-    same = same_name_voices(config, args.name)
+    result = revoke_by_name(config, args.name, by=args.by)
     registry = VoiceRegistry(config.registry_file, project_root=config.registry_file.parent)
-    if same:
-        files = []
-        for voice in same:
-            revoke_voice_consent(config, voice, by=args.by)
-            files.append(voice.path.name)
-        note(f"{args.name}: revocato il consenso di tutte le registrazioni con questo nome ({', '.join(files)}).")
+    extra = {"files": result["files"], "revoche_registro": result["registry_items"], "nomi_registro": result["registry_names"]}
+    if result["registry_names"]:
+        note(f"Revocate anche le voci gia' cancellate con lo stesso nome: {', '.join(result['registry_names'])}.")
+    if len(result["voices"]) == 1:
+        voice = result["voices"][0]
+        previous = result["previous"][voice.path.name]
+        note(
+            f"Consenso revocato per {voice.name}: la voce non verra' piu' clonata ne' riusata."
+            if previous
+            else f"Per {voice.name} non c'era un consenso registrato: segnata come revocata."
+        )
+        meta = load_meta(voice.path)
+        voice_id, _ = registry.lookup(voice.name, voice.path, config.active_provider)
         emit({
-            "voce": args.name, "file": None, "files": files, "nome_pronunciato": None,
-            "consenso": {"stato": "revocato", "revoca_nel_registro": True, "da_confermare": False},
-            "consenso_revocato": None, "revoche_registro": None,
-            "clonazione_incerta": None, "clonazione_incerta_tolta": None,
+            "voce": voice.name,
+            "file": voice.path.name,
+            "nome_pronunciato": meta.get("nome_pronunciato"),
+            "consenso": with_registry(consent_view(voice.path, meta), registry, voice_id=voice_id, voice=voice.name, meta=meta),
+            "consenso_revocato": previous,
+            "clonazione_incerta": pending_clone(config, voice.name),
+            "clonazione_incerta_tolta": None,
+            **extra,
         })
         return
-    if not registry.knows(args.name):
-        resolve_library_voice(config, args.name)  # rilancia l'errore originale
-        raise VoiceLibraryError(f"'{args.name}' non e' nella libreria ne' nel registro delle voci.")
-    items = revoke_missing_voice(config, args.name, by=args.by)
-    note(f"{args.name}: la registrazione non c'e' piu'; revoca scritta nel registro delle voci.")
+    note(f"{args.name}: revocato tutto cio' che porta questo nome ({', '.join(result['files']) or 'nessun file in libreria'}).")
     emit({
-        "voce": args.name, "file": None, "files": [], "nome_pronunciato": None,
-        "consenso": {"stato": "revocato" if items else "sconosciuto", "revoca_nel_registro": bool(items), "da_confermare": False},
-        "consenso_revocato": None, "revoche_registro": len(items),
-        "clonazione_incerta": None, "clonazione_incerta_tolta": None,
+        "voce": args.name, "file": None, "nome_pronunciato": None,
+        "consenso": {"stato": "revocato", "revoca_nel_registro": True, "da_confermare": False},
+        "consenso_revocato": None, "clonazione_incerta": None, "clonazione_incerta_tolta": None,
+        **extra,
     })
 
 

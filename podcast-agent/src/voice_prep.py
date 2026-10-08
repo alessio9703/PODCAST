@@ -416,6 +416,44 @@ def _record_revocation(config: Any, registry: VoiceRegistry, voice: str, hashes:
     )
 
 
+def revoke_by_name(config: Any, name: str, *, by: str | None) -> dict[str, Any]:
+    """La revoca per nome, l'unica usata da voice_meta.py --revoke-consent.
+
+    Revoca TUTTO cio' che porta quel nome (a meno di maiuscole, accenti, `_` e
+    `-`): ogni registrazione della libreria (doppioni compresi, metadati e
+    registro) e ogni nome del registro che si normalizza uguale ma non ha piu'
+    un file (es. `Mario_Rossi` cancellata, con `Mario Rossi.mp3` in libreria).
+    Una revoca non si sceglie e non si restringe: e' la direzione sicura
+    (sicurezza C7, terza e quarta revisione). Nessun nome simile ma diverso:
+    `Mario Ross` non revoca `Mario Rossi`.
+    """
+    from .voice_library import _normalize
+
+    target = _normalize(name)
+    files = same_name_voices(config, name)
+    # Prima i file della libreria: la revoca nei metadati si scrive anche se poi
+    # il registro risulta illeggibile (RegistryCorrupt): si sbaglia verso la revoca.
+    previous: dict[str, Any] = {}
+    for voice in files:
+        _, previous[voice.path.name] = revoke_voice_consent(config, voice, by=by)
+    registry_names = sorted(n for n in _registry(config).known_names() if _normalize(n) == target)
+    if not files and not registry_names:
+        resolve_library_voice(config, name)  # rilancia l'errore originale (nome incerto o sconosciuto)
+        raise VoiceLibraryError(f"'{name}' non e' nella libreria ne' nel registro delle voci.")
+    covered = {voice.name for voice in files}
+    registry_items = 0
+    for other in registry_names:
+        if other not in covered:
+            registry_items += len(revoke_missing_voice(config, other, by=by))
+    return {
+        "files": [voice.path.name for voice in files],
+        "voices": files,
+        "previous": previous,
+        "registry_names": [n for n in registry_names if n not in covered],
+        "registry_items": registry_items,
+    }
+
+
 def same_name_voices(config: Any, name: str) -> list[AvailableVoice]:
     """Le registrazioni della libreria con ESATTAMENTE questo nome (a meno di
     maiuscole e accenti), doppioni compresi. Nessuna somiglianza: e' il nome."""
@@ -686,6 +724,7 @@ __all__ = [
     "check_consent",
     "check_not_revoked",
     "grant_consent",
+    "revoke_by_name",
     "revoke_missing_voice",
     "same_name_voices",
     "revoke_voice_consent",
