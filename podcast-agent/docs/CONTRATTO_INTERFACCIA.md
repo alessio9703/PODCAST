@@ -846,7 +846,9 @@ i file. Se i file sono già stati cancellati, `voice_meta.py --name VOCE --revok
 --by U` funziona lo stesso per il **nome esatto** che il registro conosce (risposta con
 `file: null` e `revoche_registro`, il numero di revoche scritte), anche se in libreria c'è
 una voce dal nome simile; un nome che il registro non conosce, o incompleto, è un errore
-(non si indovina). Una clonazione che si chiude dopo la revoca della sua registrazione
+(non si indovina). Se in libreria ci sono **più file con lo stesso nome** (doppioni, es.
+`.wav` e `.mp3`), `--revoke-consent` li revoca **tutti** (risposta con `files`): una revoca
+non si sceglie. Una clonazione che si chiude dopo la revoca della sua registrazione
 entra nella revoca. I nomi `__revoche__` e
 `__storico__` sono riservati: una registrazione con quel nome è fra i file scartati e non
 si clona. Consenso e revoca della stessa voce passano da un lock comune: se arrivano

@@ -3763,11 +3763,63 @@ def test_c7_security_fixes_2() -> None:
         reg = VoiceRegistry(Path({str(root / "registro-m4.json")!r}))
         audio = Path({str(root / "voci" / "Anna Neri.wav")!r})
         digest = file_hash(audio)
-        reg.record_revocation("Anna Neri", clones={{digest: []}}, provider="fake", by="Utente B", when="2026-10-08T10:00:00")
+        reg.record_revocation("Anna Neri", hashes=[digest], extra_clones=[], provider="fake", by="Utente B", when="2026-10-08T10:00:00")
         reg.record("Anna Neri", audio, "fake", "fake-nuova", audio_hash=digest)
         print(VoiceRegistry(Path({str(root / "registro-m4.json")!r})).revocation_for(voice_id="fake-nuova") is not None)
         """)
     check("clonazione registrata dopo la revoca della stessa registrazione: il voice_id e' revocato", proc.stdout.strip() == "True", proc.stdout + proc.stderr)
+
+
+def test_c7_security_fixes_3() -> None:
+    """Revisione di sicurezza C7, terza: MEDIA-1, MEDIA-2."""
+    print("\n[sicurezza C7 ter] MEDIA-1 · revoca con doppioni in libreria: si revocano tutti")
+    root, run = c7_project()
+    mp3 = root / "voci" / "Mario Rossi.mp3"
+    import shutil as _shutil
+    _shutil.copy2(root / "voci" / "Giulia Bianchi.wav", mp3)  # un secondo file con lo stesso nome
+    from src.voice_meta import record_consent as _record_consent
+    _record_consent(mp3, voice="Mario Rossi", by="Utente A")
+    code, out, _ = run("voice_meta.py", "--name", "Mario Rossi", "--revoke-consent", "--by=Utente B")
+    check("nome con doppioni: exit 0, revocati entrambi i file", code == 0 and sorted(out["files"]) == ["Mario Rossi.mp3", "Mario Rossi.wav"], str(out)[:300])
+    (root / "voci" / "Mario Rossi.wav").unlink()
+    (root / "voci" / "Mario Rossi.json").unlink(missing_ok=True)
+    state = run("voice_meta.py", "--name", "Mario Rossi")[1]["consenso"]["stato"]
+    check("tolto il doppione, il .mp3 resta revocato (non 'registrato')", state == "revocato", state)
+
+    print("\n[sicurezza C7 ter] MEDIA-2 · una clonazione registrata mentre la revoca aspetta il lock entra nella revoca")
+    root, run = c7_project()
+    registry_file = root / "voices_registry.json"
+    audio = root / "voci" / "Anna Neri.wav"
+    from src.fileio import file_lock as _file_lock
+    from src.registry import file_hash as _file_hash
+    registry_file.write_text("{}", encoding="utf-8")
+    with _file_lock(registry_file):
+        waiting = subprocess.Popen([PYTHON, "-c", textwrap.dedent(f"""
+            from src.config import load_config
+            from src.voice_prep import resolve_library_voice, revoke_voice_consent
+            config = load_config({str(root / "config.yaml")!r})
+            revoke_voice_consent(config, resolve_library_voice(config, "Anna Neri"), by="Utente B")
+            print("REVOCATA")
+            """)], cwd=str(root), env=clean_env(), stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+        time.sleep(1.5)
+        digest = _file_hash(audio)
+        registry_file.write_text(json.dumps({
+            "Anna Neri": {"audio_file": "voci/Anna Neri.wav", "audio_hash": digest, "provider": "fake", "voice_id": "fake-appena-nata", "cloned_at": "2026-10-08T10:00:00"},
+            "__storico__": [{"voce": "Anna Neri", "audio_sha256": digest, "voice_id": "fake-appena-nata", "provider": "fake", "cloned_at": "2026-10-08T10:00:00"}],
+        }), encoding="utf-8")
+    stdout, stderr = waiting.communicate(timeout=60)
+    revocations = json.loads(registry_file.read_text(encoding="utf-8")).get("__revoche__", [])
+    check("il voice_id registrato durante l'attesa e' nella revoca", "REVOCATA" in stdout and any("fake-appena-nata" in r["voice_id"] for r in revocations), stdout + stderr[-300:] + str(revocations))
+    proc = run_python(f"""
+        from pathlib import Path
+        from src.registry import VoiceRegistry
+        reg = VoiceRegistry(Path({str(root / "registro-storico.json")!r}))
+        reg.record_revocation("Voce X", hashes=["sha256:aaa"], extra_clones=[], provider="fake", by="U", when="2026-10-08T10:00:00")
+        reg._data["__storico__"] = [{{"voce": "Voce X", "audio_sha256": "sha256:aaa", "voice_id": "fake-x", "provider": "fake", "cloned_at": "t"}}]
+        reg.save()
+        print(VoiceRegistry(Path({str(root / "registro-storico.json")!r})).revocation_for(voice_id="fake-x") is not None)
+        """)
+    check("revocation_for: un voice_id dello storico legato a una registrazione revocata e' revocato", proc.stdout.strip() == "True", proc.stdout + proc.stderr)
 
 
 def test_c7() -> None:
@@ -3782,6 +3834,7 @@ def test_c7() -> None:
     test_c7_security_fixes()
     test_c7_followup()
     test_c7_security_fixes_2()
+    test_c7_security_fixes_3()
 
 
 def test_ffmpeg_input_confined() -> None:

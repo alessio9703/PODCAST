@@ -206,11 +206,21 @@ class VoiceRegistry:
 
     def revocation_for(self, *, voice_id: str | None = None, audio_hash: str | None = None) -> dict[str, Any] | None:
         """La revoca che riguarda questo voice_id o questa registrazione, o None."""
-        for item in self.revocations():
+        revocations = self.revocations()
+        for item in revocations:
             if voice_id and voice_id in (item.get("voice_id") or []):
                 return item
             if audio_hash and audio_hash == item.get("audio_sha256"):
                 return item
+        if voice_id:
+            # Un voice_id che la revoca non elenca ma che lo storico lega a una
+            # registrazione revocata e' revocato lo stesso (C7, terza revisione).
+            for clone in self.history():
+                if clone.get("voice_id") != voice_id:
+                    continue
+                for item in revocations:
+                    if item.get("voce") == clone.get("voce") and item.get("audio_sha256") and item.get("audio_sha256") == clone.get("audio_sha256"):
+                        return item
         return None
 
     def clones_of(self, voice: str) -> list[tuple[str | None, str]]:
@@ -278,25 +288,32 @@ class VoiceRegistry:
         self,
         voice: str,
         *,
-        clones: dict[str | None, list[str]],
+        hashes: list[str | None],
+        extra_clones: list[tuple[str | None, str]],
         provider: str | None,
         by: str,
         when: str,
     ) -> list[dict[str, Any]]:
         """Aggiunge le revoche, una per registrazione (sotto lock, rileggendo dentro).
 
-        `clones`: sha256 della registrazione -> voice_id clonati da QUELLA
-        registrazione (lista vuota se non e' mai stata clonata). Una chiave None
-        raccoglie voice_id di cui non si conosce la registrazione: quella revoca
-        non si toglie mai con un consenso.
+        Le clonazioni note della voce (riga, storico) si leggono DENTRO il lock:
+        una clonazione registrata un istante prima non resta fuori dalla revoca
+        (sicurezza C7, terza revisione, MEDIA-2). `hashes`: registrazioni da
+        revocare anche se mai clonate; `extra_clones`: (sha256, voice_id) trovati
+        fuori dal registro (voci_usate.json delle run). Una chiave None raccoglie
+        voice_id di cui non si conosce la registrazione: quella revoca non si
+        toglie mai con un consenso.
         """
-        items = [
-            {"voce": voice, "audio_sha256": digest, "voice_id": sorted(set(ids)), "provider": provider, "da": by, "il": when}
-            for digest, ids in clones.items()
-            if digest or ids
-        ]
         with file_lock(self.path):
             self._data = self._load()
+            clones: dict[str | None, list[str]] = {h: [] for h in hashes if h}
+            for digest, voice_id in [*self.clones_of(voice), *extra_clones]:
+                clones.setdefault(digest, []).append(voice_id)
+            items = [
+                {"voce": voice, "audio_sha256": digest, "voice_id": sorted(set(ids)), "provider": provider, "da": by, "il": when}
+                for digest, ids in clones.items()
+                if digest or ids
+            ]
             self._data[REVOCATIONS_KEY] = [*self.revocations(), *items]
             write_json_atomic(self.path, self._data)
         return items

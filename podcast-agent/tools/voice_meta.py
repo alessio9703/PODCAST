@@ -45,6 +45,7 @@ from src.voice_prep import (  # noqa: E402
     resolve_library_voice,
     revoke_missing_voice,
     revoke_voice_consent,
+    same_name_voices,
 )
 from src.errors import AmbiguousName  # noqa: E402
 from src.voice_library import VoiceLibraryError  # noqa: E402
@@ -91,28 +92,9 @@ def main() -> None:
     try:
         voice = resolve_library_voice(config, args.name)
     except (VoiceLibraryError, AmbiguousName):
-        # Una voce gia' cancellata si revoca per il nome ESATTO che il registro
-        # conosce, anche se in libreria c'e' un nome simile: proporre quello
-        # vorrebbe dire revocare un'altra persona (sicurezza C7 bis, MEDIA-3).
-        if not (args.revoke_consent and VoiceRegistry(config.registry_file, project_root=config.registry_file.parent).knows(args.name)):
+        if not args.revoke_consent:
             raise
-        # La registrazione e' gia' stata cancellata: la revoca si scrive lo
-        # stesso nel registro, per il nome esatto che il registro conosce
-        # (revisione di sicurezza C7, MEDIA-1).
-        items = revoke_missing_voice(config, args.name, by=args.by)
-        note(f"{args.name}: la registrazione non c'e' piu'; revoca scritta nel registro delle voci.")
-        emit(
-            {
-                "voce": args.name,
-                "file": None,
-                "nome_pronunciato": None,
-                "consenso": {"stato": "revocato", "revoca_nel_registro": True, "da_confermare": False},
-                "consenso_revocato": None,
-                "revoche_registro": len(items),
-                "clonazione_incerta": None,
-                "clonazione_incerta_tolta": None,
-            }
-        )
+        _revoke_without_single_voice(config, args)
         return
 
     revoked = None
@@ -159,6 +141,45 @@ def main() -> None:
             "clonazione_incerta_tolta": cleared,
         }
     )
+
+
+def _revoke_without_single_voice(config, args) -> None:  # type: ignore[no-untyped-def]
+    """--revoke-consent quando il nome non da' UNA voce della libreria.
+
+    - Ci sono registrazioni con esattamente quel nome (doppioni, es. .wav e .mp3):
+      si revocano TUTTE, metadati e registro (sicurezza C7, terza revisione,
+      MEDIA-1). Una revoca non e' una scelta da indovinare: vale per ognuna.
+    - Nessuna registrazione con quel nome, ma il registro lo conosce
+      esattamente: la registrazione e' stata cancellata, la revoca si scrive nel
+      registro (C7, MEDIA-1 e MEDIA-3 della seconda revisione).
+    - Altrimenti l'errore originale (nome incerto o sconosciuto): non si indovina.
+    """
+    same = same_name_voices(config, args.name)
+    registry = VoiceRegistry(config.registry_file, project_root=config.registry_file.parent)
+    if same:
+        files = []
+        for voice in same:
+            revoke_voice_consent(config, voice, by=args.by)
+            files.append(voice.path.name)
+        note(f"{args.name}: revocato il consenso di tutte le registrazioni con questo nome ({', '.join(files)}).")
+        emit({
+            "voce": args.name, "file": None, "files": files, "nome_pronunciato": None,
+            "consenso": {"stato": "revocato", "revoca_nel_registro": True, "da_confermare": False},
+            "consenso_revocato": None, "revoche_registro": None,
+            "clonazione_incerta": None, "clonazione_incerta_tolta": None,
+        })
+        return
+    if not registry.knows(args.name):
+        resolve_library_voice(config, args.name)  # rilancia l'errore originale
+        raise VoiceLibraryError(f"'{args.name}' non e' nella libreria ne' nel registro delle voci.")
+    items = revoke_missing_voice(config, args.name, by=args.by)
+    note(f"{args.name}: la registrazione non c'e' piu'; revoca scritta nel registro delle voci.")
+    emit({
+        "voce": args.name, "file": None, "files": [], "nome_pronunciato": None,
+        "consenso": {"stato": "revocato" if items else "sconosciuto", "revoca_nel_registro": bool(items), "da_confermare": False},
+        "consenso_revocato": None, "revoche_registro": len(items),
+        "clonazione_incerta": None, "clonazione_incerta_tolta": None,
+    })
 
 
 if __name__ == "__main__":

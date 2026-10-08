@@ -410,11 +410,19 @@ def _clones_in_runs(config: Any, voice: str) -> list[tuple[str | None, str]]:
 
 def _record_revocation(config: Any, registry: VoiceRegistry, voice: str, hashes: list[str | None], by: str, when: str) -> list[dict[str, Any]]:
     """Una revoca per registrazione, ognuna con i voice_id clonati da lei."""
-    clones: dict[str | None, list[str]] = {h: [] for h in hashes if h}
-    for digest, voice_id in [*registry.clones_of(voice), *_clones_in_runs(config, voice)]:
-        clones.setdefault(digest, []).append(voice_id)
     entry = registry.get(voice) or {}
-    return registry.record_revocation(voice, clones=clones, provider=entry.get("provider"), by=by, when=when)
+    return registry.record_revocation(
+        voice, hashes=hashes, extra_clones=_clones_in_runs(config, voice), provider=entry.get("provider"), by=by, when=when,
+    )
+
+
+def same_name_voices(config: Any, name: str) -> list[AvailableVoice]:
+    """Le registrazioni della libreria con ESATTAMENTE questo nome (a meno di
+    maiuscole e accenti), doppioni compresi. Nessuna somiglianza: e' il nome."""
+    from .voice_library import _normalize
+
+    target = _normalize(name)
+    return [v for v in _library(config).voices if _normalize(v.name) == target]
 
 
 def revoke_voice_consent(config: Any, voice: AvailableVoice, *, by: str | None) -> tuple[dict[str, Any], dict[str, Any] | None]:
@@ -679,6 +687,7 @@ __all__ = [
     "check_not_revoked",
     "grant_consent",
     "revoke_missing_voice",
+    "same_name_voices",
     "revoke_voice_consent",
     "plan_voices",
     "prepare_voices",

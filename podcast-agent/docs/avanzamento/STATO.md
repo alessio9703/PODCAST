@@ -52,7 +52,7 @@ resoconti accanto a questo file:
 
 Test all'ultimo commit, sempre con `.venv/bin/python`: smoke 68, tools_cli 190 (+1
 saltato: il test reale con Anthropic, solo con `PODCAST_E2E_REALE=1`), music 73,
-lessons 80, web_integration 839.
+lessons 80, web_integration 843.
 
 ## 2. Fasi
 
