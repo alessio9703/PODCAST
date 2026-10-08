@@ -1,6 +1,6 @@
 # Stato dell'integrazione web
 
-Ultimo aggiornamento: 2026-10-07 (fase C7: correzioni della revisione finale). Branch `integrazione-web`.
+Ultimo aggiornamento: 2026-10-08 (fase C8: rifinitura, N28). `integrazione-web` è in `main` (`e67f7b0`); C8 sul branch `rifinitura`.
 
 Il metodo di lavoro e le regole sono in `CLAUDE.md`. I dettagli di ogni fase sono nei
 resoconti accanto a questo file:
@@ -14,7 +14,8 @@ resoconti accanto a questo file:
 - `C5.md` (con il riepilogo finale dell'integrazione web), `C5-sicurezza.md`
 - `C6.md`, `C6-sicurezza.md`
 - `REVISIONE-FINALE.md` (revisione indipendente dell'intero branch)
-- `C7.md`, `C7-sicurezza.md`
+- `C7.md`, `C7-sicurezza.md` … `C7-sicurezza-5.md`
+- `C8.md`, `C8-sicurezza.md`
 
 ## 1. Commit
 
@@ -48,11 +49,13 @@ resoconti accanto a questo file:
 | `39c1178` | revisione finale: controllo automatico su ffmpeg/ffprobe con `-i` |
 | `d61ee5e` | **revisione finale** dell'intero branch (3 bloccanti, 32 non bloccanti) |
 | `400b781` … `269b7a6` | **C7** correzioni della revisione finale, blocchi A–G (dettaglio in `C7.md`) |
-| `06acc06` … (questo) | C7: rapporti di sicurezza 1–5 e correzioni, seconda tornata di decisioni, basse della quinta revisione, chiusura |
+| `06acc06` … `2e03b3c` | C7: rapporti di sicurezza 1–5 e correzioni, seconda tornata di decisioni, basse della quinta revisione, chiusura |
+| `e67f7b0` | **merge in `main`**: "Integrazione web: C0-C7" (`--no-ff`) |
+| (questo, branch `rifinitura`) | **C8**: N28 (elenco unico degli `error_type`) e test del flusso completo deterministico |
 
 Test all'ultimo commit, sempre con `.venv/bin/python`: smoke 68, tools_cli 190 (+1
 saltato: il test reale con Anthropic, solo con `PODCAST_E2E_REALE=1`), music 73,
-lessons 80, web_integration 860.
+lessons 80, web_integration 871.
 
 ## 2. Fasi
 
@@ -68,7 +71,8 @@ lessons 80, web_integration 860.
 | C5 | Contratto completo + README/LEGENDA + riepilogo finale | **fatta** (verifica finale compresa); revisione: 0 alte, 2 medie, 5 basse, **tutte corrette** |
 | C6 | Fase finale: `run.py` su `src/music_context.py`, `lessons --propose`, ffmpeg, sha256 dei documenti, flusso in modalità web, pulizia | **fatta**; revisione: 0 alte, 0 medie, 3 basse, **tutte corrette** |
 | Revisione finale | Revisione indipendente dell'intero branch (`REVISIONE-FINALE.md`) | **fatta**: 3 bloccanti, 32 non bloccanti |
-| C7 | Correzioni della revisione finale: B1–B3, N1, §8.6, N2–N6, N8–N12, N14–N27, percorso dei wireframe | **fatta**; revisione: 1 alta, 2 medie, 4 basse; **alta e medie corrette**, basse da decidere (`C7.md` §6) |
+| C7 | Correzioni della revisione finale: B1–B3, N1, §8.6, N2–N6, N8–N12, N14–N27, percorso dei wireframe | **fatta** e in `main`; cinque revisioni di sicurezza, alte e medie corrette, ciclo chiuso dall'utente; basse aperte in "Da rivedere prima della produzione" |
+| C8 | Rifinitura: N28 e test deterministico | **fatta** (`C8.md`); revisione di sicurezza: vedi `C8-sicurezza.md` |
 
 A fine di **ogni** fase: revisione di sicurezza (`<fase>-sicurezza.md`), alte corrette
 prima della fase successiva.
@@ -182,12 +186,14 @@ piano della fase che le attua). **Fatto** (`C7.md` §7):
 
 ### Piano di C8 · rifinitura (branch `rifinitura`, da `main` dopo il merge)
 
-1. **N28 per primo** (prioritario: l'adattatore si basa su quei nomi): `error_type`
-   coerenti, con un **elenco unico** nel contratto (§3) con gli exit code. Resoconto in
-   `C8.md`, poi **fermarsi e aspettare l'OK** dell'utente.
-2. Dopo l'OK: N29 (codice morto), N30 (logica in `tools/` e duplicata), N31 (documenti in
-   disaccordo; il percorso dei wireframe è già fatto), N32 (installazione: `doctor` e
-   chiavi, versione minima di Python, `httpx2`).
+1. **Fatto**: N28 (`error_type` coerenti, elenco unico in `src/error_catalog.py` e nel
+   contratto §3 con gli exit code) e il test del flusso completo reso deterministico
+   (decisione dell'utente del 2026-10-08). Una revisione di sicurezza sul diff, solo le
+   alte si correggono; poi merge in `main` e tag `v1.0-web`; poi fermarsi.
+2. **Dopo l'OK dell'utente**: N29 (codice morto), N30 (logica in `tools/` e duplicata,
+   compresi i `ValueError`/`FileNotFoundError` dei tool da sostituire con nomi precisi),
+   N31 (documenti in disaccordo; il percorso dei wireframe è già fatto), N32
+   (installazione: `doctor` e chiavi, versione minima di Python, `httpx2`).
 
 ## 3. Decisioni prese (con il motivo)
 
@@ -329,10 +335,9 @@ piano della fase che le attua). **Fatto** (`C7.md` §7):
 
 ## 4. Richieste ricevute e non ancora completate
 
-1. **Merge in `main`** autorizzato dall'utente (2026-10-07) quando tutto è verde e non ci
-   sono alte o medie aperte: `--no-ff`, messaggio "Integrazione web: C0-C7", **nessun tag**.
-2. **C8 · rifinitura** (piano qui sopra): N28 subito, poi stop in attesa dell'OK per
-   N29–N32.
+1. Merge di `integrazione-web` in `main`: **fatto** (`e67f7b0`).
+2. **C8**: merge di `rifinitura` in `main` e tag `v1.0-web` dopo la revisione di sicurezza;
+   poi stop in attesa dell'OK per N29–N32.
 3. Interpretazioni di C7 e basse della sicurezza: decise e attuate (`C7.md` §7, D12).
 
 ## Da rivedere prima della produzione

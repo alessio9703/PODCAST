@@ -33,6 +33,8 @@ class TimelineError(RuntimeError):
     def __init__(self, message: str, *, code: str = "timeline_illeggibile") -> None:
         super().__init__(message)
         self.code = code
+        # Il motivo anche in `details`, come per gli altri errori (fase C8, N28).
+        self.details = {"code": code}
 
 
 @dataclass(frozen=True)

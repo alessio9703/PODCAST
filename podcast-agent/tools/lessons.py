@@ -26,7 +26,8 @@ import json
 import os
 from pathlib import Path
 
-from _common import InvalidArguments, NeedsUserInput, PROJECT_ROOT, add_config_arg, bootstrap, emit, note, parse_args, run_tool, web_mode  # noqa: E402
+from _common import PROJECT_ROOT, add_config_arg, bootstrap, emit, note, parse_args, run_tool, web_mode  # noqa: E402
+from src.errors import DomainError, NeedsUserDecision  # noqa: E402
 from src import lessons as lessons_mod  # noqa: E402
 from src.config import ConfigError  # noqa: E402
 from src.episode_signals import SIGNALS_FILENAME  # noqa: E402
@@ -168,8 +169,9 @@ def _do_accept(lessons_config: dict, lesson_id: str, text_override: str | None, 
         note(f"{exc} Candidati: {candidati or 'nessuno'}.")
         # I candidati anche in `details`, come ogni altro esito 3: la UI li
         # mostra come scelta, senza leggere il testo (revisione finale, N25).
-        raise NeedsUserInput(
+        raise NeedsUserDecision(
             f"{exc} Candidati: {candidati or 'nessuno'}.",
+            error_type="LessonRemovalRequired",
             details={
                 "campo": "remove_id",
                 "lezione": lesson_id,
@@ -235,7 +237,7 @@ def main() -> None:
     if (args.accept or args.reject) and web_mode() and not (args.by and args.by.strip()):
         # Una lezione entra nel prompt di tutti gli episodi: dall'interfaccia
         # si registra chi l'ha decisa (revisione di sicurezza C4, MEDIA-2).
-        raise InvalidArguments("Serve --by: chi accetta o rifiuta la lezione.", details={"messaggio": "manca --by"})
+        raise DomainError("Serve --by: chi accetta o rifiuta la lezione.", error_type="ByRequired", details={"campo": "by"})
     lessons_config = config.lessons
 
     if args.evidence:

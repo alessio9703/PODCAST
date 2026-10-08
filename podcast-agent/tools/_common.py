@@ -54,6 +54,7 @@ for _stream in (sys.stdout, sys.stderr):
 from src.audio_assembler import AssemblyError  # noqa: E402
 from src.config import Config, ConfigError, load_config, load_dotenv  # noqa: E402
 from src.episode_signals import SignalsError  # noqa: E402
+from src.error_catalog import CATALOG as ERROR_CATALOG  # noqa: E402
 from src.errors import DomainError, NeedsUserDecision, error_details  # noqa: E402
 from src.ffmpeg_tool import FfmpegNotFoundError  # noqa: E402
 from src.lessons import LessonsError  # noqa: E402
@@ -73,17 +74,6 @@ EXIT_OK = 0
 EXIT_DOMAIN = 1
 EXIT_PROVIDER = 2
 EXIT_NEEDS_USER = 3
-
-
-class NeedsUserInput(NeedsUserDecision):
-    """L'agente deve chiedere qualcosa all'utente e richiamare il tool.
-
-    Resta con il suo `error_type` storico ("needs_user_input"); gli esiti 3
-    nuovi usano una sottoclasse di src.errors.NeedsUserDecision con un nome
-    proprio (es. AmbiguousName, ConsentRequired).
-    """
-
-    error_type = "needs_user_input"
 
 
 #: Esito di un'interruzione (Ctrl-C o SIGTERM). Exit 1 e non un codice nuovo:
@@ -235,12 +225,13 @@ def require_by_in_web(by: str | None, what: str) -> None:
     Approvazioni, ritiri, ripristini, modifiche, stesure e retake registrano
     chi li ha fatti ("Approvato da ..."): l'adattatore sa sempre chi e'
     l'utente collegato, quindi un --by mancante e' un suo errore
-    (InvalidArguments, `details.campo = "by"`). Revisione finale, N27.
+    (ByRequired, `details.campo = "by"`). Revisione finale N27, nome unico in C8.
     """
     if web_mode() and not (by and by.strip()):
-        raise InvalidArguments(
+        raise DomainError(
             f"Dall'interfaccia {what} richiede --by: chi la fa (l'utente collegato).",
-            details={"campo": "by", "messaggio": "manca --by"},
+            error_type="ByRequired",
+            details={"campo": "by"},
         )
 
 
@@ -287,7 +278,7 @@ def _classify(exc: Exception) -> tuple[int, str]:
     # qualunque altro errore di dominio, perdendo il segnale "serve una
     # risposta esplicita" (--accept-changed-music).
     if isinstance(exc, MusicChangedError):
-        return EXIT_NEEDS_USER, type(exc).__name__
+        return EXIT_NEEDS_USER, "MusicChanged"
     if isinstance(exc, VoiceProviderError):
         return EXIT_PROVIDER, type(exc).__name__
     # Chiave Anthropic non valida o credito esaurito: come un errore del
@@ -315,6 +306,24 @@ def _classify(exc: Exception) -> tuple[int, str]:
     ):
         return EXIT_DOMAIN, _kind(exc)
     return EXIT_DOMAIN, _kind(exc)
+
+
+def _stable(code: int, kind: str, exc: Exception) -> tuple[int, str]:
+    """Solo nomi dell'elenco unico (src/error_catalog.py) arrivano nel JSON.
+
+    Un'eccezione imprevista non esce con il nome di una classe Python: un
+    `ValueError` diventa `InvalidInput`, un `FileNotFoundError` `NotFound`, il
+    resto `InternalError`. L'exit code e' quello dell'elenco, cosi' contratto e
+    comportamento non possono divergere (fase C8, N28).
+    """
+    if kind not in ERROR_CATALOG:
+        if isinstance(exc, FileNotFoundError):
+            kind = "NotFound"
+        elif isinstance(exc, ValueError):
+            kind = "InvalidInput"
+        else:
+            kind = "InternalError"
+    return ERROR_CATALOG[kind][0], kind
 
 
 def _kind(exc: Exception) -> str:
@@ -355,7 +364,7 @@ def run_tool(main: Callable[[], None]) -> None:
         note(f"ERRORE [{INTERRUPTED}] {message}")
         raise SystemExit(EXIT_DOMAIN)
     except Exception as exc:  # noqa: BLE001 - tradotte deliberatamente
-        code, kind = _classify(exc)
+        code, kind = _stable(*_classify(exc), exc)
         _emit_error(kind, str(exc), code, error_details(exc))
         note(f"ERRORE [{kind}] {exc}")
         raise SystemExit(code)
@@ -408,7 +417,6 @@ __all__ = [
     "EXIT_DOMAIN",
     "EXIT_PROVIDER",
     "EXIT_NEEDS_USER",
-    "NeedsUserInput",
     "INTERRUPTED",
     "add_config_arg",
     "WEB_MODE_ENV",

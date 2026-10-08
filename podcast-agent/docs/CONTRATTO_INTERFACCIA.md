@@ -110,11 +110,11 @@ si usa; la stima dall'interfaccia è `estimate.py --run-dir` (senza `--script`).
 
 **`--by` obbligatorio dal web** (C7, N27). Le azioni che lasciano una firma
 ("Approvato da …", elenco versioni, metadati dei take) vogliono `--by` con il nome
-dell'utente collegato: senza, exit 1 `InvalidArguments` con `details.campo: "by"`, e
+dell'utente collegato: senza, exit 1 `ByRequired` con `details.campo: "by"`, e
 niente cambia. Sono: `script_approve.py` (approva e `--revoke`), `script_edit.py`,
 `script_versions.py --restore`, `script_write.py`, `script_revise.py`, `retake.py --turn`
 (non `--dry-run`), `voice_meta.py --spoken-name`. `voice_meta.py --consent`/`--revoke-consent`
-(`ConsentByRequired`), `music_meta.py` e `lessons.py --accept/--reject` lo richiedevano già.
+(oggi tutti con lo stesso nome `ByRequired`), `music_meta.py` e `lessons.py --accept/--reject` lo richiedevano già.
 In locale (subagent, CLI) `--by` resta facoltativo dove lo era.
 
 ### Campi da mostrare e campi da non mostrare
@@ -169,7 +169,7 @@ percorsi che ricevono, quindi la difesa non dipende dall'adattatore:
 |---|---|---|---|
 | 0 | `true` | Tutto a posto | Conferma breve, si prosegue |
 | 1 | `false` | Errore correggibile dall'utente | Dice cosa correggere, accanto al campo che l'ha causato |
-| 2 | `false` | Errore del provider esterno (voce/sintesi) | **Blocco, nessun "Riprova"** automatico: una clonazione ripetuta creerebbe voci duplicate a pagamento |
+| 2 | `false` | Errore di un servizio esterno a pagamento: provider vocale (clonazione, sintesi) o modello che scrive il copione (chiave non valida, credito esaurito) | **Blocco, nessun "Riprova"** automatico: si interviene su account o configurazione; una clonazione ripetuta creerebbe voci duplicate a pagamento |
 | 3 | `false` | Serve una scelta dell'utente | Mostra la domanda e le opzioni (da `details`), poi richiama il comando con la risposta |
 
 ### Forma del JSON di errore
@@ -189,9 +189,110 @@ percorsi che ricevono, quindi la difesa non dipende dall'adattatore:
 - `details` è **opzionale**: c'è solo per gli errori che hanno dati da
   mostrare. Un errore senza `details` si mostra con il solo testo di `error`.
 
-## 3. `error_type` con significato fisso
+## 3. `error_type`: l'elenco unico
 
-L'elenco cresce fase per fase; quelli qui sotto sono già in vigore.
+Questo è l'**elenco completo** degli `error_type` che un comando può restituire (fase C8,
+N28). La fonte è `src/error_catalog.py`; un test controlla che codice, elenco e questa
+tabella coincidano, exit code compresi. `run_tool` garantisce che nel JSON finisca solo
+un nome di questo elenco: un'eccezione imprevista non arriva mai con il nome di una
+classe Python (`ValueError`, `KeyError`, …) ma come `InvalidInput`, `NotFound` o
+`InternalError`, con il testo che spiega.
+
+**Convenzione dei nomi**: CamelCase; senza suffisso = una situazione precisa
+(`ConsentRequired`, `VersionConflict`); con il suffisso `Error` = l'errore generico di un
+componente o di un servizio (`DocumentError`, `ProviderAuthError`), con il testo che dice
+cosa fare e, dove serve, `details.campo`.
+
+**Rinominati in C8** (l'adattatore usa solo i nomi nuovi):
+
+| Prima | Ora |
+|---|---|
+| `needs_user_input` | `LessonRemovalRequired` |
+| `MusicChangedError` | `MusicChanged` |
+| `ConsentByRequired`, `InvalidArguments` e `MusicMetaError` per un `--by` mancante | `ByRequired` (`details.campo: "by"`) |
+| `ValueError` di `script_save.py` per un copione non valido | `ScriptInvalid` (`details.errors`) |
+| `ValueError`, `FileNotFoundError` e altri nomi di classi Python | `InvalidInput`, `NotFound`, `InternalError` |
+
+| error_type | exit | Quando | `details` |
+|---|---|---|---|
+| `InvalidInput` | 1 | Valore non valido passato al comando (il testo dice quale e perché) | — |
+| `NotFound` | 1 | Un file o una cartella richiesti non esistono (run, copione, documento…) | — |
+| `InternalError` | 1 | Errore imprevisto: da registrare nei log e segnalare | — |
+| `Interrupted` | 1 | Comando fermato da SIGTERM o Ctrl-C; nessun file lasciato a metà | — |
+| `InvalidArguments` | 1 | Argomenti non validi per il comando (errore dell'adattatore) | `messaggio` |
+| `NotAllowedInWebMode` | 1 | Argomento o comando riservato all'uso locale, in modalità web (errore dell'adattatore) | `argomenti`, `comando` |
+| `ByRequired` | 1 | Manca `--by` (chi fa l'azione) dove serve una firma (errore dell'adattatore) | `campo: "by"` |
+| `PathNotAllowed` | 1 | Un percorso esce dalla cartella prevista | `campo` |
+| `LockTimeout` | 1 | Un file condiviso è rimasto occupato troppo a lungo: si può riprovare | `file`, `timeout_seconds` |
+| `RunBusy` | 1 | Sulla run è già in corso un'operazione lunga | `in_corso` |
+| `ConfigError` | 1 | `config.yaml` non valido o incompleto (errore dell'amministratore) | — |
+| `DocumentError` | 1 | Documento non leggibile o fuori dalla libreria | — |
+| `DocumentNotExtractable` | 1 | Documento senza testo ricavabile | `motivo`, `file` |
+| `UnsupportedDocument` | 1 | Estensione del documento non gestita | `estensione`, `ammesse` |
+| `DocumentTooLarge` | 1 | Il documento supera un limite di `documents:` | `limite`, `massimo`, `valore`, `file` |
+| `EpisodeConfigError` | 1 | Scelta non valida nei passi 1–2 | `campo` (+ `ruolo`, `ammessi`…) |
+| `SpokenNameIncomplete` | **3** | Nome da pronunciare senza cognome: si conferma esplicitamente | `campo`, `ruolo` o `voce`, `nome` |
+| `AmbiguousName` | **3** | Un nome corrisponde a più elementi: non si indovina | `query`, `candidates` (+ `campo`, `category`, `ruolo`) |
+| `ScriptInvalid` | 1 | Il copione (modificato o salvato) non sarebbe valido: niente salvato | `errors` |
+| `ScriptHasErrors` | 1 | Approvare una versione con errori bloccanti | `version`, `errors` |
+| `VersionConflict` | 1 | Il copione è cambiato rispetto alla versione che l'utente guardava | `expected_version`, `current_version` |
+| `VersionRequired` | 1 | `script_approve.py` senza `--version` | `current_version` |
+| `NothingToChange` | 1 | La modifica lascerebbe tutto com'è | `turn` o `version` |
+| `TurnNotFound` | 1 | Numero di battuta inesistente | `turn`, `turn_count` |
+| `ScriptMissing` | 1 | Stima o produzione di una run senza copione | — |
+| `ScriptSessionError` | 1 | Sessione del copione mancante o illeggibile | — |
+| `ScriptWriterError` | 1 | Scrittura del copione non riuscita (rifiuto del modello, risposta non valida…) | — |
+| `ModelAuthError` | **2** | Chiave del modello non valida o senza permessi | `status` |
+| `ModelCreditExhausted` | **2** | Credito del modello esaurito | `status` |
+| `ModelRateLimited` | 1 | Troppe richieste al modello: si riprova dopo | `status`, `retry_after_seconds` |
+| `ModelOverloaded` | 1 | Modello sovraccarico o in errore (5xx) | `status`, `retry_after_seconds` |
+| `ModelUnreachable` | 1 | Modello non raggiungibile (rete, timeout) | `status`, `retry_after_seconds` |
+| `VoiceLibraryError` | 1 | Voce inesistente, doppioni, campione non utilizzabile | — |
+| `VoiceMetaError` | 1 | Metadati di una voce illeggibili | `file` (+ `campo`) |
+| `ConsentRequired` | **3** | Una voce da usare non ha il consenso valido: niente clonato | `voci` (+ `done`, `total`, `missing`) |
+| `CloneOutcomeUnknown` | **3** | Una clonazione precedente non si sa come sia finita: non si ritenta da soli | `speaker`, `dal`, `provider` |
+| `RecordingChanged` | **3** | La registrazione non è quella che l'utente ha visto: consenso non registrato | `voce`, `atteso`, `attuale` |
+| `RevokedMeanwhile` | **3** | La voce è stata revocata dopo lo stato mostrato: vince la revoca | `voce` |
+| `RevocationIncomplete` | 1 | Una revoca non è riuscita per tutto: si è revocato il possibile | `revocati`, `non_revocati`, `revoche_registro` |
+| `RegistryCorrupt` | 1 | Revoche o storico del registro delle voci non ben formati: ci si ferma | `file`, `campo` |
+| `ApprovalRequired` | 1 | Copione non approvato o diverso da quello approvato (anche a produzione in corso) | `approval_problem` (+ `done`, `total`, `missing`) |
+| `ProductionInterrupted` | 1 | Produzione fermata fra una battuta e l'altra: si riprende rilanciando | `done`, `total`, `missing` |
+| `AssemblyError` | 1 | Sintesi o montaggio non riusciti; le battute pronte restano | — |
+| `MissingSpeakerVoice` | 1 | Una voce del copione non ha un voice_id | — |
+| `SegmentCacheError` | 1 | Segmenti o loro indice illeggibili | — |
+| `VoiceProviderError` | **2** | Errore del provider vocale | — |
+| `ProviderAuthError` | **2** | Chiave del provider vocale non valida | — |
+| `ProviderQuotaError` | **2** | Credito del provider vocale esaurito | — |
+| `ProviderRateLimitError` | **2** | Troppe richieste al provider vocale | — |
+| `ProviderTimeoutError` | **2** | Il provider vocale non risponde in tempo | — |
+| `ProviderAudioQualityError` | **2** | Il provider rifiuta la registrazione di riferimento | — |
+| `RetakeError` | 1 | Retake non possibile (turno, take, file) | — |
+| `SegmentsMissing` | 1 | Rimontaggio senza tutti i segmenti: serve `produce.py` | `missing` |
+| `UnknownDirection` | 1 | Indicazione di resa non prevista in `config.yaml` | `indicazione`, `ammesse` |
+| `DirectionNeedsTextEdit` | 1 | "Pronuncia diversa": va corretto il testo | `indicazione` |
+| `ConflictingDirections` | 1 | Due indicazioni opposte insieme | `indicazioni` |
+| `TooManyTakes` | 1 | Più take di `retake.max_takes` | `massimo`, `richiesti` |
+| `WaveformError` | 1 | Numero di punti non ammesso, file non decodificabile | `campo`, `ammessi` |
+| `EpisodeNotProduced` | 1 | Operazione su un episodio senza file finale | — |
+| `TimelineError` | 1 | Tempi delle battute mancanti o di un copione diverso | `code` |
+| `SignalsError` | 1 | Segnali dell'episodio non calcolabili | — |
+| `MusicLibraryError` | 1 | Brano inesistente o non utilizzabile, `musiche.json` illeggibile | — |
+| `MusicMixerError` | 1 | Mix con le musiche non riuscito (ffmpeg assente, brano sparito…) | — |
+| `MusicChanged` | **3** | Un brano già usato è stato sostituito: si conferma con `--accept-changed-music` | — |
+| `MusicMetaError` | 1 | Metadati di un brano non validi | `campo` |
+| `MusicChoiceError` | 1 | Scelta delle musiche non valida | `campo` o `category`, `query` |
+| `FfmpegNotFoundError` | 1 | ffmpeg non disponibile | — |
+| `LessonsError` | 1 | Operazione sulle lezioni non valida | — |
+| `LessonRemovalRequired` | **3** | Accettare una lezione supererebbe il tetto: va indicata quale togliere | `campo`, `lezione`, `candidates` |
+
+Exit **1**: correggibile (la UI dice cosa correggere; per `LockTimeout`, `RunBusy`,
+`ModelRateLimited`, `ModelOverloaded`, `ModelUnreachable` si può riprovare).
+`InvalidArguments`, `NotAllowedInWebMode`, `ByRequired` sono errori dell'adattatore: si
+registrano nei log, non si mostrano come campi da correggere. Exit **2**: servizio esterno
+a pagamento, nessun "Riprova" automatico. Exit **3**: serve una scelta dell'utente, poi si
+richiama il comando con la risposta.
+
+### Note sui singoli esiti
 
 ### `Interrupted` · exit 1
 
@@ -212,14 +313,14 @@ sottoprocesso) o da Ctrl-C prima di finire. Il JSON viene scritto comunque.
   file corrotti: il comando si può rilanciare così com'è.
 - In precedenza un'interruzione usciva con codice 130 senza JSON: questo non
   succede più.
-- Il comando "produci" (fase C2) avrà una propria interruzione ordinata, con un
-  `error_type` dedicato e il punto raggiunto in `details`.
+- `produce.py` ha la sua interruzione ordinata: `ProductionInterrupted`, con il punto
+  raggiunto in `details`.
 
 ### `AmbiguousName` · exit 3
 
 Un nome scritto dall'utente corrisponde a più elementi: il comando **non
-sceglie mai al posto dell'utente**. Oggi lo usano `music_list.py --resolve` e
-`music_set.py`.
+sceglie mai al posto dell'utente**. Lo usano i nomi di voci e brani (`episode_config.py`,
+`voice_meta.py`, `voices_list.py --resolve`, `music_list.py --resolve`, `music_set.py`).
 
 ```json
 {
@@ -250,31 +351,7 @@ libreria.
 Un nome che non corrisponde a niente **non** è un `AmbiguousName`: è exit 1
 senza `details`, con l'elenco dei disponibili nel testo.
 
-### Introdotti in C1
-
-| error_type | exit | Quando | `details` |
-|---|---|---|---|
-| `DocumentNotExtractable` | 1 | Documento senza testo ricavabile | `motivo` (`scansione`, `protetto`, `vuoto`, `illeggibile`), `file` |
-| `UnsupportedDocument` | 1 | Estensione non gestita | `estensione`, `ammesse` |
-| `SpokenNameIncomplete` | 3 | Nome da pronunciare senza cognome | `campo`, `ruolo`, `nome` |
-| `EpisodeConfigError` | 1 | Scelta non valida nei passi 1–2 | `campo` (+ `ruolo`, `ammessi`, ...) |
-| `AmbiguousName` | 3 | Anche per le voci in `episode_config.py` | `campo: "voce"`, `ruolo`, `query`, `candidates` |
-| `ScriptInvalid` | 1 | Una modifica renderebbe il copione non valido: non salvata | `errors` |
-| `ScriptHasErrors` | 1 | Approvare una versione con errori bloccanti | `version`, `errors` |
-| `VersionConflict` | 1 | Il copione è cambiato rispetto alla versione che l'utente guardava | `expected_version`, `current_version` |
-| `NothingToChange` | 1 | La modifica lascerebbe tutto com'è: nessuna versione creata | `turn` o `version` |
-| `TurnNotFound` | 1 | Numero di battuta inesistente | `turn`, `turn_count` |
-| `RunBusy` | 1 | Sulla run è già in corso un'operazione lunga | `in_corso: {operazione, dal, …}` (senza `pid`) |
-| `PathNotAllowed` | 1 | Un percorso esce dalla cartella prevista (vedi "Percorsi") | `campo` (`run_dir`, `save_to`, `script`, ...) |
-
-### Introdotti con le correzioni di sicurezza C0+C1
-
-| error_type | exit | Quando | `details` |
-|---|---|---|---|
-| `DocumentTooLarge` | 1 | Il documento supera un limite di `documents:` in `config.yaml` | `limite` (`byte`, `pagine`, `caratteri`, `byte_scompattati`, `byte_xml`, `parti_zip`, `contenuto_pagine`, `secondi`), `massimo`, `valore`, `file` |
-| `VersionRequired` | 1 | `script_approve.py` senza `--version` (né `--current`) | `current_version` |
-| `NotAllowedInWebMode` | 1 | Argomento riservato all'uso locale in modalità web | `argomenti` |
-| `InvalidArguments` | 1 | Argomenti non validi per il comando | `messaggio` |
+#### Documenti troppo grandi (`DocumentTooLarge`)
 
 I limiti dei documenti (default: 20 MB, 500 pagine, 2.000.000 di caratteri;
 per un DOCX 100 MB scompattati, 15 MB di parti XML, 2000 parti; per un PDF
@@ -284,19 +361,12 @@ tempo, che si contano durante l'estrazione: un PDF si ferma alla prima pagina
 oltre il limite. La UI mostra "Documento troppo
 grande" con il limite superato.
 
+#### Copione cambiato (`VersionConflict`)
+
 `VersionConflict` è il caso "due persone sullo stesso copione": la UI ricarica il
 copione e mostra la versione nuova, non riprova da sola.
 
-### Errori dell'API del modello (scrittura e revisione del copione)
-
-| error_type | exit | Quando | `details` |
-|---|---|---|---|
-| `ModelAuthError` | **2** | Chiave Anthropic non valida o senza permessi (HTTP 401/403) | `status` |
-| `ModelCreditExhausted` | **2** | Credito dell'account esaurito | `status` |
-| `ModelRateLimited` | 1 | Troppe richieste (HTTP 429) | `status`, `retry_after_seconds` (null se il servizio non lo indica) |
-| `ModelOverloaded` | 1 | Servizio sovraccarico o in errore (HTTP 5xx, 529) | `status`, `retry_after_seconds` |
-| `ModelUnreachable` | 1 | Rete assente o timeout | `status: null`, `retry_after_seconds: null` |
-| `ScriptWriterError` | 1 | Altro: rifiuto del modello, risposta non valida, altri errori HTTP | — |
+#### Errori del modello (`Model*`)
 
 - Exit 2 vale come per il provider vocale: blocco, nessun "Riprova", si
   interviene su account o configurazione.
@@ -308,21 +378,7 @@ copione e mostra la versione nuova, non riprova da sola.
   viene rilasciato.
 - I messaggi non contengono mai intestazioni HTTP né la chiave.
 
-### Introdotti in C2
-
-| error_type | exit | Quando | `details` |
-|---|---|---|---|
-| `ConsentRequired` | **3** | Una voce da usare non ha il consenso valido: **nessuna voce è stata clonata** (o, a produzione in corso, un consenso è stato revocato: ci si ferma). Dal web anche una voce già clonata da **riusare** senza consenso registrato (C7, N1) | `voci: [{speaker, azione, stato, da_confermare, file}]`; una revoca trovata solo nel registro: `{speaker, azione, stato: "revocato", revoca_nel_registro: true}` | (+ `done`, `total`, `missing` se la sintesi era partita) |
-| `CloneOutcomeUnknown` | **3** | Una clonazione precedente della stessa voce è finita con un errore o è stata interrotta: la voce potrebbe esistere sul provider. **Non si ritenta da soli** | `speaker`, `dal`, `provider` |
-| `RecordingChanged` | **3** | `voice_meta.py --consent --expect-sha256 H`: la registrazione non è più quella che l'utente ha visto. Niente registrato | `voce`, `atteso`, `attuale` |
-| `ConsentByRequired` | 1 | `voice_meta.py --consent`/`--revoke-consent` senza `--by` | `campo: "by"` |
-| `RevokedMeanwhile` | **3** | (C7) `voice_meta.py --consent` su uno stato in cui la revoca non c'era ancora (`--expect-revision` superata) o mentre la voce veniva revocata: **vince la revoca**, il consenso non è registrato. La UI ricarica lo stato | `voce` |
-| `RevocationIncomplete` | 1 | (C7) `voice_meta.py --revoke-consent` non è riuscita per tutto (metadati di un doppione illeggibili, registro illeggibile): **si revoca tutto il possibile**, poi si riporta cosa no. I file vanno corretti a mano, non cancellati, e la revoca ripetuta | `revocati` (file), `non_revocati: [{file, errore, solo_registro?}]`, `revoche_registro` |
-| `RegistryCorrupt` | 1 | (C7) Le revoche (`__revoche__`) o lo storico (`__storico__`) di `voices_registry.json` non sono ben formati: ci si ferma (stima, produzione, consenso, revoca) **prima di spendere**, invece di ignorarli. Va corretto a mano (errore dell'amministratore) | `file`, `campo` |
-| `VoiceMetaError` | 1 | File dei metadati di una voce illeggibile | `file` |
-| `ApprovalRequired` | 1 | `produce.py` su un copione non approvato, o diverso da quello approvato; oppure (C7, N2) approvazione ritirata **a produzione in corso**: ci si ferma alla battuta successiva | `approval_problem`; a produzione in corso anche `done`, `total`, `missing` |
-| `ScriptMissing` | 1 | Stima o produzione di una run senza copione | — |
-| `ProductionInterrupted` | 1 | Produzione fermata (SIGTERM/Ctrl-C) fra una battuta e l'altra | `done`, `total`, `missing` |
+#### Consenso (`ConsentRequired`, `CloneOutcomeUnknown`)
 
 `ConsentRequired` è un esito 3: la UI mostra le caselle "Confermo che … ha dato il
 consenso" per le voci in `details.voci`, registra le conferme con `voice_meta.py` e
@@ -334,40 +390,13 @@ stata sostituita dopo il consenso) o `revocato` (vale anche per una voce già cl
 registrato (voci clonate prima del consenso o fuori dal controllo). Non c'è migrazione
 automatica: la UI mostra la stessa casella "Confermo che …", da spuntare una volta.
 
-### Introdotti in C3
-
-| error_type | exit | Quando | `details` |
-|---|---|---|---|
-| `UnknownDirection` | 1 | Retake con un'indicazione di resa che non è in `config.yaml` | `indicazione`, `ammesse` |
-| `DirectionNeedsTextEdit` | 1 | Retake con "Pronuncia diversa": va corretto il testo | `indicazione` |
-| `ConflictingDirections` | 1 | Due indicazioni opposte insieme (es. più lento e più veloce) | `indicazioni` |
-| `TooManyTakes` | 1 | Più take di `retake.max_takes` | `massimo`, `richiesti` |
-| `SegmentsMissing` | 1 | `mix.py` senza tutti i segmenti in cache (copione cambiato o episodio vecchio): serve `produce.py` | `missing` |
-| `WaveformError` | 1 | Numero di punti non ammesso, file non decodificabile | `campo` (`"points"`), `ammessi` (i valori di `--points` accettati) |
-| `EpisodeNotProduced` | 1 | Forma d'onda di un episodio senza file finale | — |
-
-### Introdotti in C4
-
-| error_type | exit | Quando | `details` |
-|---|---|---|---|
-| `MusicMetaError` | 1 | Metadati di un brano non validi (sottofondo con parlato, trascrizione senza parlato, testo vuoto o troppo lungo, `--by` mancante, brano inesistente) | `campo` |
-| `SpokenNameIncomplete` | 3 | Anche per `voice_meta.py --spoken-name` senza cognome: si conferma con `--accept-incomplete-name` | `campo`, `voce`, `nome` |
-
-### `LockTimeout` · exit 1
+#### File condiviso occupato (`LockTimeout`)
 
 Un file condiviso (per esempio il registro delle voci) è rimasto in uso da
 un'altra operazione per più di 30 secondi. In `details`: `file` (solo il nome)
 e `timeout_seconds`. Di norma non succede: le operazioni protette durano
 millisecondi. Se compare, la UI può proporre di riprovare.
 
-### Errori già esistenti, invariati
-
-| error_type | exit | Quando |
-|---|---|---|
-| `needs_user_input` | 3 | Esiti 3 storici non ancora strutturati (es. `lessons.py --accept` quando serve togliere una lezione) |
-| `MusicChangedError` | 3 | Un brano già usato è stato sostituito: serve `--accept-changed-music` |
-| nome della classe del provider (`ProviderQuotaError`, `ProviderAuthError`, ...) | 2 | Errore del servizio vocale |
-| nome della classe di dominio (`ValueError`, `ScriptWriterError`, ...) | 1 | Errore correggibile; il testo dice cosa fare |
 
 ## 4. Concorrenza
 
@@ -989,7 +1018,7 @@ episodio troncato. Ogni esecuzione di ffmpeg ha un limite di 15 minuti.
 | 0 | episodio pronto |
 | 1 | `ApprovalRequired`, `ScriptMissing`, `RunBusy`, `ProductionInterrupted`, `Interrupted`, `PathNotAllowed` (`_eventi.jsonl` link simbolico), errori delle musiche (anche ffmpeg oltre il limite di tempo), errore di sintesi di una battuta (`AssemblyError`: si può rilanciare, si pagano solo le mancanti) |
 | 2 | errore del provider durante la **clonazione** (`ProviderQuotaError`, `ProviderAuthError`, …): blocco, nessun "Riprova" |
-| 3 | `ConsentRequired`, `CloneOutcomeUnknown`, `MusicChangedError` (brano sostituito: si conferma con `--accept-changed-music`) |
+| 3 | `ConsentRequired`, `CloneOutcomeUnknown`, `MusicChanged` (brano sostituito: si conferma con `--accept-changed-music`) |
 
 ## Passo 7 · Episodio e correzioni
 
@@ -1127,7 +1156,7 @@ copione: non blocca. I `warnings` non contengono percorsi del server (C7, N3).
 | 0 | fatto |
 | 1 | `WaveformError`, `EpisodeNotProduced`, `UnknownDirection`, `DirectionNeedsTextEdit`, `ConflictingDirections`, `TooManyTakes`, `SegmentsMissing`, `RunBusy`, gate di approvazione (`retake.py`/`mix.py` su un copione non approvato), `ScriptMissing` |
 | 2 | errore del provider durante la sintesi di un take |
-| 3 | `ConsentRequired` (retake, anteprime o rimontaggio con una voce revocata), `MusicChangedError` |
+| 3 | `ConsentRequired` (retake, anteprime o rimontaggio con una voce revocata), `MusicChanged` |
 
 ## Archivio
 
@@ -1303,7 +1332,7 @@ retake, valuta, lezioni, cartelle}}`. Sola lettura, solo una **whitelist** di ch
   (`accettata_da`, `rifiutata_da`).
 - Testo di una lezione: al massimo 400 caratteri, nessuna riga che inizi con `#` o `---`;
   `lezioni.md` al massimo 4000 caratteri (`LessonsError`, nulla scritto).
-- `--accept` può dare exit 3 `needs_user_input` (serve togliere una lezione: si richiama con
+- `--accept` può dare exit 3 `LessonRemovalRequired` (serve togliere una lezione: si richiama con
   `--remove-id`). I candidati sono in `details` (C7, N25):
   `{"campo": "remove_id", "lezione": "L2", "candidates": [{"id": "L1", "motivo": "…", "testo": "…"}]}`.
 - Gli errori dell'API in `--propose` hanno gli stessi `error_type` della scrittura del
@@ -1405,7 +1434,7 @@ Le tre librerie sono cartelle: un caricamento è la scrittura di un file lì den
 - **Nessuna sovrascrittura silenziosa**: un file con lo stesso nome si sostituisce solo
   con una conferma esplicita dell'utente. Effetti di una sostituzione: una voce passa a
   consenso `superato` (va riconfermato) e alla prossima produzione va clonata di nuovo; un
-  brano già usato fa uscire `produce.py`/`mix.py` con `MusicChangedError` finché non si
+  brano già usato fa uscire `produce.py`/`mix.py` con `MusicChanged` finché non si
   conferma `--accept-changed-music`; un documento si ri-estrae.
 - **Dopo il caricamento** di una voce: `voice_meta.py --name … --spoken-name=… --consent
   --expect-sha256=… --by=…` (lo sha256 è quello che l'utente ha visto, da `voices_list.py`

@@ -72,7 +72,7 @@ def update_metadata(
     """Aggiorna i metadati del brano. Tutto o niente: si valida prima di scrivere."""
     who = " ".join(by.split()) if by else None
     if not who:
-        raise MusicMetaError("Serve il nome di chi modifica (--by).", details={"campo": "by"})
+        raise MusicMetaError("Serve il nome di chi modifica (--by).", error_type="ByRequired", details={"campo": "by"})
     if len(who) > MAX_BY:
         raise MusicMetaError(f"--by troppo lungo (massimo {MAX_BY} caratteri).", details={"campo": "by"})
     target = track.path.with_suffix(".json")
