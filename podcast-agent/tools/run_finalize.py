@@ -12,7 +12,7 @@ from __future__ import annotations
 import argparse
 import json
 
-from _common import add_config_arg, bootstrap, emit, note, resolve_path, run_tool  # noqa: E402
+from _common import add_config_arg, add_trusted_paths_arg, bootstrap, documents_confined, emit, file_arg, note, parse_args, run_dir_arg, run_tool  # noqa: E402
 from src.pdf_reader import locate_document  # noqa: E402
 from src.registry import VoiceRegistry  # noqa: E402
 from src.run_layout import archive_source_document, write_voices_used  # noqa: E402
@@ -28,14 +28,15 @@ def main() -> None:
         default=None,
         help="JSON speaker -> file audio di riferimento (da voices_prepare.py)",
     )
+    add_trusted_paths_arg(parser)
     add_config_arg(parser)
-    args = parser.parse_args()
+    args = parse_args(parser)
 
     config = bootstrap(args)
-    run_dir = resolve_path(args.run_dir)
-    voice_map = json.loads(resolve_path(args.voices).read_text(encoding="utf-8"))
+    run_dir = run_dir_arg(args.run_dir, config)
+    voice_map = json.loads(file_arg(args.voices, config, args, "voices").read_text(encoding="utf-8"))
     audio_paths = (
-        json.loads(resolve_path(args.audio_paths).read_text(encoding="utf-8"))
+        json.loads(file_arg(args.audio_paths, config, args, "audio_paths").read_text(encoding="utf-8"))
         if args.audio_paths
         else {}
     )
@@ -46,12 +47,15 @@ def main() -> None:
     )
     # Stessa ricerca di doc_extract.py: un nome nudo va cercato in documents_dir,
     # non risolto contro la working directory.
-    source = locate_document(args.document, search_dir=config.documents_dir)
+    source = locate_document(
+        args.document, search_dir=config.documents_dir, confined=documents_confined(args)
+    )
     source_note = archive_source_document(source, run_dir)
     note(f"Run chiusa: {run_dir}")
 
     emit(
         {
+            "run": run_dir.name,
             "run_dir": str(run_dir),
             "voci_usate": str(voices_file),
             "documento": source_note,

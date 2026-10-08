@@ -12,6 +12,7 @@ Il provider vocale e' il FakeProvider: nessuna chiamata a pagamento.
 
 from __future__ import annotations
 
+import importlib.util
 import json
 import math
 import os
@@ -27,6 +28,7 @@ sys.path.insert(0, str(PROJECT_ROOT))
 
 from src.ffmpeg_tool import find_ffmpeg  # noqa: E402
 from src.music_library import MusicLibrary  # noqa: E402
+from src.registry import file_hash  # noqa: E402
 from src.script_session import ScriptSession  # noqa: E402
 
 PYTHON = str(PROJECT_ROOT / ".venv" / "bin" / "python")
@@ -232,7 +234,7 @@ def prepare_run(root: Path, config: Path, title: str = "Prova musiche") -> Path:
     voices_json = run_dir / "voci.json"
     code, out, err = tool(
         "voices_prepare.py", "--speakers", "Mario Rossi", "Giulia Bianchi",
-        "--out", str(voices_json), "--no-approval-gate", config=config,
+        "--out", str(voices_json), "--no-approval-gate", "--no-consent-gate", config=config,
     )
     check(f"voices_prepare ({title})", code == 0, err)
     return run_dir
@@ -262,7 +264,17 @@ def main() -> None:
     check("exit 0 senza musica e senza ffmpeg", code == 0, err)
     check("nessuna chiave musiche nell'output", "voice_offset_seconds" not in out, str(out))
     check("output prodotto", Path(out["output"]).is_file())
-    check("formato mp3 (via lameenc, ffmpeg disabilitato)", out["format"] == "mp3", str(out))
+    # lameenc e' una dipendenza OPZIONALE (commentata in requirements.txt):
+    # con ffmpeg disabilitato l'mp3 si ottiene solo se c'e'. Senza, il
+    # comportamento documentato e' il ripiego su WAV con un avviso esplicito.
+    if importlib.util.find_spec("lameenc") is not None:
+        check("formato mp3 (via lameenc, ffmpeg disabilitato)", out["format"] == "mp3", str(out))
+    else:
+        check(
+            "senza lameenc ne' ffmpeg: ripiego su WAV, con avviso",
+            out["format"] == "wav" and any("WAV invece che in MP3" in w for w in out["warnings"]),
+            str(out),
+        )
     check("tts_calls == 4 (tutti i turni)", out["tts_calls"] == 4, str(out))
 
     # ------------------------------------------------------------------
@@ -418,6 +430,7 @@ def main() -> None:
     # ------------------------------------------------------------------
     piano_path = root / "musiche" / "sottofondo" / "Piano.wav"
     original_piano = piano_path.read_bytes()
+    sha256_before_swap = file_hash(piano_path)
     make_wav(piano_path, 2.0, 700, amp=6500)  # stesso nome, contenuto diverso -> sha256 diverso
 
     code, out, err = tool("mix.py", "--run-dir", str(run_dir), "--no-approval-gate", config=config)
@@ -430,9 +443,10 @@ def main() -> None:
     check("--accept-changed-music -> exit 0", code == 0, err)
     usate_after = json.loads(Path(out["musiche_usate_file"]).read_text(encoding="utf-8"))
     check(
-        "musiche_usate.json aggiornato con il nuovo sha256",
-        usate_after["sottofondo"]["sha256"] != usate.get("sottofondo", {}).get("sha256", "diverso-di-default")
-        or True,  # il valore esatto non conta, conta che non sollevi piu' l'errore
+        "musiche_usate.json aggiornato con lo sha256 del brano nuovo",
+        usate_after["sottofondo"]["sha256"] == file_hash(piano_path)
+        and usate_after["sottofondo"]["sha256"] != sha256_before_swap,
+        f"{usate_after['sottofondo']} contro {file_hash(piano_path)}",
     )
     piano_path.write_bytes(original_piano)  # ripristino
     tool("mix.py", "--run-dir", str(run_dir), "--no-approval-gate", "--accept-changed-music", config=config)
@@ -461,7 +475,8 @@ def main() -> None:
     )
     check("retake --with-music: exit 0", code == 0, err)
     check("previews_with_music popolato", len(out.get("previews_with_music", [])) == 1, str(out))
-    check("anteprima con musica esiste", Path(out["previews_with_music"][0]).is_file())
+    # percorso relativo alla cartella che contiene output/ (mai assoluto)
+    check("anteprima con musica esiste", (Path(run_dir).parent.parent / out["previews_with_music"][0]).is_file())
     new_take = out["new_takes"][0]
 
     code, out, err = tool("retake.py", "--run-dir", str(run_dir), "--choose", f"1={new_take}", config=config)

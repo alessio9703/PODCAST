@@ -20,9 +20,13 @@ Prima di aggiungere un file in quella cartella, assicurati che:
 - la persona sappia che la sua voce verrà clonata e usata per generare parlato
   che non ha mai pronunciato;
 - sappia in che contesto verrà pubblicato il risultato;
-- possa revocare il consenso — in quel caso vanno cancellati sia il file audio,
-  sia la voce clonata sul provider, sia la riga corrispondente in
-  `voices_registry.json`.
+- possa revocare il consenso — in quel caso **prima** si registra la revoca
+  (`tools/voice_meta.py --name NOME --revoke-consent --by CHI`, o dall'interfaccia),
+  **poi** si cancellano il file audio e la voce clonata sul provider. La revoca
+  resta scritta in `voices_registry.json` (sotto `__revoche__`, con il `voice_id`
+  e lo sha256 della registrazione) anche dopo aver cancellato i file: la stessa
+  registrazione ricaricata risulta ancora revocata, e i retake e i rimontaggi
+  degli episodi vecchi non usano più quella voce.
 
 Le voci clonate vengono create come **private** sul provider (`visibility:
 private` in `config.yaml`). Verifica comunque i termini di servizio del
@@ -92,11 +96,11 @@ package manager) invece di quello del pacchetto pip, va bene lo stesso:
 | Variabile | Obbligatoria? | Dove si ottiene | A cosa serve |
 |---|---|---|---|
 | `FISH_AUDIO_API_KEY` | **sì** | <https://fish.audio/app/api-keys/> | clonazione voci + sintesi |
-| `ANTHROPIC_API_KEY` | solo per `run.py` | <https://console.anthropic.com/settings/keys> | far scrivere il copione all'API |
+| `ANTHROPIC_API_KEY` | per `run.py` e per l'interfaccia web | <https://console.anthropic.com/settings/keys> | far scrivere e rivedere il copione all'API; proposte di lezioni |
 
-**La chiave Anthropic serve solo alla CLI classica.** Con il subagent
-`@podcast-agent` il copione lo scrive l'agente stesso in conversazione, quindi basta la
-chiave di Fish Audio. Attenzione: `ANTHROPIC_API_KEY` è una chiave API a consumo,
+**La chiave Anthropic serve alla CLI classica e all'interfaccia web** (scrittura e
+revisione del copione, `lessons.py --propose`). Con il subagent `@podcast-agent` il
+copione lo scrive l'agente stesso in conversazione, quindi basta la chiave di Fish Audio. Attenzione: `ANTHROPIC_API_KEY` è una chiave API a consumo,
 **diversa dall'abbonamento Claude Pro/Max** — averlo non la include.
 
 Vanno nel file `.env` (non committarlo). Il nome della variabile per il
@@ -114,12 +118,18 @@ documenti/
 └── nota-interna.docx
 ```
 
-- Formati letti: **PDF**, **DOCX**, **TXT**, **MD** (`.markdown`, `.rst`).
+- Formati letti: **PDF**, **DOCX** (`python-docx`, dipendenza obbligatoria), **TXT**,
+  **MD** (`.markdown`, `.rst`).
 - Se il file è lì dentro, **basta il nome**: `python run.py report-q3.pdf`, o
   `@podcast-agent trasforma report-q3.pdf in un episodio...`. Vale sia per la
   CLI sia per il subagent.
-- Un percorso completo continua a funzionare da qualunque cartella: `documenti/`
-  è una comodità, non un vincolo.
+- **I comandi di `tools/` leggono solo da `documenti/`** (e mai file nascosti o senza
+  un'estensione gestita): è quello che usa l'interfaccia web. Un percorso libero resta
+  possibile con `run.py` e, nei tool, con `--trusted-paths` (solo uso locale: il
+  subagent lo usa, l'interfaccia web no).
+- Limiti (sezione `documents:` di `config.yaml`): 20 MB, 500 pagine, 2 milioni di
+  caratteri, e limiti di lavoro per PDF e DOCX costruiti apposta (contenuto delle pagine,
+  parti XML, 60 secondi di estrazione). Oltre: errore `DocumentTooLarge`.
 - La cartella è in `.gitignore` (resta solo il `.gitkeep`): i documenti sono tuoi
   e non finiscono nel repo.
 - Si sposta da `config.yaml` → `paths.documents_dir`.
@@ -152,6 +162,37 @@ voci_disponibili/
 L'agente **non inventa nomi**: se scrivi un nome che non corrisponde a nessun
 file ti mostra le corrispondenze possibili e ti chiede quale intendevi, invece
 di indovinare.
+
+### Il consenso, registrato accanto alla registrazione
+
+Una voce **si clona solo se il consenso della persona è registrato**, in
+`voci_disponibili/<Nome>.json` accanto all'audio:
+
+```bash
+.venv/bin/python tools/voice_meta.py --name "Mario Rossi" --consent --by "chi conferma"
+.venv/bin/python tools/voice_meta.py --name "Mario Rossi" --revoke-consent --by "chi revoca"
+```
+
+- Il consenso vale per **quella** registrazione (se ne salva lo sha256): se il file viene
+  sostituito, va riconfermato.
+- Il consenso è una proprietà della **voce**, non dell'episodio. Dall'interfaccia web
+  anche il **riuso** di una voce già clonata richiede il consenso registrato: le voci
+  clonate prima del consenso (o fuori dal controllo) risultano "consenso da
+  confermare" (`consenso.da_confermare: true`) e si confermano una volta. In locale
+  (subagent, `voices_prepare.py`) una voce già clonata si riusa senza chiederlo di
+  nuovo.
+- In `run.py` il consenso si chiede (una volta, e si registra) sia per una voce da clonare
+  sia per una già clonata da riusare.
+- Una voce **revocata** non si clona, non si riusa, non si rimonta, in ogni modalità
+  (anche in `run.py`). Un nuovo consenso sulla **stessa** registrazione toglie la
+  revoca; una registrazione diversa con lo stesso nome non rende di nuovo usabile la
+  voce clonata revocata.
+- Senza consenso `voices_prepare.py` e `produce.py` escono con codice `3`
+  (`ConsentRequired`) **senza clonare niente**. L'unico modo di saltare il controllo è
+  `--no-consent-gate` di `voices_prepare.py`, per l'uso manuale: mai in una sessione con
+  l'utente, rifiutato dall'interfaccia web.
+- Nello stesso file si può confermare il nome come va pronunciato:
+  `voice_meta.py --name "Voce Mario" --spoken-name "Mario Rossi" --by "…"`.
 
 ### Cosa registrare: la gamma di pitch, non solo la voce
 
@@ -246,6 +287,9 @@ LIL.json`:
   ha `parlato: true`, il copione non ripete quello che l'intro dice già (vedi
   `prompts/copione.md`). Per il **sottofondo**, `parlato: true` è un errore
   di dominio: il sottofondo deve essere solo musica.
+- Si possono scrivere a mano o con `tools/music_meta.py --category intro --name
+  "Sigla LIL" --licenza "…" --by "…"` (stesse regole, scrittura sotto lock, con chi e
+  quando ha dichiarato la licenza).
 
 ### Come si sceglie
 
@@ -360,6 +404,35 @@ Il flusso è:
 
 ---
 
+## Uso dall'interfaccia web
+
+Il progetto è pronto per un'interfaccia web (le schermate sono in `docs/wireframe/wireframe/`).
+Server, accessi, caricamenti e coda dei lavori stanno in un **adattatore separato**, che
+chiama i comandi di `tools/` come sottoprocessi e legge il loro JSON. Il contratto
+completo, schermata per schermata, è in
+**[docs/CONTRATTO_INTERFACCIA.md](docs/CONTRATTO_INTERFACCIA.md)**.
+
+| Schermata | Comandi principali |
+|---|---|
+| Archivio | `runs_list.py`, `run_status.py` (stato derivato da file e lock) |
+| 1 · Documento, 2 · Cast, 3 · Musiche | `run_init.py`, `episode_config.py`, `music_set.py` |
+| 4 · Copione e Confronto | `script_write.py`, `script_show.py`, `script_edit.py`, `script_revise.py`, `script_versions.py`, `script_approve.py --version V` |
+| 5 · Stima e consenso | `estimate.py --run-dir`, `voice_meta.py --consent` |
+| 6 · Generazione | `produce.py --events` (eventi JSONL, interruzione pulita e ripresa) |
+| 7 · Episodio | `episode_info.py`, `waveform.py`, `retake.py` (indicazioni di resa da `config.yaml`), `mix.py` |
+| Documenti, Voci, Musiche | `documents_list.py`, `voices_list.py` + `voice_meta.py`, `music_list.py` + `music_meta.py` |
+| Lezioni, Impostazioni, Diagnostica | `lessons.py`, `settings_show.py`, `doctor.py` |
+
+L'adattatore lancia sempre i comandi con **`PODCAST_AGENT_WEB=1`**: in questa modalità i
+comandi rifiutano gli argomenti riservati all'uso locale (`--config`, `--trusted-paths`,
+`--no-approval-gate`, `--no-consent-gate`, i file passati per percorso…). Alcune risposte
+contengono ancora percorsi assoluti (`run_dir`, `session_file`…) per il subagent: il
+contratto elenca i campi che l'adattatore non mostra, e quelli relativi da usare (`run`,
+`output/<run>/…`). Le garanzie di sempre restano nei
+comandi, non nell'adattatore: gate di approvazione sullo sha256, consenso prima di ogni
+clonazione, nessun retry sulla clonazione, nomi mai indovinati, percorsi confinati alle
+cartelle del progetto, lock e scritture atomiche per più utenti.
+
 ## Uso come subagent Claude Code
 
 Oltre alla CLI, il progetto è un **subagent di Claude Code**: invece di rispondere a una
@@ -387,10 +460,11 @@ qualunque parte lo generi. Python lo **valida e lo persiste**, non lo genera.
 | `tools/voices_list.py` | elenca le voci, risolve i nomi (senza mai indovinare) |
 | `tools/run_init.py` | crea `output/<data>_<titolo>/` |
 | `tools/script_save.py` | valida e salva il copione scritto dall'agente |
-| `tools/script_approve.py` | registra il sì dell'utente sul copione |
+| `tools/script_approve.py` | registra il sì dell'utente sul copione (`--current` o `--version V`) |
+| `tools/voice_meta.py` | consenso e nome pronunciato di una voce |
 | `tools/music_list.py` | elenca le musiche disponibili, risolve i nomi |
 | `tools/music_set.py` | sceglie intro/outro/sottofondo per la run (gratis) |
-| `tools/voices_prepare.py` | riusa dalla cache o clona |
+| `tools/voices_prepare.py` | riusa dalla cache o clona (solo con il consenso registrato) |
 | `tools/estimate.py` | caratteri, durata (incluse le musiche), costo |
 | `tools/synthesize.py` | sintesi + montaggio (+ mix, se ci sono musiche) |
 | `tools/mix.py` | rifà solo il mix dalla cache, zero chiamate TTS |
@@ -422,8 +496,11 @@ Gli exit code distinguono i casi che l'agente deve trattare diversamente:
 
 I vincoli del progetto sono scritti come regole non negoziabili nel prompt dell'agente
 (`.claude/agents/podcast-agent.md`): niente nomi di voce indovinati su corrispondenza
-parziale, nessun retry sulla clonazione, e il promemoria sul consenso ogni volta che una
-voce viene clonata per la prima volta.
+parziale, nessun retry sulla clonazione, il consenso chiesto all'utente e registrato
+prima di clonare, e il promemoria ogni volta che una voce viene clonata per la prima
+volta. Il subagent passa `--trusted-paths` a `doc_extract.py` e `run_finalize.py`, perché
+lavora anche con documenti fuori da `documenti/`. Gli altri comandi dell'interfaccia
+(tabella sopra) funzionano anche a mano.
 
 ### Il checkpoint di approvazione non è una regola d'onore
 
@@ -431,9 +508,10 @@ Nella CLI è il ciclo `while` di `run.py` a non lasciarti proseguire. Con il sub
 ciclo non c'è, quindi l'approvazione è uno **stato sul disco legato ai byte del copione**:
 
 1. `script_save.py` salva ogni versione con `approved: null`;
-2. dopo il tuo sì, `script_approve.py` registra l'approvazione **insieme allo sha256 del
-   copione approvato**;
-3. `voices_prepare.py` e `synthesize.py` — i due passi che spendono — confrontano
+2. dopo il tuo sì, `script_approve.py --current` (o `--version V`) registra
+   l'approvazione **insieme allo sha256 del copione approvato**; senza uno dei due flag
+   non approva niente;
+3. `voices_prepare.py`, `synthesize.py`, `produce.py`, `retake.py` e `mix.py` confrontano
    quell'hash con il copione che stanno per usare, e si rifiutano di partire se non
    corrisponde.
 
@@ -509,6 +587,13 @@ output/2026-09-13_10-30_titolo-episodio/
 ├── voci_usate.json                # speaker -> voice_id, hash e data di clonazione
 ├── musiche.json                   # intro/outro/sottofondo scelti (se ci sono)
 ├── musiche_usate.json             # brani usati: hash, durata, licenza, voice_offset_seconds
+├── episodio.json                  # interfaccia web: titolo, documento, formato, cast, durata
+├── _script_session.json           # versioni del copione, revisioni, approvazione (sha256)
+├── documento_estratto.txt         # il testo del documento usato per il copione
+├── voci.json, _audio_paths.json   # voci della run (speaker -> voice_id) e registrazioni
+├── _montaggio.json                # cosa c'e' nel file finale: copione, take, musiche, sezioni
+├── _eventi.jsonl                  # avanzamento dell'ultima produzione (produce.py --events)
+├── _forma_onda_<N>.json           # picchi della forma d'onda (cache legata allo sha256)
 ├── documento_originale.pdf        # copia del documento di partenza
 ├── _tempi_turni.json              # durata e posizione di ogni turno NEL MASTER DI SOLA VOCE
 ├── _sintesi_log.json              # QUANDO l'episodio e' stato sintetizzato, con quale copione
@@ -708,7 +793,19 @@ podcast-agent/
 │   ├── music_mixer.py            # mix di intro/outro/sottofondo (unico modulo che parla ffmpeg per il mix)
 │   ├── segment_cache.py          # rilettura della cache dei segmenti di una run (retake, mix)
 │   ├── episode_timeline.py       # dal minutaggio dell'episodio alla battuta
-│   └── retake.py                 # nuovi take di una battuta, a parità di testo
+│   ├── retake.py                 # nuovi take di una battuta, a parità di testo (+ indicazioni di resa)
+│   ├── errors.py  fileio.py  paths.py  redaction.py   # esiti strutturati, lock e scritture atomiche,
+│   │                             #   percorsi confinati, niente percorsi del server nei messaggi
+│   ├── episode_config.py  episode_setup.py            # passi 1-2: episodio.json, cast, documento
+│   ├── script_authoring.py  script_editing.py  script_view.py  script_diff.py  script_rules.py
+│   │                             # passo 4 e Confronto: stesura, modifiche, vista, confronto, regole
+│   ├── run_lock.py               # lock di lavoro di una run: lo stato "in corso" si deriva da qui
+│   ├── voice_meta.py  voice_prep.py  voice_catalog.py # consenso, preparazione delle voci, libreria Voci
+│   ├── production.py             # passi 5-6: stima per la run, produzione con eventi, montaggio
+│   ├── episode_info.py  waveform.py                   # passo 7: schermo Episodio, forma d'onda
+│   ├── run_state.py              # Archivio: stato derivato di ogni run
+│   ├── document_library.py  music_meta.py  music_catalog.py  hash_cache.py  # librerie
+│   └── settings_view.py          # Impostazioni (whitelist, sola lettura)
 ├── tools/                        # entry-point CLI richiamati dal subagent
 │   ├── _common.py                # JSON su stdout, exit code tipizzati
 │   ├── _approval.py              # gate: niente clonazione/sintesi senza il sì
@@ -716,12 +813,22 @@ podcast-agent/
 │   └── doc_extract.py  voices_list.py  music_list.py  music_set.py  run_init.py
 │       script_save.py  script_approve.py  script_write.py  script_revise.py
 │       voices_prepare.py  estimate.py  synthesize.py  mix.py  turn_at.py
-│       retake.py  run_finalize.py
+│       retake.py  run_finalize.py  signals.py  lessons.py
+│       episode_config.py  script_show.py  script_edit.py  script_versions.py
+│       voice_meta.py  produce.py  episode_info.py  waveform.py
+│       runs_list.py  run_status.py  documents_list.py  music_meta.py  settings_show.py
 ├── tests/
 │   ├── fake_provider.py          # provider finto (toni sinusoidali)
-│   ├── test_smoke.py             # 51 controlli end-to-end
-│   ├── test_tools_cli.py         # 171 controlli sui CLI del subagent
-│   └── test_music.py             # controlli su intro/outro/sottofondo (skip se manca ffmpeg)
+│   ├── fake_anthropic.py         # client Anthropic finto: i test non chiamano mai l'API
+│   ├── test_smoke.py             # 68 controlli end-to-end
+│   ├── test_tools_cli.py         # 190 controlli sui CLI del subagent
+│   ├── test_music.py             # 73 controlli su intro/outro/sottofondo
+│   ├── test_lessons.py           # 80 controlli su segnali e lezioni
+│   └── test_web_integration.py   # 860 controlli sull'integrazione web (C0-C7)
+├── docs/
+│   ├── CONTRATTO_INTERFACCIA.md  # il contratto per l'adattatore web
+│   ├── wireframe/                # le schermate dell'interfaccia
+│   └── avanzamento/              # stato del lavoro, resoconti e revisioni di sicurezza
 └── README.md
 ```
 
@@ -743,6 +850,10 @@ podcast-agent/
 | `music.bed_level_db` | quanto il sottofondo sta sotto la voce (dB, negativo) |
 | `music.ducking` | se il sottofondo si abbassa ulteriormente mentre si parla (default `false`) |
 | `music.target_lufs` / `music.true_peak_db` | loudness e picco target del file finale |
+| `documents.*` | limiti sui documenti di partenza (dimensione, pagine, caratteri, lavoro, tempo) |
+| `retake.indicazioni` / `retake.max_takes` | indicazioni di resa ammesse nei retake (indicazione → tag) e take per volta |
+| `providers.<nome>.clone_cost_usd` | costo di una clonazione per la stima; `null` = non noto |
+| `currency.eur_per_usd` / `currency.rate_date` | cambio datato per mostrare la stima in euro; senza, solo dollari |
 
 ---
 
@@ -774,7 +885,15 @@ silenzio — nei casi seguenti:
 - un sottofondo ha `parlato: true` nei metadati → errore di dominio: il
   sottofondo deve essere solo musica;
 - un brano già registrato in `musiche_usate.json` è stato sostituito → si
-  ferma e chiede `--accept-changed-music` per procedere.
+  ferma e chiede `--accept-changed-music` per procedere;
+- consenso mancante, superato o revocato → si ferma **senza clonare niente**
+  (`ConsentRequired`); una clonazione finita male non si ritenta da sola
+  (`CloneOutcomeUnknown`, si conferma dopo aver controllato sul provider);
+- documento troppo grande o costruito apposta per occupare l'estrazione →
+  `DocumentTooLarge`.
+
+L'elenco completo degli esiti (`error_type` stabili, exit code e cosa fa l'interfaccia)
+è nel §3 di [docs/CONTRATTO_INTERFACCIA.md](docs/CONTRATTO_INTERFACCIA.md).
 
 ---
 
@@ -782,8 +901,9 @@ silenzio — nei casi seguenti:
 
 Due chiamate a pagamento per episodio:
 
-- **Claude** — solo con `run.py`: una chiamata per la prima stesura, una per ogni
-  revisione. Con il subagent il copione lo scrive l'agente, quindi questa voce sparisce.
+- **Claude** — con `run.py` e con l'interfaccia web: una chiamata per la prima stesura,
+  una per ogni revisione (più `lessons.py --propose`). Con il subagent il copione lo
+  scrive l'agente, quindi questa voce sparisce.
 - **Provider vocale** — clonazione (una tantum per voce, poi cache) + sintesi,
   che di norma si paga a caratteri.
 
@@ -791,5 +911,6 @@ Il checkpoint di revisione esiste apposta per non pagare la sintesi due volte:
 lo script si itera quanto serve, l'audio si genera una volta sola.
 
 E se dopo l'ascolto una battuta non va, si paga quella: la cache dei segmenti
-tiene tutto il resto. `estimate.py --run-dir` lo dice prima di spendere, e
+tiene tutto il resto. `estimate.py --run-dir` lo dice prima di spendere (anche il costo
+delle clonazioni, e in euro se c'è un cambio datato in `config.yaml`), e
 `retake.py --dry-run` fa lo stesso per un nuovo tentativo sulla stessa battuta.

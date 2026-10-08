@@ -40,7 +40,8 @@ podcast-agent/
 │   ├── providers/
 │   │   └── fish_audio_provider.py . unico file che conosce le API di Fish Audio
 │   ├── config.py .................. legge config.yaml e istanzia il provider dinamicamente
-│   ├── ffmpeg_tool.py .............. UNICO punto che cerca l'eseguibile ffmpeg
+│   ├── ffmpeg_tool.py .............. UNICO punto che cerca l'eseguibile ffmpeg; input_args():
+│   │                                 ogni file in ingresso con -protocol_whitelist file e -f
 │   ├── pdf_reader.py .............. documento -> testo
 │   ├── voice_library.py ........... cartella voci -> elenco + risoluzione dei nomi
 │   ├── music_library.py ........... cartella musiche -> elenco + risoluzione dei nomi
@@ -55,21 +56,27 @@ podcast-agent/
 │   ├── episode_timeline.py ........ dal minutaggio dell'episodio alla battuta
 │   ├── retake.py .................. nuovi take di una battuta, a parita' di testo
 │   ├── episode_signals.py ......... segnali per le lezioni (deterministico, gira dopo ogni sintesi)
-│   └── lessons.py .................. aggregazione + proposta (modello) + approvazione (SOLO l'utente)
+│   ├── lessons.py .................. aggregazione + proposta (modello) + approvazione (SOLO l'utente)
+│   └── (integrazione web) ......... vedi la sezione "Integrazione web" in fondo: errors, fileio,
+│                                    paths, redaction, episode_*, script_*, run_lock, voice_meta,
+│                                    voice_prep, production, episode_info, waveform, run_state, ...
 │
 ├── tools/ ......................... entry-point CLI: argparse + import, ZERO logica
 │   ├── _common.py ................. JSON su stdout, exit code tipizzati
 │   ├── _approval.py ............... il gate: niente spesa senza il si' dell'utente
 │   ├── doctor.py ................... diagnosi dell'installazione (Python, dipendenze, ffmpeg)
 │   └── (altri tool) ................ uno per passo, piu' turn_at.py/retake.py/mix.py
-│                                   per correggere una battuta o le musiche di un episodio gia' montato
+│                                   per correggere una battuta o le musiche di un episodio gia' montato;
+│                                   per l'interfaccia web: produce.py, episode_info.py, runs_list.py, ...
 │
 └── tests/
     ├── fake_provider.py ........... provider finto (toni sinusoidali) — anche da esempio
-    ├── test_smoke.py .............. 51 controlli sui moduli src/
-    ├── test_tools_cli.py .......... 171 controlli sui CLI del subagent
-    ├── test_music.py .............. controlli su intro/outro/sottofondo (skip esplicito se manca ffmpeg)
-    └── test_lessons.py ............ segnali e lezioni: mai sui file veri di prompts/
+    ├── fake_anthropic.py .......... client Anthropic finto: i test non chiamano mai l'API
+    ├── test_smoke.py .............. 68 controlli sui moduli src/
+    ├── test_tools_cli.py .......... 190 controlli sui CLI del subagent
+    ├── test_music.py .............. 73 controlli su intro/outro/sottofondo
+    ├── test_lessons.py ............ 80 controlli: segnali e lezioni, mai sui file veri di prompts/
+    └── test_web_integration.py .... 860 controlli sull'integrazione web
 ```
 
 Come si incastrano (le frecce vanno da "chi chiama" a "chi viene chiamato"):
@@ -745,25 +752,32 @@ resta visibile quando viene usato.
 
 | File | Importa da `src/` | Nota di manutenzione |
 |---|---|---|
-| `doc_extract.py` | `pdf_reader`, `config` | con `--save-to` scrive il testo su file per chi scrive il copione; un nome nudo lo cerca in `documenti/` |
+| `doc_extract.py` | `pdf_reader`, `config` | con `--save-to` scrive il testo su file per chi scrive il copione. Legge **solo da `documenti/`** (niente file nascosti o senza estensione gestita), con i limiti di `documents:`; il percorso libero solo con `--trusted-paths` (uso locale) |
 | `script_save.py` | `script_session`, `script_writer`, `music_library` | **valida** il copione scritto dal subagent: rifa' a mano i controlli che lo schema JSON garantiva. Vedi sotto. Alla prima stesura cattura anche `music_context` da `musiche.json` (solo intro/outro con `parlato: true`) |
-| `script_approve.py` | `script_session` | registra il si' dell'utente legandolo allo sha256 |
+| `script_approve.py` | `script_session` | registra il si' dell'utente legandolo allo sha256. **Serve `--version V` o `--current`**: un'approvazione senza versione e' rifiutata (`VersionRequired`); dall'interfaccia solo `--version` |
 | `voices_list.py` | `voice_library`, `registry` | **ritorna `match: null` sui parziali**: e' cosi' che la regola anti-indovinare sopravvive al passaggio a subagent |
 | `music_list.py` | `music_library` | elenca i brani, o risolve un nome. **Diverge da `voices_list.py`**: `--resolve CATEGORIA NOME` esce col codice 3 (ambiguo) o 1 (non trovato) invece di ritornare sempre `match: null` — e' esplicitamente richiesto perche' serve anche a `music_set.py`, che deve potersi fermare da solo senza un agente a interpretare `match: null` |
 | `music_set.py` | `music_library` | scrive `musiche.json`: gratis, nessuna approvazione. Stessa risoluzione dei nomi di `music_list.py`. `warnings[]` per i brani senza licenza |
 | `run_init.py` | `run_layout`, `script_session` | va chiamato prima del copione: la sessione vive nella cartella della run |
 | `script_write.py` | `script_writer`, `script_session` | percorso API (`run.py`), **non** usato dal subagent. Espone `build_writer()` e `report()` |
 | `script_revise.py` | `script_session` | idem: ricostruisce la conversazione dal disco |
-| `voices_prepare.py` | `config`, `registry`, `voice_library` | **nessun retry**; passa dal gate; `--dry-run` non spende quindi non lo richiede; scrive `_audio_paths.json` |
+| `voices_prepare.py` | `voice_prep` | **nessun retry**; passa dal gate; **consenso prima di ogni clonazione** (`ConsentRequired`, bypass solo `--no-consent-gate`); `--dry-run` non spende quindi non lo richiede; scrive `_audio_paths.json`. Non si usa dall'interfaccia web (lo fa `produce.py`) |
 | `estimate.py` | `cost_estimate`, `audio_assembler`, `music_library` | non spende: nessun gate. Con `--run-dir` conta solo i turni non in cache. Aggiunge `duration_with_music_seconds` (durata + intro/outro/pause) accanto a `duration_seconds` (solo parlato): NON sostituirle una con l'altra, restano entrambe apposta |
-| `synthesize.py` | `audio_assembler`, `music_mixer` | passa dal gate, poi `check_voice_coverage()`. Se `musiche.json` esiste, `preflight()` valida PRIMA della sintesi (ffmpeg, nomi, sha256), poi il mix e' l'ultimo passo. I segmenti restano: si cancellano solo con `--purge-segments` |
-| `mix.py` | `music_mixer`, `segment_cache`, `audio_assembler` | rifa' SOLO il mix dalla cache: zero chiamate TTS. Passa dal gate (verifica che l'episodio sia stato approvato, non che il mix lo sia — produce l'output finale ascoltabile). Distingue "nessun segmento" da "impronta di sintesi cambiata" (due cause, due messaggi) |
-| `turn_at.py` | `episode_timeline`, `music_mixer` | dal minutaggio DEL FILE FINALE alla battuta. Sottrae `voice_offset_seconds` da `musiche_usate.json` se esiste; un istante nell'intro/outro lo dice esplicitamente. Non tocca nessun provider; senza timeline dice di rimontare |
-| `retake.py` | `retake`, `audio_assembler`, `music_mixer` | nuovi take a parita' di testo. Passa dal gate; `--dry-run` no, perche' non spende. `--with-music` aggiunge un'anteprima con il sottofondo sotto (stessi parametri del mix vero, ma senza le dissolvenze ai bordi: l'anteprima e' quasi sempre a meta' episodio). Usa il `voice_id` di `voci.json` **della run** e non riclona mai |
+| `synthesize.py` | `production.render_episode`, `music_mixer` | passa dal gate, poi `check_voice_coverage()`. Se `musiche.json` esiste, `preflight()` valida PRIMA della sintesi (ffmpeg, nomi, sha256), poi il mix e' l'ultimo passo. I segmenti restano: si cancellano solo con `--purge-segments`. Non si usa dall'interfaccia web (lo fa `produce.py`) |
+| `mix.py` | `production.assemble_episode`, `segment_cache` | rimonta dalla cache, con le musiche o la sola voce: zero chiamate TTS. Sotto il lock di lavoro, gate sul copione che monta, nessuna voce revocata. Segmenti mancanti: `SegmentsMissing` |
+| `turn_at.py` | `episode_timeline`, `production` | dal minutaggio DEL FILE FINALE alla battuta. Sottrae `voice_offset_seconds` da `_montaggio.json` (o da `musiche_usate.json` per le run vecchie); un istante nell'intro/outro lo dice esplicitamente. Non tocca nessun provider; senza timeline dice di rimontare |
+| `retake.py` | `retake`, `audio_assembler`, `music_mixer` | nuovi take a parita' di testo. Passa dal gate (dentro il lock); `--dry-run` no, perche' non spende. `--direction` solo dalla whitelist `retake.indicazioni` (le tag vanno solo nel testo inviato per quei take). `--list` monta l'anteprima in contesto di ogni take senza sintesi. `--with-music` aggiunge il sottofondo. Usa il `voice_id` di `voci.json` **della run** e non riclona mai; niente voci revocate |
 | `run_finalize.py` | `run_layout`, `registry` | produce i dati del riepilogo finale |
 | `doctor.py` | `ffmpeg_tool`, `config` | diagnosi: Python, dipendenze, ffmpeg (e da dove), filtri richiesti, cartelle di config.yaml. **Non segue la convenzione 0/1/2/3**: l'exit code e' un riassunto di controlli (0/1), non la traduzione di un'eccezione |
 | `signals.py` | `episode_signals` | raccoglie i segnali di una run gia' sintetizzata e scrive `_segnali.json`. Gira gia' da solo dentro `synthesize.py`: serve per rilanciarla a mano. Nessun costo, nessuna approvazione |
-| `lessons.py` | `lessons`, `episode_signals` | `--evidence`/`--list`/`--review`/`--trend` non spendono e non scrivono `lezioni.md`. `--propose` chiama un modello (dichiara il costo prima) e scrive proposte in `prompts/_lezioni.json`. **Solo `--accept` scrive `prompts/lezioni.md`** |
+| `lessons.py` | `lessons`, `episode_signals` | `--evidence`/`--list`/`--review`/`--trend` non spendono e non scrivono `lezioni.md`. `--propose` chiama un modello (dichiara il costo prima) e scrive proposte in `prompts/_lezioni.json`. **Solo `--accept` scrive `prompts/lezioni.md`**. Registro sotto lock e scritture atomiche; testo di una lezione al massimo 400 caratteri; `--by` (obbligatorio dall'interfaccia) |
+| `episode_config.py` | `episode_config`, `episode_setup` | passi 1-2: titolo, documento, formato, durata, voci, nomi, descrizioni in `episodio.json`. Cambiare il cast dopo l'approvazione la ritira |
+| `script_show.py` / `script_edit.py` / `script_versions.py` | `script_view`, `script_editing`, `script_diff` | passo 4 e Confronto: copione strutturato, modifica di una battuta, versioni, confronto, ripristino (= nuova versione da riapprovare) |
+| `voice_meta.py` | `voice_meta`, `voice_prep` | consenso (con lo sha256 della registrazione; `--expect-sha256`), revoca, nome pronunciato, `--confirm-clone-retry` dopo una clonazione dall'esito incerto |
+| `produce.py` | `production` | passo 6 per intero, sotto il lock di lavoro: gate, musiche, voci (consenso), sintesi, montaggio, mix, chiusura. Eventi JSONL in `_eventi.jsonl`, interruzione pulita (SIGTERM) e ripresa. Nessun flag di bypass |
+| `episode_info.py` / `waveform.py` | `episode_info`, `waveform` | passo 7: stato derivato, sezioni, trascrizione con i tempi del file finale, file; picchi della forma d'onda in cache |
+| `runs_list.py` / `run_status.py` | `run_state` | Archivio: stato derivato di ogni run da file e lock |
+| `documents_list.py` / `music_meta.py` / `settings_show.py` | `document_library`, `music_meta`, `music_catalog`, `settings_view` | librerie Documenti e Musiche, impostazioni in sola lettura (whitelist) |
 
 #### I controlli di `script_save.py`
 
@@ -1060,8 +1074,11 @@ code**. Copre anche i tre vincoli che devono sopravvivere al passaggio a subagen
 *prima* della sintesi. Piu' il round-trip di `ScriptSession` (salva → ricarica → le
 istruzioni precedenti sono ancora nel contesto), senza chiamare l'API.
 
-I due tool che parlano con Claude vengono saltati con uno skip esplicito se manca
-`ANTHROPIC_API_KEY`, per non spendere in CI.
+I due tool che parlano con Claude (`script_write.py`, `script_revise.py`) girano con il
+client finto `tests/fake_anthropic.py`, e le chiavi API vengono tolte dall'ambiente dei
+tool. La prova contro l'API vera parte solo con `PODCAST_E2E_REALE=1` (e la chiave
+presente): senza quel flag è saltata anche se `ANTHROPIC_API_KEY` è esportata, perché
+spende.
 
 La sezione `[15]` copre la correzione di una battuta end-to-end, contando le
 chiamate al TTS finte una per una: seconda sintesi identica a zero chiamate,
@@ -1236,6 +1253,24 @@ esplicitamente alle funzioni di `src/lessons.py` — per questo prendono
     `PATTERN_CATEGORIES`.** Se ci riuscisse, `--review` non lo ritroverebbe
     mai piu' e la lezione resterebbe non verificabile per sempre — per questo
     la validazione e' nel tool, non solo nel prompt del modello.
+24. **Non chiamare `parser.parse_args()` in un tool.** Si passa da
+    `_common.parse_args()`, che applica la modalita' web; un tool che lo salta, in
+    modalita' web, non parte (`bootstrap()` lo rifiuta).
+25. **Non accettare un percorso da input senza `src/paths.py`.** `--run-dir` solo
+    sottocartelle dirette di `output/`, documenti solo da `documenti/`, file solo dentro
+    `output/` (salvo `--trusted-paths`, uso locale).
+26. **Non salvare uno stato che si puo' derivare.** "In corso" viene dal lock di
+    lavoro, "pronto" dal confronto fra `_montaggio.json` e la run: un campo salvato
+    resterebbe vero dopo un crash.
+27. **Non clonare senza ricontrollare il consenso sui byte che si mandano.**
+    `prepare_voices` legge la registrazione una volta, ricontrolla il consenso su quello
+    sha256 e clona da una copia privata: controllare prima e clonare poi dal file della
+    libreria lascerebbe una finestra per una revoca o una sostituzione.
+28. **Non scrivere un file condiviso senza lock e senza rilettura dentro il lock.**
+    Registro delle voci, metadati di voci e brani, registro delle lezioni: con
+    l'interfaccia web ci lavorano piu' persone (`src/fileio.py`).
+29. **Non far arrivare testo libero al sintetizzatore fuori dal copione approvato.** I
+    retake aggiungono solo tag della whitelist `retake.indicazioni`.
 
 
 ---
@@ -1348,3 +1383,43 @@ quella costante va rigenerata, altrimenti la suite fallisce.
 `tools/script_save.py` dov'erano: servono sia alla validazione sia alla stima
 della durata, e due copie dello stesso pattern sarebbero divergiute alla prima
 modifica. `tools/` resta argparse + import, come da regola d'oro.
+
+
+---
+
+## Integrazione web
+
+Il lavoro per l'interfaccia web (fasi C0-C5, resoconti in `docs/avanzamento/`) ha
+aggiunto moduli in `src/` e comandi in `tools/` senza cambiare il comportamento di
+`run.py` e del subagent. Il contratto per l'adattatore e' in
+`docs/CONTRATTO_INTERFACCIA.md`.
+
+| Modulo | A cosa serve |
+|---|---|
+| `src/errors.py` | `DomainError`, `NeedsUserDecision`, `AmbiguousName`: esiti con `error_type` stabile e `details` |
+| `src/fileio.py` | lock fra processi (`file_lock`, `is_locked`), scritture atomiche, `atomic_output` per i file scritti da ffmpeg |
+| `src/paths.py` | percorsi da input confinati (`confine_run_dir`, `confine_to`, `PathNotAllowed`) |
+| `src/redaction.py` | toglie i percorsi del server da errori, stderr ed eventi |
+| `src/run_lock.py` | lock di lavoro di una run (`RunBusy`), `current_work` senza pid |
+| `src/episode_config.py`, `src/episode_setup.py` | `episodio.json` dei passi 1-2: documento, formato, cast, durata; ritiro dell'approvazione su cambio di cast |
+| `src/script_authoring.py`, `script_editing.py`, `script_view.py`, `script_diff.py`, `script_rules.py` | passo 4 e Confronto: stesura e revisione via API, modifica di una battuta, ripristino, vista strutturata, confronto parola per parola, regole condivise |
+| `src/voice_meta.py` | `voci_disponibili/<nome>.json`: consenso (legato allo sha256 della registrazione), revoca, nome pronunciato |
+| `src/voice_prep.py` | piano delle voci, `ConsentRequired`, clonazione senza retry e una per voce alla volta, `CloneOutcomeUnknown` |
+| `src/production.py` | stima per la run (passo 5), `render_episode`/`assemble_episode`, `produce` con eventi e interruzione, `_montaggio.json` |
+| `src/episode_info.py`, `src/waveform.py` | schermo "Episodio" e forma d'onda (ffmpeg, cache legata allo sha256) |
+| `src/run_state.py` | Archivio: stato derivato di ogni run |
+| `src/document_library.py`, `src/voice_catalog.py`, `src/music_meta.py`, `src/music_catalog.py`, `src/hash_cache.py` | librerie Documenti, Voci, Musiche; cache di sha256 e durate |
+| `src/settings_view.py` | impostazioni in sola lettura, whitelist |
+
+**Modalita' web.** Con `PODCAST_AGENT_WEB=1` (sempre, dall'adattatore) i tool rifiutano
+gli argomenti riservati all'uso locale (`NotAllowedInWebMode`), `voices_prepare.py` e
+`synthesize.py` non partono, e gli elenchi delle librerie non danno percorsi del server
+ne' `voice_id`. Altre risposte tengono campi assoluti per il subagent (`run_dir`,
+`session_file`...): il contratto elenca quelli che l'adattatore non mostra. L'elenco e' `WEB_FORBIDDEN_ARGS` in
+`tools/_common.py`: un flag di bypass nuovo va aggiunto li'.
+
+**Revisioni di sicurezza.** A fine di ogni fase il subagent
+`.claude/agents/security-reviewer.md` ha scritto un rapporto
+(`docs/avanzamento/<fase>-sicurezza.md`); ogni rapporto ha in fondo l'esito delle
+correzioni.
+

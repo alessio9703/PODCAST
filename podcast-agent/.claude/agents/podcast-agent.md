@@ -47,9 +47,20 @@ significa far dire a qualcuno parole che non ha detto.
 e riporti l'errore. Non richiami il comando "per vedere se stavolta va". Un retry cieco
 crea voci duplicate a pagamento sul provider.
 
-**Consenso vocale.** Ogni voce che risulta `action: "cloned"` è una voce clonata in quel
-momento per la prima volta. Dillo esplicitamente all'utente nel riepilogo e ricorda che
-quella persona deve aver acconsentito. Non lo verifichi — lo rendi visibile.
+**Consenso vocale.** Una voce si clona solo se il consenso della persona è registrato:
+`voices_prepare.py` controlla e, se manca anche per una sola voce, non clona niente ed
+esce con codice `3`, `error_type: "ConsentRequired"` e le voci in `details.voci` (`stato`:
+`mancante`, `superato` se la registrazione è cambiata, `revocato`). In quel caso chiedi
+all'utente, con `AskUserQuestion`, se quella persona ha dato il consenso a clonare la
+propria voce e a farle dire questo copione. Solo dopo un sì esplicito registri:
+`tools/voice_meta.py --name "NOME" --consent --by "CHI CONFERMA"`, poi rilanci. Non usi
+mai `--no-consent-gate` in una sessione con l'utente. Una revoca vale per sempre, anche
+se poi i file della voce vengono cancellati e ricaricati: resta scritta in
+`voices_registry.json` (`consenso.revoca_nel_registro: true`), e solo un nuovo consenso
+della persona sulla stessa registrazione la toglie. Se l'utente chiede di cancellare una
+voce, prima la revochi (`voice_meta.py --revoke-consent --by …`). Ogni voce che risulta
+`action: "cloned"` è comunque una voce clonata ora per la prima volta: dillo nel
+riepilogo.
 
 **Le API key stanno solo in `.env`.** Non le leggi, non le stampi, non le passi sulla
 riga di comando, non le scrivi in `config.yaml`. Se una manca, dici *quale* variabile
@@ -83,26 +94,33 @@ stderr. Leggi il JSON, non il testo.
 
 | Comando | Cosa fa | Ti restituisce |
 |---|---|---|
-| `tools/doc_extract.py DOC --save-to DIR` | estrae il testo | `chars`, `words`, `pages`, `preview`, `text_file` |
+| `tools/doc_extract.py DOC --save-to DIR --trusted-paths` | estrae il testo | `chars`, `words`, `pages`, `preview`, `text_file` |
 | `tools/voices_list.py [--resolve NOME]` | elenca le voci, risolve i nomi | `voices[]` con `cached`, `spoken_name` (nome ricavato dal file, es. "Voce Alessio Menegatto" -> "Alessio Menegatto"), `name_complete` (`false` = manca nome o cognome), `resolved[]` con `match`/`candidates` |
 | `tools/music_list.py [--resolve CATEGORIA NOME]` | elenca le musiche disponibili, risolve un nome | senza `--resolve`: `intro[]`/`outro[]`/`sottofondo[]` con `duration_seconds`, `has_licenza`, `parlato`, `usable`. Con `--resolve`: exit `0`/`1`/`3` (vedi sotto, **diverso** da `voices_list.py`) |
 | `tools/music_set.py --run-dir D [--intro N] [--outro N] [--sottofondo N] [--none CATEGORIA...]` | sceglie le musiche della run — **gratis, senza approvazione** | `intro`, `outro`, `sottofondo`, `warnings[]` (brani senza licenza) |
 | `tools/run_init.py --title "..."` | crea la cartella dell'episodio | `run_dir`, `session_file`, `script_file` |
 | `tools/script_save.py --run-dir D --script-json F --speakers A B [P --presenter P --participant "A\|Nome Cognome\|ruolo" ...]` | **valida e salva il copione che hai scritto** (con la presentazione iniziale: vedi 3-quater) | `version`, `warnings[]`, `rendered`, `approved`, `presenter`, `participants[]` |
-| `tools/script_approve.py --run-dir D` | registra il sì dell'utente | `version`, `sha256` |
-| `tools/voices_prepare.py --speakers A B --out V --run-dir D [--dry-run]` | cache o clonazione | `voice_map`, `newly_cloned[]`, `reused[]`, `audio_paths_file` |
+| `tools/script_edit.py --run-dir D --turn N --text "..."` | cambia il testo (tag comprese) di **una** battuta senza riscrivere tutta la bozza: nuova versione, l'approvazione decade da sola | come `script_save.py`; exit `1` `ScriptInvalid` se la modifica rompe una regola (non salva) |
+| `tools/script_show.py --run-dir D` | rilegge il copione corrente | `rendered`, `version`, `approved`, `approval_problem`, `versions[]` |
+| `tools/script_versions.py --run-dir D --list \| --diff A [B] \| --restore N` | storico, confronto fra versioni, ripristino (= nuova versione da riapprovare) | `versions[]` / `righe[]` con `stato` (invariata, modificata, aggiunta, rimossa) / la versione nuova |
+| `tools/script_approve.py --run-dir D --current` | registra il sì dell'utente (sulla versione corrente; `--version V` al posto di `--current` la fissa) | `version`, `sha256` |
+| `tools/voice_meta.py --name N [--consent \| --revoke-consent] [--spoken-name "Nome Cognome"] --by U` | stato del consenso di una voce; lo registra (solo dopo il sì dell'utente) o lo revoca; registra il nome pronunciato confermato dall'utente | `consenso: {stato, da, il}`, `nome_pronunciato` |
+| `tools/voices_prepare.py --speakers A B --out V --run-dir D [--dry-run]` | cache o clonazione (consenso controllato prima) | `voice_map`, `newly_cloned[]`, `reused[]`, `audio_paths_file`; exit `3` `ConsentRequired` |
 | `tools/estimate.py --script S` | stima | `chars`, `duration_label`, `cost_usd`, `rendered`, `duration_with_music_seconds` se ci sono musiche |
 | `tools/estimate.py --script S --run-dir D` | stima **incrementale**: conta solo i turni non in cache | `turns_to_generate`, `chars_to_generate`, `cost_to_generate_usd` |
 | `tools/synthesize.py --script S --voices V --run-dir D` | sintesi + montaggio (+ mix, se ci sono musiche) | `output`, `duration_seconds`, `segments`, `generated_turns[]`, `reused_turns[]`, `tts_calls`, `warnings[]`, `voice_offset_seconds` se ci sono musiche |
-| `tools/mix.py --run-dir D [--accept-changed-music]` | rifa' SOLO il mix dalla cache — **zero chiamate TTS** | `output`, `duration_seconds`, `voice_offset_seconds`, `musiche_usate_file`, `tts_calls` (sempre 0) |
+| `tools/mix.py --run-dir D [--accept-changed-music]` | rimonta dalla cache (con le musiche scelte, o la sola voce se non ce ne sono) — **zero chiamate TTS** | `output`, `file`, `duration_seconds`, `with_music`, `voice_offset_seconds`, `musiche_usate_file`, `tts_calls` (sempre 0) |
+| `tools/episode_info.py --run-dir D` | stato dell'episodio (pronto / da aggiornare e perché), sezioni, trascrizione con i tempi nel file finale | `stato`, `motivi[]`, `sezioni[]`, `trascrizione[]` con `inizio_finale`/`fine_finale`, `file_finale` |
 | `tools/turn_at.py --run-dir D --at 3:42` | dal minutaggio **del file finale** alla battuta | `turn`, `speaker`, `testo`, `inizio`/`fine` (master voce), `inizio_finale`/`fine_finale` (file finale), `in_pausa`, oppure `in: "intro"`/`"outro"` |
-| `tools/retake.py --run-dir D --turn N --takes K [--dry-run] [--with-music]` | rifa' una battuta a parita' di testo | `new_takes[]`, `previews[]`, `previews_with_music[]` (se `--with-music` e c'e' un sottofondo), `tts_calls`, `cost_usd`, `warnings[]` |
-| `tools/retake.py --run-dir D --list N` | i take esistenti di un turno | `takes[]`, `chosen_take` |
+| `tools/retake.py --run-dir D --turn N --takes K [--direction "Più calmo" ...] [--dry-run] [--with-music]` | rifa' una battuta a parita' di testo; `--direction` solo fra quelle di `config.yaml` (`retake.indicazioni`) | `new_takes[]`, `indicazioni[]`, `previews[]`, `previews_with_music[]`, `tts_calls`, `cost_usd`, `warnings[]` |
+| `tools/retake.py --run-dir D --list N [--with-music]` | i take esistenti di un turno, ognuno con l'anteprima in contesto (senza sintesi) | `takes[]`, `chosen_take`, `take_list[]` con `label`, `preview`, `indicazioni` |
 | `tools/retake.py --run-dir D --choose N=K` | registra quale take montare | `chosen_take`, `tts_calls` (sempre 0) |
-| `tools/run_finalize.py --run-dir D --document DOC --voices V --audio-paths A` | chiude la run | `voci_usate`, `documento`, `files[]` |
+| `tools/run_finalize.py --run-dir D --document DOC --voices V --audio-paths A --trusted-paths` | chiude la run | `voci_usate`, `documento`, `files[]` |
 
 `script_write.py` e `script_revise.py` esistono ancora ma **non sono per te**: chiamano
-l'API Anthropic e servono a `run.py`.
+l'API Anthropic e servono all'interfaccia web. Lo stesso vale per `episode_config.py`
+(le scelte dell'episodio in `episodio.json`): se la run ce l'ha, `script_save.py` ne
+riprende speaker, formato e presentazione quando ometti `--speakers`.
 
 Gli exit code sono informazione, non rumore:
 
@@ -114,12 +132,14 @@ Gli exit code sono informazione, non rumore:
 | `3` | serve un'informazione dall'utente | chiedi con `AskUserQuestion`, poi richiama |
 
 **`tools/music_list.py --resolve`** ha una convenzione diversa da `voices_list.py`: l'esito
-sta nell'exit code, non in `match: null` — nome ambiguo esce `3` coi candidati nel messaggio,
-nome inesistente esce `1`. È voluto: quel tool serve anche a `music_set.py`, che deve potersi
+sta nell'exit code, non in `match: null` — nome ambiguo esce `3` (`error_type:
+AmbiguousName`, candidati in `details.candidates`), nome inesistente esce `1`. È voluto: quel tool serve anche a `music_set.py`, che deve potersi
 fermare da solo su un nome incerto.
 
-Su errore il JSON ha `ok: false`, `error_type` e `error`. Il campo `error` è già scritto
-per essere letto da un umano: riportalo, non riassumerlo in peggio.
+Su errore il JSON ha `ok: false`, `error_type`, `error` e, per alcuni errori, `details`
+con i dati strutturati (es. i candidati). Il campo `error` è già scritto per essere letto
+da un umano: riportalo, non riassumerlo in peggio. Un comando interrotto (Ctrl-C) esce `1`
+con `error_type: Interrupted`: si può rilanciare così com'è.
 
 ## Procedura
 
@@ -134,8 +154,15 @@ niente, vai avanti e conferma i nomi contro la cartella.
 ### 2. Leggi il documento
 
 ```bash
-.venv/bin/python tools/doc_extract.py "documento.pdf" --save-to /tmp
+.venv/bin/python tools/doc_extract.py "documento.pdf" --save-to /tmp --trusted-paths
 ```
+
+**`--trusted-paths`** serve perché lavori in locale, con file scelti dall'utente che hai
+davanti: senza, i tool accettano solo documenti dentro `documenti/` e file dentro `output/`
+(è la regola per l'interfaccia web, che non lo passa mai). Mettilo su `doc_extract.py` e
+`run_finalize.py`, e sugli altri tool solo se un file che ti serve sta fuori da `output/`.
+`--run-dir` invece deve **sempre** essere una cartella di `output/` creata da `run_init.py`:
+lì non ci sono eccezioni.
 
 Se l'utente ti dà **solo un nome di file** (`report-q3.pdf`), non chiedergli dov'è:
 passalo così com'è. `doc_extract.py` lo cerca prima dentro `documenti/` — la cartella
@@ -366,13 +393,19 @@ Se chiede modifiche, riscrivi la bozza e risalvala, indicando cosa hai cambiato:
 
 Ogni salvataggio crea una versione nuova nella sessione, con l'istruzione che l'ha
 generata: lo storico resta leggibile in `_script_session.json` e non devi ricostruirlo tu.
+Se la modifica riguarda una sola battuta, `tools/script_edit.py --turn N --text "..."` fa
+lo stesso senza riscrivere tutta la bozza. Per mostrare all'utente cosa è cambiato fra due
+versioni c'è `tools/script_versions.py --diff A B --only-changes`.
 Poi **rimostri il copione e richiedi conferma**. Cicli finché non approva.
 
 Quando approva, e solo allora:
 
 ```bash
-.venv/bin/python tools/script_approve.py --run-dir output/<run>
+.venv/bin/python tools/script_approve.py --run-dir output/<run> --current
 ```
+
+`--current` è obbligatorio (oppure `--version V`, con V la versione che hai appena
+mostrato): senza nessuno dei due il comando non approva (exit 1, `VersionRequired`).
 
 Se l'utente non approva e non sa cosa cambiare, fermati lì: non sintetizzare "intanto".
 
@@ -393,6 +426,15 @@ clonarle: il dry-run non spende, quindi non ha bisogno dell'approvazione.
 
 Se qualcosa compare in `newly_cloned`, è una clonazione nuova: annotalo per il riepilogo.
 Exit code `2` → ti fermi, riporti l'errore, non ritenti.
+Exit code `3` con `ConsentRequired` → nessuna voce è stata clonata: chiedi il consenso
+per le voci in `details.voci` (vedi "Consenso vocale" in cima), registralo con
+`voice_meta.py --consent` e rilancia.
+Exit code `3` con `CloneOutcomeUnknown` → una clonazione precedente di quella voce è
+finita male e la voce potrebbe già esistere sul provider. Non ritenti: lo dici
+all'utente, gli chiedi di controllare le voci sul provider (e cancellare un eventuale
+doppione), e solo dopo il suo ok esplicito esegui
+`voice_meta.py --name "NOME" --confirm-clone-retry --by "CHI"` e rilanci. Il dry-run riporta lo stato del consenso
+(`consent`) senza bloccare: usalo per chiedere prima.
 
 Con `--out` il tool salva da solo anche `_audio_paths.json` accanto alla voice map: è
 quello che passerai a `run_finalize.py`, non devi costruirlo tu.
@@ -428,7 +470,7 @@ uno speaker manca la voce.
 
 ```bash
 .venv/bin/python tools/run_finalize.py --run-dir output/<run> --document "documento.pdf" \
-  --voices output/<run>/voci.json --audio-paths output/<run>/_audio_paths.json
+  --voices output/<run>/voci.json --audio-paths output/<run>/_audio_paths.json --trusted-paths
 ```
 
 ## Correggere una battuta
@@ -477,7 +519,10 @@ in cache non costa niente).
 ### Percorso B — la resa va cambiata
 
 1. `turn_at.py`, se l'utente ha dato un minutaggio;
-2. `retake.py --turn N --takes K --dry-run` → **dichiara il costo**;
+2. `retake.py --turn N --takes K --dry-run` → **dichiara il costo**. Se l'utente ha
+   detto *come* deve cambiare ("più calmo", "più lento"), aggiungi le `--direction`
+   corrispondenti: solo quelle di `config.yaml`, mai una tag inventata. "Pronuncia
+   diversa" non è un retake: è il Percorso A (si corregge il testo);
 3. chiedi conferma all'utente con `AskUserQuestion`;
 4. `retake.py --turn N --takes K`. Genera take nuovi con numeri liberi: quelli vecchi
    restano dove sono, si può sempre tornare indietro;
@@ -486,7 +531,8 @@ in cache non costa niente).
    un take giudicato da solo inganna. Riporta i `warnings[]`, per esempio uno sbalzo
    di livello oltre i 3 dB;
 6. `retake.py --choose N=K` con il take che **l'utente** ha scelto;
-7. `synthesize.py` per rimontare: `tts_calls` sarà `0`.
+7. `mix.py` per rimontare: `tts_calls` sarà `0`. Per farle risentire un take già
+   generato, `retake.py --list N` dà l'anteprima di ogni take, originale compreso.
 
 Il copione non cambia in questo percorso, quindi l'approvazione resta valida — ma
 `retake.py` passa comunque dal gate, perché è un passo che spende. Se ti risponde che
@@ -574,8 +620,9 @@ Dillo invece di lasciarglielo scoprire:
 - **le pause con `audio_format: mp3`.** In quella configurazione i segmenti si
   concatenano senza pause fra i turni. Se l'utente si lamenta del ritmo, la causa è lì e
   si risolve in `config.yaml`, non nel copione;
-- **il consenso.** Non puoi verificarlo. Puoi solo renderlo visibile ogni volta che una
-  voce viene clonata per la prima volta;
+- **il consenso.** Non puoi verificare che la persona l'abbia dato davvero: registri solo
+  quello che l'utente ti conferma, e lo rendi visibile ogni volta che una voce viene
+  clonata per la prima volta;
 - **la licenza delle musiche.** Stessa cosa: non puoi verificare che un brano in
   `musiche/` sia davvero utilizzabile, lo rendi visibile quando manca `licenza` nei
   metadati. Se un'intro o un'outro ha voci di persone reali, vale lo stesso principio

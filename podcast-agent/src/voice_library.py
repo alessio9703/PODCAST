@@ -12,6 +12,8 @@ import unicodedata
 from dataclasses import dataclass
 from pathlib import Path
 
+from .registry import RESERVED_NAMES
+
 
 class VoiceLibraryError(RuntimeError):
     """Problema nella cartella delle voci disponibili."""
@@ -36,6 +38,10 @@ def _normalize(value: str) -> str:
     decomposed = unicodedata.normalize("NFKD", value)
     stripped = "".join(ch for ch in decomposed if not unicodedata.combining(ch))
     return " ".join(stripped.lower().replace("_", " ").replace("-", " ").split())
+
+
+#: File che stanno accanto alle registrazioni senza esserlo.
+_SIDECAR_EXTENSIONS = {".json", ".lock", ".tmp"}
 
 
 #: Parole che nei nomi dei file stanno davanti al nome della persona ("Voce
@@ -80,7 +86,25 @@ class VoiceLibrary:
         voices: list[AvailableVoice] = []
         rejected: list[Path] = []
         for entry in sorted(self.dir.iterdir()):
-            if not entry.is_file() or entry.name.startswith("."):
+            if entry.name.startswith("."):
+                continue
+            if entry.is_symlink():
+                # Un link si scarta (finisce fra i file scartati): seguirlo
+                # vorrebbe dire mandare al provider, come campione da clonare,
+                # un file fuori dalla libreria (revisione finale, N4).
+                rejected.append(entry)
+                continue
+            if not entry.is_file():
+                continue
+            # Metadati accanto alla registrazione (src/voice_meta.py) e i loro
+            # lock: non sono registrazioni, ne' file in un formato sbagliato.
+            if entry.suffix.lower() in _SIDECAR_EXTENSIONS:
+                continue
+            if entry.stem.strip() in RESERVED_NAMES:
+                # Nomi riservati del registro (revoche, storico): una voce cosi'
+                # si clonerebbe a pagamento e poi non si potrebbe registrare
+                # (revisione di sicurezza C7, MEDIA-2). Scartata prima di spendere.
+                rejected.append(entry)
                 continue
             if entry.suffix.lower() in self.accepted_extensions:
                 voices.append(AvailableVoice(name=entry.stem.strip(), path=entry))
@@ -94,6 +118,25 @@ class VoiceLibrary:
     @property
     def voices(self) -> list[AvailableVoice]:
         return list(self._voices)
+
+    @property
+    def duplicates(self) -> dict[str, list[str]]:
+        """{nome normalizzato: [file]} per i nomi con piu' di una registrazione.
+
+        "Mario Rossi.wav" e "Mario Rossi.mp3" sono la STESSA voce per nome: una
+        delle due va tolta. Finche' ci sono entrambe, la voce non si usa
+        (src/voice_prep.py): scegliere un file al posto dell'utente vorrebbe
+        dire indovinare quale persona far parlare (revisione di sicurezza C5,
+        MEDIA-1).
+        """
+        groups: dict[str, list[str]] = {}
+        for voice in self._voices:
+            groups.setdefault(_normalize(voice.name), []).append(voice.path.name)
+        return {key: sorted(files) for key, files in groups.items() if len(files) > 1}
+
+    def duplicate_files(self, name: str) -> list[str]:
+        """I file che condividono il nome di questa voce (vuoto se e' unica)."""
+        return self.duplicates.get(_normalize(name), [])
 
     @property
     def rejected_files(self) -> list[Path]:

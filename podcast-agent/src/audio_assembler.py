@@ -35,7 +35,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable, Iterable
 
-from .ffmpeg_tool import find_ffmpeg
+from .ffmpeg_tool import FFMPEG_TIMEOUT_SECONDS, find_ffmpeg, input_args
+from .fileio import atomic_output, write_bytes_atomic
 from .script_writer import PodcastScript, spoken_text
 from .voice_provider import VoiceProvider, VoiceProviderError
 
@@ -57,6 +58,22 @@ class AssemblyError(RuntimeError):
 
 class MissingSpeakerVoice(AssemblyError):
     """Uno speaker dello script non ha una voce assegnata."""
+
+
+class SynthesisStopped(AssemblyError):
+    """La sintesi si e' fermata su richiesta, fra una battuta e l'altra.
+
+    Nessun segmento resta scritto a meta' (la scrittura e' atomica): quelli
+    gia' pronti restano in cache, e rilanciando si pagano solo `missing`.
+    """
+
+    def __init__(self, done: int, total: int, missing: list[int]) -> None:
+        super().__init__(
+            f"Sintesi fermata: {done} battute pronte su {total}, ne mancano {len(missing)}."
+        )
+        self.done = done
+        self.total = total
+        self.missing = missing
 
 
 @dataclass
@@ -361,6 +378,7 @@ class AudioAssembler:
         voice_map: dict[str, str],
         segments_dir: Path,
         progress: ProgressCallback | None = None,
+        should_stop: Callable[[], bool] | None = None,
     ) -> SynthesisResult:
         """Sintetizza solo i turni che non sono gia' in cache.
 
@@ -374,6 +392,10 @@ class AudioAssembler:
         scrittura e' atomica (vedi `_write_atomic`): un crash a meta'
         download lascia al massimo un `.tmp`, mai un wav troncato che alla
         sintesi dopo verrebbe riusato come se fosse buono.
+
+        `should_stop()` si controlla prima di ogni battuta da sintetizzare:
+        se e' vero la sintesi si ferma con SynthesisStopped, senza lasciare
+        niente a meta'. La battuta gia' partita invece finisce: e' pagata.
         """
         self.check_voice_coverage(script, voice_map)
         segments_dir.mkdir(parents=True, exist_ok=True)
@@ -398,6 +420,13 @@ class AudioAssembler:
                     progress(index, total, speaker, True)
                 reused.append(index)
             else:
+                if should_stop and should_stop():
+                    missing = [
+                        n
+                        for n, k in enumerate(keys, start=1)
+                        if not segment_path(segments_dir, k, choices.get(k, 1), extension).is_file()
+                    ]
+                    raise SynthesisStopped(total - len(missing), total, missing)
                 if progress:
                     progress(index, total, speaker, False)
                 try:
@@ -615,13 +644,12 @@ class AudioAssembler:
             )
         params, frames, _ = self._concat_wav(segments)
         target.parent.mkdir(parents=True, exist_ok=True)
-        tmp = target.with_suffix(target.suffix + ".tmp")
-        with wave.open(str(tmp), "wb") as out:
-            out.setnchannels(params.nchannels)
-            out.setsampwidth(params.sampwidth)
-            out.setframerate(params.framerate)
-            out.writeframes(b"".join(frames))
-        tmp.replace(target)
+        with atomic_output(target) as partial:
+            with wave.open(str(partial), "wb") as out:
+                out.setnchannels(params.nchannels)
+                out.setsampwidth(params.sampwidth)
+                out.setframerate(params.framerate)
+                out.writeframes(b"".join(frames))
         return target
 
     def _assemble_from_wav(
@@ -633,11 +661,12 @@ class AudioAssembler:
 
         master_wav = output_basename.with_suffix(".wav")
         master_wav.parent.mkdir(parents=True, exist_ok=True)
-        with wave.open(str(master_wav), "wb") as out:
-            out.setnchannels(params.nchannels)
-            out.setsampwidth(params.sampwidth)
-            out.setframerate(params.framerate)
-            out.writeframes(b"".join(frames))
+        with atomic_output(master_wav) as partial:
+            with wave.open(str(partial), "wb") as out:
+                out.setnchannels(params.nchannels)
+                out.setsampwidth(params.sampwidth)
+                out.setframerate(params.framerate)
+                out.writeframes(b"".join(frames))
 
         total_bytes = sum(len(chunk) for chunk in frames)
         duration = total_bytes / (params.framerate * params.nchannels * params.sampwidth)
@@ -682,20 +711,31 @@ class AudioAssembler:
     ) -> bool:
         ffmpeg = find_ffmpeg()
         if ffmpeg:
-            command = [
-                ffmpeg, "-y", "-loglevel", "error",
-                "-i", str(source_wav),
-                "-codec:a", "libmp3lame",
-                "-b:a", f"{self.output_mp3_bitrate}k",
-                str(target_mp3),
-            ]
-            result = subprocess.run(command, capture_output=True, text=True)
-            if result.returncode == 0 and target_mp3.is_file():
+            # Su un temporaneo, poi il nome finale: un'interruzione a meta'
+            # codifica non lascia un episodio troncato con il nome buono.
+            result = None
+            try:
+                with atomic_output(target_mp3) as partial:
+                    command = [
+                        ffmpeg, "-y", "-loglevel", "error",
+                        *input_args(source_wav),
+                        "-codec:a", "libmp3lame",
+                        "-b:a", f"{self.output_mp3_bitrate}k",
+                        str(partial),
+                    ]
+                    result = subprocess.run(command, capture_output=True, text=True, timeout=FFMPEG_TIMEOUT_SECONDS)
+                    if result.returncode != 0:
+                        raise OSError("ffmpeg ha fallito")
                 return True
-            warnings.append(
-                f"ffmpeg ha fallito la codifica mp3 (exit {result.returncode}): "
-                f"{result.stderr.strip()[:300]}"
-            )
+            except subprocess.TimeoutExpired as exc:
+                raise AssemblyError(
+                    f"ffmpeg non ha finito la codifica entro {FFMPEG_TIMEOUT_SECONDS} secondi: fermato."
+                ) from exc
+            except OSError:
+                warnings.append(
+                    f"ffmpeg ha fallito la codifica mp3 (exit {result.returncode if result else '?'}): "
+                    f"{(result.stderr if result else '').strip()[:300]}"
+                )
 
         try:
             import lameenc  # type: ignore
@@ -717,7 +757,7 @@ class AudioAssembler:
         encoder.set_in_sample_rate(params.framerate)
         encoder.set_channels(params.nchannels)
         encoder.set_quality(2)
-        target_mp3.write_bytes(encoder.encode(pcm) + encoder.flush())
+        _write_atomic(target_mp3, encoder.encode(pcm) + encoder.flush())
         return True
 
     # -- percorso mp3 ------------------------------------------------------
@@ -728,9 +768,10 @@ class AudioAssembler:
         target = output_basename.with_suffix(".mp3")
         target.parent.mkdir(parents=True, exist_ok=True)
 
-        with target.open("wb") as out:
-            for segment in segments:
-                out.write(_strip_id3(segment.read_bytes()))
+        with atomic_output(target) as partial:
+            with partial.open("wb") as out:
+                for segment in segments:
+                    out.write(_strip_id3(segment.read_bytes()))
 
         return AssemblyResult(
             path=target,
@@ -763,10 +804,7 @@ def _write_atomic(target: Path, data: bytes) -> None:
     per sempre, e il difetto si sentirebbe nell'episodio senza che niente lo
     segnali.
     """
-    target.parent.mkdir(parents=True, exist_ok=True)
-    tmp = target.with_suffix(target.suffix + ".tmp")
-    tmp.write_bytes(data)
-    tmp.replace(target)
+    write_bytes_atomic(target, data)
 
 
 def segment_rms(path: Path) -> float | None:
@@ -875,7 +913,7 @@ def peak_level_dbfs(data: bytes, params) -> float | None:  # type: ignore[no-unt
     tutto a circa -31 dBFS di picco, con il parlato vero e proprio sepolto
     dentro un pavimento di rumore quieto invece che vero silenzio o rumore
     forte — per questo ne' il controllo sul rapporto (il "parlato" relativo
-    coprivа tutto il segmento) ne' quello sul vuoto (nessun tratto si
+    copriva tutto il segmento) ne' quello sul vuoto (nessun tratto si
     distingueva dal resto, perche' tutto era altrettanto piano) lo vedevano.
     Sui 26 segmenti sani dello stesso episodio il picco peggiore era -4.3 dBFS
     e il migliore -0.3 dBFS: un margine enorme rispetto al segmento difettoso.
@@ -1203,9 +1241,18 @@ def _slug(value: str) -> str:
     return "".join(keep).strip("-").replace("--", "-") or "speaker"
 
 
+#: Nomi che Windows riserva ai dispositivi, anche con un'estensione ("con.mp3").
+_WINDOWS_RESERVED = {"con", "prn", "aux", "nul", *(f"com{i}" for i in range(1, 10)), *(f"lpt{i}" for i in range(1, 10))}
+
+
 def slugify(value: str, max_length: int = 60) -> str:
-    """Slug riutilizzabile per i nomi delle cartelle di output."""
-    return _slug(value)[:max_length].strip("-") or "episodio"
+    """Slug riutilizzabile per i nomi delle cartelle di output.
+
+    Un titolo come "CON" darebbe un nome riservato su Windows: si aggiunge un
+    suffisso (revisione di sicurezza C3, BASSA-4).
+    """
+    slug = _slug(value)[:max_length].strip("-") or "episodio"
+    return f"{slug}-episodio" if slug in _WINDOWS_RESERVED else slug
 
 
 def total_bytes(paths: Iterable[Path]) -> int:

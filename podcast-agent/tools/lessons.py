@@ -26,8 +26,9 @@ import json
 import os
 from pathlib import Path
 
-from _common import NeedsUserInput, PROJECT_ROOT, add_config_arg, bootstrap, emit, note, run_tool  # noqa: E402
+from _common import InvalidArguments, NeedsUserInput, PROJECT_ROOT, add_config_arg, bootstrap, emit, note, parse_args, run_tool, web_mode  # noqa: E402
 from src import lessons as lessons_mod  # noqa: E402
+from src.config import ConfigError  # noqa: E402
 from src.episode_signals import SIGNALS_FILENAME  # noqa: E402
 
 PROMPTS_DIR = PROJECT_ROOT / "prompts"
@@ -114,19 +115,29 @@ def _do_propose(config, lessons_config: dict, last: int | None, dry_run: bool) -
         emit({"dry_run": True, "evidenza": aggregated, "stima": stima})
         return
 
-    api_key_env = str(lessons_config.get("api_key_env") or config.script.get("api_key_env", "ANTHROPIC_API_KEY"))
-    api_key = os.environ.get(api_key_env, "").strip()
-    if not api_key:
-        raise ValueError(
-            f"Variabile d'ambiente {api_key_env} non impostata: serve per far proporre le lezioni a Claude.\n"
-            f"Aggiungila al file .env:\n    {api_key_env}=sk-ant-..."
-        )
+    # Stesso client della scrittura del copione (Config.anthropic_client): chiave
+    # da script.api_key_env (o lessons.api_key_env), client finto nei test, e
+    # gli errori dell'API classificati come per il copione.
+    api_key_env = lessons_config.get("api_key_env")
+    # Con un client_factory (configurazione di prova) si usa SEMPRE quello: mai
+    # una chiamata vera da una configurazione di prova (C6, BASSA-2).
+    if api_key_env and not config.script.get("client_factory"):
+        api_key = os.environ.get(str(api_key_env), "").strip()
+        if not api_key:
+            raise ConfigError(
+                f"Variabile d'ambiente {api_key_env} non impostata: serve per far proporre le lezioni a Claude."
+            )
+        import anthropic
+
+        client = anthropic.Anthropic(api_key=api_key)
+    else:
+        client = config.anthropic_client()
 
     result = lessons_mod.propose(
         prompts_dir=PROMPTS_DIR,
         copione_path=COPIONE_PATH,
         aggregated=aggregated,
-        api_key=api_key,
+        client=client,
         model=model,
         max_examples_per_pattern=thresholds["max_examples_per_pattern"],
         max_example_chars=thresholds["max_example_chars"],
@@ -140,7 +151,7 @@ def _do_propose(config, lessons_config: dict, last: int | None, dry_run: bool) -
     emit({**result, "stima": stima})
 
 
-def _do_accept(lessons_config: dict, lesson_id: str, text_override: str | None, remove_id: str | None) -> None:
+def _do_accept(lessons_config: dict, lesson_id: str, text_override: str | None, remove_id: str | None, by: str | None = None) -> None:
     lezioni_md_path = PROMPTS_DIR / lessons_mod.MD_FILENAME
     try:
         result = lessons_mod.accept(
@@ -150,11 +161,21 @@ def _do_accept(lessons_config: dict, lesson_id: str, text_override: str | None, 
             text_override=text_override,
             remove_id=remove_id,
             max_lines=int(lessons_config.get("max_lines", 20)),
+            by=by,
         )
     except lessons_mod.NeedsRemoval as exc:
         candidati = "; ".join(f"{c['id']} ({c['motivo']}): {c['testo']}" for c in exc.candidates)
         note(f"{exc} Candidati: {candidati or 'nessuno'}.")
-        raise NeedsUserInput(f"{exc} Candidati: {candidati or 'nessuno'}.") from exc
+        # I candidati anche in `details`, come ogni altro esito 3: la UI li
+        # mostra come scelta, senza leggere il testo (revisione finale, N25).
+        raise NeedsUserInput(
+            f"{exc} Candidati: {candidati or 'nessuno'}.",
+            details={
+                "campo": "remove_id",
+                "lezione": lesson_id,
+                "candidates": [{"id": c["id"], "motivo": c["motivo"], "testo": c["testo"]} for c in exc.candidates],
+            },
+        ) from exc
 
     note(f"Lezione {lesson_id} attiva in {result['lezioni_md']}.")
     if result.get("rimossa"):
@@ -162,8 +183,8 @@ def _do_accept(lessons_config: dict, lesson_id: str, text_override: str | None, 
     emit(result)
 
 
-def _do_reject(lesson_id: str, reason: str | None) -> None:
-    result = lessons_mod.reject(PROMPTS_DIR, lesson_id, reason=reason)
+def _do_reject(lesson_id: str, reason: str | None, by: str | None = None) -> None:
+    result = lessons_mod.reject(PROMPTS_DIR, lesson_id, reason=reason, by=by)
     note(f"Lezione {lesson_id} rifiutata.")
     emit(result)
 
@@ -206,10 +227,15 @@ def main() -> None:
     parser.add_argument("--text", default=None, help="Con --accept: riscrive il testo della proposta")
     parser.add_argument("--remove-id", default=None, help="Con --accept: quale lezione attiva togliere se serve spazio")
     parser.add_argument("--reason", default=None, help="Con --reject: perche' si scarta")
+    parser.add_argument("--by", default=None, help="Con --accept/--reject: chi decide (obbligatorio dall'interfaccia)")
     add_config_arg(parser)
-    args = parser.parse_args()
+    args = parse_args(parser)
 
     config = bootstrap(args)
+    if (args.accept or args.reject) and web_mode() and not (args.by and args.by.strip()):
+        # Una lezione entra nel prompt di tutti gli episodi: dall'interfaccia
+        # si registra chi l'ha decisa (revisione di sicurezza C4, MEDIA-2).
+        raise InvalidArguments("Serve --by: chi accetta o rifiuta la lezione.", details={"messaggio": "manca --by"})
     lessons_config = config.lessons
 
     if args.evidence:
@@ -219,9 +245,9 @@ def main() -> None:
     elif args.list:
         emit({"lezioni": lessons_mod.list_lessons(PROMPTS_DIR)})
     elif args.accept:
-        _do_accept(lessons_config, args.accept, args.text, args.remove_id)
+        _do_accept(lessons_config, args.accept, args.text, args.remove_id, args.by)
     elif args.reject:
-        _do_reject(args.reject, args.reason)
+        _do_reject(args.reject, args.reason, args.by)
     elif args.review:
         _do_review(config, lessons_config)
     elif args.trend:

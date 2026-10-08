@@ -24,6 +24,7 @@ from src.audio_assembler import (
 )
 from src.config import Config, ConfigError, PROJECT_ROOT, load_config, load_dotenv
 from src.cost_estimate import estimate
+from src.music_context import context_from_tracks, spoken_tracks_for_choice
 from src.music_library import CATEGORIES, MusicLibrary, MusicTrack, has_any_music, write_music_choice
 from src.music_mixer import MusicMixerError, mix_episode, preflight
 from src.pdf_reader import Document, DocumentError, extract_text
@@ -34,7 +35,11 @@ from src.run_layout import (
     write_voices_used,
 )
 from src.script_writer import PodcastScript, ScriptWriter, ScriptWriterError
+from src.errors import DomainError, NeedsUserDecision
+from src.fileio import LockTimeout
 from src.voice_library import AvailableVoice, VoiceLibrary, VoiceLibraryError
+from src.voice_meta import CONSENT_GRANTED, CONSENT_OUTDATED, CONSENT_REVOKED, VoiceMetaError
+from src.voice_prep import ACTION_CLONE, grant_consent, plan_voices, prepare_voices
 from src.voice_provider import VoiceProvider, VoiceProviderError
 
 SEPARATOR = "-" * 72
@@ -256,21 +261,20 @@ def step_choose_music(library: MusicLibrary) -> dict[str, str | None]:
 
 
 def _music_context(library: MusicLibrary, chosen: dict[str, str | None]) -> dict[str, dict] | None:
-    """Contesto per ScriptWriter: solo intro/outro con `parlato: true`."""
-    context: dict[str, dict] = {}
-    for category in ("intro", "outro"):
-        name = chosen.get(category)
-        if not name:
-            continue
-        track = next((t for t in library.tracks(category) if t.name == name), None)
-        if track and track.metadata.parlato:
-            if not track.metadata.trascrizione:
-                print(
-                    f"  ATTENZIONE: '{track.name}' ha parlato ma nessuna trascrizione "
-                    "nei metadati: il copione potrebbe ripetere quello che dice."
-                )
-            context[category] = {"trascrizione": track.metadata.trascrizione or ""}
-    return context or None
+    """Contesto per ScriptWriter: solo intro/outro con `parlato: true`.
+
+    La logica e' quella condivisa con i tool (src/music_context.py); qui resta
+    solo l'avviso stampato come prima.
+    """
+    tracks = spoken_tracks_for_choice(chosen, library)
+    for _category, track in tracks:
+        if not track.metadata.trascrizione:
+            print(
+                f"  ATTENZIONE: '{track.name}' ha parlato ma nessuna trascrizione "
+                "nei metadati: il copione potrebbe ripetere quello che dice."
+            )
+    context, _warnings = context_from_tracks(tracks)
+    return context
 
 
 # ----------------------------------------------------------------------
@@ -344,33 +348,75 @@ def step_write_script(
 
 
 def step_prepare_voices(
+    config: Config,
     provider: VoiceProvider,
-    registry: VoiceRegistry,
     selected: list[AvailableVoice],
 ) -> dict[str, str]:
+    """Riuso o clonazione, con le stesse protezioni dei tool (src/voice_prep.py).
+
+    Revisione finale, B1: lock per voce, marcatore di clonazione dall'esito
+    incerto (nessun retry, nemmeno dopo un errore lasciato dall'interfaccia
+    web), sha256 dei byte effettivamente clonati. Sul consenso:
+      - una voce con il consenso REVOCATO non si usa mai (ne' clonata ne' riusata);
+      - a una voce senza consenso registrato lo si chiede qui, e lo si registra
+        come farebbe l'interfaccia (voice_meta, legato allo sha256 della
+        registrazione mostrata); senza un si' esplicito non si clona. Vale anche
+        per una voce gia' clonata da riusare: il consenso e' una proprieta' della
+        voce (D11, decisione dell'utente dopo C7).
+    """
     heading("[6/9]", "Preparazione delle voci clonate")
-    voice_map: dict[str, str] = {}
+    speakers = [voice.name for voice in selected]
+    try:
+        plans = plan_voices(config, speakers, reuse_requires_consent=True)
+    except (VoiceLibraryError, VoiceMetaError) as exc:
+        fail(str(exc))
 
-    for voice in selected:
-        voice_id, reason = registry.lookup(voice.name, voice.path, provider.name)
-        if voice_id:
-            print(f"  {voice.name}: {reason} ({voice_id})")
-            voice_map[voice.name] = voice_id
+    revoked = [plan.speaker for plan in plans if plan.consent["stato"] == CONSENT_REVOKED]
+    if revoked:
+        fail(
+            "Consenso revocato per: " + ", ".join(revoked) + ".\n"
+            "  Queste voci non si clonano e non si riusano. Scegli altre voci, oppure "
+            "registra di nuovo il consenso (tools/voice_meta.py --consent) se la persona "
+            "lo ha dato di nuovo."
+        )
+
+    for plan in plans:
+        if plan.consent["stato"] == CONSENT_GRANTED:
             continue
-
-        print(f"  {voice.name}: {reason} -> clono la voce su '{provider.name}'...")
+        why = (
+            "la registrazione e' cambiata dopo il consenso"
+            if plan.consent["stato"] == CONSENT_OUTDATED
+            else "il consenso non e' registrato"
+        )
+        what = "va clonata" if plan.action == ACTION_CLONE else "e' gia' clonata e verra' riusata"
+        print(f"\n  {plan.speaker} ({plan.voice.path.name}) {what}, ma {why}.")
+        print("  Si clona solo la voce di una persona che ha dato il consenso esplicito.")
+        if not ask_yes_no(f"  {plan.speaker} ha dato il consenso alla clonazione della sua voce?"):
+            fail(f"Consenso di {plan.speaker} non confermato: nessuna voce clonata, nessuna sintesi avviata.")
+        by = ""
+        while not by:
+            by = " ".join(ask("  Chi conferma il consenso (nome e cognome)").split())
         try:
-            new_id = provider.clone_voice(voice.name, str(voice.path))
-        except VoiceProviderError as exc:
-            fail(
-                f"Clonazione di '{voice.name}' fallita.\n  {exc}\n"
-                "  Nessuna sintesi e' stata avviata."
+            grant_consent(
+                config, plan.voice, by=by, expect_sha256=plan.consent["audio_sha256"],
+                expect_revision=plan.consent["revisione"],
             )
-        entry = registry.record(voice.name, voice.path, provider.name, new_id)
-        print(f"    clonata: voice_id={entry.voice_id}")
-        voice_map[voice.name] = entry.voice_id
+        except (DomainError, NeedsUserDecision) as exc:
+            fail(str(exc))
+        print(f"  Consenso di {plan.speaker} registrato (confermato da {by}).")
 
-    return voice_map
+    try:
+        prepared = prepare_voices(
+            config, speakers, provider=provider, reuse_requires_consent=True,
+            note=lambda message: print(f"  {message}"),
+        )
+    except VoiceProviderError as exc:
+        fail(f"Clonazione fallita.\n  {exc}\n  Nessuna sintesi e' stata avviata. Non ritento da solo.")
+    except (DomainError, NeedsUserDecision, VoiceLibraryError, LockTimeout) as exc:
+        fail(f"{exc}\n  Nessuna sintesi e' stata avviata.")
+    for name, result in prepared.results.items():
+        print(f"  {name}: {result['action']} ({result['voice_id']})")
+    return prepared.voice_map
 
 
 # ----------------------------------------------------------------------
@@ -449,8 +495,7 @@ def main() -> None:
         provider = config.build_provider()
     except (ConfigError, VoiceProviderError) as exc:
         fail(str(exc))
-    registry = VoiceRegistry(config.registry_file, project_root=PROJECT_ROOT)
-    voice_map = step_prepare_voices(provider, registry, selected)
+    voice_map = step_prepare_voices(config, provider, selected)
 
     assembler = AudioAssembler.from_config(provider, config.audio)
 
@@ -519,6 +564,8 @@ def main() -> None:
             fail(str(exc))
         result.warnings = [*synthesis.warnings, *result.warnings]
 
+    # Il registro si legge ORA: le voci clonate al passo 6 ci sono gia'.
+    registry = VoiceRegistry(config.registry_file, project_root=PROJECT_ROOT)
     voices_file = write_voices_used(
         run_dir,
         provider.name,

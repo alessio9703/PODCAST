@@ -31,10 +31,11 @@ from array import array
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 from .audio_assembler import AudioAssembler, slugify
-from .ffmpeg_tool import find_ffmpeg, require_ffmpeg
+from .ffmpeg_tool import FFMPEG_TIMEOUT_SECONDS, find_ffmpeg, input_args, require_ffmpeg
+from .fileio import atomic_output, write_json_atomic
 from .music_library import (
     CATEGORIES,
     MusicLibrary,
@@ -221,6 +222,8 @@ def mix_episode(
     config: Any,
     accept_changed_music: bool = False,
     choice: ChosenMusic | None = None,
+    on_mix_start: Callable[[], None] | None = None,
+    output_basename: str | None = None,
 ) -> MixResult:
     """Rimonta la voce dai segmenti e ci sovrappone intro/outro/sottofondo.
 
@@ -252,6 +255,10 @@ def mix_episode(
     segments_dir = run_dir / "segmenti"
     voice_master_path = segments_dir / assembler.VOICE_MASTER_FILENAME
     voice_assembly = assembler.assemble_voice_master(segments, voice_master_path)
+    # Fine del montaggio della voce, inizio del mix: la UI li mostra come due
+    # fasi distinte (tools/produce.py).
+    if on_mix_start:
+        on_mix_start()
 
     with wave.open(str(voice_master_path), "rb") as handle:
         rate = handle.getframerate()
@@ -339,7 +346,7 @@ def mix_episode(
             run_dir, choice, dict(music_cfg), voice_offset, voice_duration
         )
 
-        final_mp3 = run_dir / f"{slugify(script.titolo)}.mp3"
+        final_mp3 = run_dir / f"{output_basename or slugify(script.titolo)}.mp3"
         bitrate = int(config.audio.get("output_mp3_bitrate", 192))
         _encode_mp3(final_wav, final_mp3, bitrate)
 
@@ -384,11 +391,7 @@ def _write_musiche_usate(
         # questo): oltre voice_offset + voice_duration_seconds si e' nell'outro.
         "voice_duration_seconds": round(voice_duration, 3),
     }
-    target = run_dir / MUSICHE_USATE_FILENAME
-    tmp = target.with_suffix(target.suffix + ".tmp")
-    tmp.write_text(json.dumps(payload, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
-    tmp.replace(target)
-    return target
+    return write_json_atomic(run_dir / MUSICHE_USATE_FILENAME, payload)
 
 
 # ----------------------------------------------------------------------
@@ -603,7 +606,7 @@ def _decide_channels(
     ):
         probe = tmp_dir / f"_probe_{index}.wav"
         _run_ffmpeg([
-            "-y", "-loglevel", "error", "-i", str(track.path),
+            "-y", "-loglevel", "error", *input_args(track.path),
             "-sample_fmt", "s16", str(probe),
         ])
         with wave.open(str(probe), "rb") as handle:
@@ -623,7 +626,12 @@ def _run_ffmpeg(args: list[str]) -> str:
     trovarlo (pacchetto imageio-ffmpeg, poi PATH di sistema)."""
     exe = require_ffmpeg()
     try:
-        result = subprocess.run([exe, *args], capture_output=True, text=True)
+        result = subprocess.run([exe, *args], capture_output=True, text=True, timeout=FFMPEG_TIMEOUT_SECONDS)
+    except subprocess.TimeoutExpired as exc:
+        raise MusicMixerError(
+            f"ffmpeg non ha finito entro {FFMPEG_TIMEOUT_SECONDS} secondi: fermato. "
+            "Controlla i file delle musiche e lo spazio su disco, poi rilancia."
+        ) from exc
     except OSError as exc:
         raise MusicMixerError(f"Impossibile eseguire ffmpeg ({exe}): {exc}") from exc
     if result.returncode != 0:
@@ -637,7 +645,7 @@ def _run_ffmpeg(args: list[str]) -> str:
 def _convert(src: Path, dst: Path, rate: int, channels: int) -> None:
     """Decodifica/ricampiona/adatta i canali qualunque sia il formato sorgente."""
     _run_ffmpeg([
-        "-y", "-loglevel", "error", "-i", str(src),
+        "-y", "-loglevel", "error", *input_args(src),
         "-ar", str(rate), "-ac", str(channels), "-sample_fmt", "s16", str(dst),
     ])
 
@@ -677,7 +685,7 @@ def _loudnorm(src: Path, dst: Path, target_i: float, target_tp: float, rate: int
     chiamante la riporta nei warning.
     """
     measure_stderr = _run_ffmpeg([
-        "-i", str(src),
+        *input_args(src),
         "-af", f"loudnorm=I={target_i}:TP={target_tp}:LRA=11:print_format=json",
         "-f", "null", "-",
     ])
@@ -690,7 +698,7 @@ def _loudnorm(src: Path, dst: Path, target_i: float, target_tp: float, rate: int
         f"linear=true:print_format=json,aresample={rate}"
     )
     apply_stderr = _run_ffmpeg([
-        "-y", "-i", str(src), "-af", apply_filter,
+        "-y", *input_args(src), "-af", apply_filter,
         "-ar", str(rate), "-sample_fmt", "s16", str(dst),
     ])
     applied = _parse_loudnorm_json(apply_stderr)
@@ -712,7 +720,7 @@ def _match_level(path: Path, target_i: float, target_tp: float, rate: int) -> No
     limit = 10 ** (target_tp / 20)
     tmp_out = path.with_name(path.stem + "_lvl.wav")
     _run_ffmpeg([
-        "-y", "-i", str(path),
+        "-y", *input_args(path),
         "-af", f"volume={gain:.2f}dB,alimiter=limit={limit:.4f}:level=disabled",
         "-ar", str(rate), "-sample_fmt", "s16", str(tmp_out),
     ])
@@ -721,7 +729,7 @@ def _match_level(path: Path, target_i: float, target_tp: float, rate: int) -> No
 
 def _measure_integrated_loudness(path: Path) -> float:
     stderr = _run_ffmpeg([
-        "-i", str(path), "-af", "loudnorm=print_format=json", "-f", "null", "-",
+        *input_args(path), "-af", "loudnorm=print_format=json", "-f", "null", "-",
     ])
     stats = _parse_loudnorm_json(stderr)
     return float(stats["input_i"])
@@ -769,7 +777,7 @@ def _apply_ducking(bed_path: Path, sidechain_path: Path, out_path: Path, rate: i
     padded_out = tmp_dir / f"{out_path.stem}_padded_out.wav"
     _run_ffmpeg([
         "-y", "-loglevel", "error",
-        "-i", str(bed_padded), "-i", str(sidechain_padded),
+        *input_args(bed_padded), *input_args(sidechain_padded),
         "-filter_complex", filt, "-map", "[out]",
         "-ar", str(rate), "-sample_fmt", "s16", str(padded_out),
     ])
@@ -787,12 +795,16 @@ def _encode_mp3(src: Path, dst: Path, bitrate: int) -> None:
     """Codifica finale via ffmpeg. Il percorso musica richiede gia' ffmpeg per il
     mix (verificato in preflight()): non c'e' bisogno del ripiego lameenc che
     usa invece assemble() quando non c'e' nessuna musica."""
-    _run_ffmpeg([
-        "-y", "-loglevel", "error", "-i", str(src),
-        "-codec:a", "libmp3lame", "-b:a", f"{bitrate}k", str(dst),
-    ])
-    if not dst.is_file():
-        raise MusicMixerError("ffmpeg non ha prodotto il file mp3 finale.")
+    # Su un temporaneo, poi il nome finale: un'interruzione a meta' codifica
+    # non lascia un episodio troncato con il nome buono.
+    try:
+        with atomic_output(dst) as partial:
+            _run_ffmpeg([
+                "-y", "-loglevel", "error", *input_args(src),
+                "-codec:a", "libmp3lame", "-b:a", f"{bitrate}k", str(partial),
+            ])
+    except OSError as exc:
+        raise MusicMixerError("ffmpeg non ha prodotto il file mp3 finale.") from exc
 
 
 # ----------------------------------------------------------------------

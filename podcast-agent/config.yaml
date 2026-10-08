@@ -75,6 +75,12 @@ providers:
         top_p: 0.7
         # >1 scoraggia le cantilene e le cadenze ripetute fra turno e turno.
         repetition_penalty: 1.2
+    # Costo di UNA clonazione di voce (USD), per la stima del passo 5. Sta qui,
+    # accanto a `options` e non dentro, perche' le opzioni vanno tali e quali
+    # al provider. null = costo non noto: la stima lo dichiara e mostra solo
+    # il costo della sintesi. Compilalo con la tariffa vera: un numero
+    # indovinato sarebbe peggio di nessun numero.
+    clone_cost_usd: null
 
   # Esempio di come si aggiunge un provider alternativo in futuro:
   # cartesia:
@@ -96,6 +102,42 @@ paths:
   # o e' vuota la funzione musica e' semplicemente non disponibile: non e'
   # un errore.
   music_dir: ./musiche
+
+# Limiti sui documenti di partenza. Si controllano PRIMA di leggere il
+# contenuto: un file enorme non deve occupare memoria e tempo (e il lock della
+# bozza) solo per sentirsi dire che e' troppo grande. Oltre un limite il
+# comando esce con exit 1, error_type DocumentTooLarge.
+# Valuta della stima (decisione D3). Il provider fattura in dollari: il costo
+# in euro si mostra solo con un cambio dichiarato E datato qui. Senza, null e
+# la stima resta in dollari.
+currency:
+  eur_per_usd: null
+  rate_date: null
+
+documents:
+  # Dimensione del file (20 MB).
+  max_bytes: 20971520
+  # Pagine di un PDF.
+  max_pages: 500
+  # Caratteri del testo estratto. Al modello ne arrivano comunque al massimo
+  # script.max_document_chars: questo e' il limite di cio' che si accetta.
+  max_chars: 2000000
+  # Dimensione scompattata di un DOCX (100 MB): un DOCX e' uno zip, e un file
+  # piccolo puo' contenere un XML enorme.
+  max_unpacked_bytes: 104857600
+  # Delle quali, parti XML (15 MB): python-docx crea un oggetto per ogni
+  # paragrafo, e 30 MB di paragrafi vuoti costano un minuto e 600 MB di memoria.
+  max_xml_bytes: 15728640
+  # Parti dello zip di un DOCX: uno vero ne ha qualche decina.
+  max_zip_entries: 2000
+  # Byte dei content stream di un PDF, decodificati e sommati pagina per pagina
+  # (50 MB). Misura il lavoro dell'estrazione: un PDF piccolo puo' far
+  # decodificare a ogni pagina lo stesso stream enorme fatto di soli spazi.
+  max_content_bytes: 52428800
+  # Tempo massimo dell'estrazione in secondi, controllato fra una pagina e
+  # l'altra. Una pagina sola non si interrompe da dentro: l'adattatore mette
+  # comunque un timeout al sottoprocesso.
+  max_seconds: 60
 
 audio:
   # Ritaglia il silenzio che il TTS mette in testa e in coda a ogni segmento
@@ -221,6 +263,28 @@ script:
   words_per_minute: 150
   # Caratteri massimi del documento passati al modello (0 = nessun limite)
   max_document_chars: 120000
+
+# ---------------------------------------------------------------------------
+# Retake: "Come deve cambiare?" al passo 7 (decisione D1).
+# Ogni indicazione aggiunge la sua tag SOLO al testo inviato per quel take:
+# il copione approvato e il suo sha256 non cambiano. E' una whitelist: nessun
+# testo libero arriva al sintetizzatore fuori dal copione approvato. Le tag si
+# pagano come il resto del testo (la stima le conta).
+# "Pronuncia diversa" non c'e' di proposito: una pronuncia si corregge
+# cambiando il testo (passo "Cosa dice"), con una nuova approvazione.
+# Le tag sono punti di partenza da tarare a orecchio, come in prompts/copione.md.
+# `opposto`: le due indicazioni non si chiedono insieme.
+# ---------------------------------------------------------------------------
+retake:
+  max_takes: 3
+  indicazioni:
+    "Più lento": {tag: "[lentamente]", opposto: "Più veloce"}
+    "Più veloce": {tag: "[rapidamente]", opposto: "Più lento"}
+    "Più energico": {tag: "[entusiasta]", opposto: "Più calmo"}
+    "Più calmo": {tag: "[calmo]", opposto: "Più energico"}
+    "Più serio": {tag: "[serio]", opposto: "Più sorridente"}
+    "Più sorridente": {tag: "[sorride]", opposto: "Più serio"}
+    "Più pause": {tag: "[con pause]"}
 
 # ---------------------------------------------------------------------------
 # Intro, outro e sottofondo (tutti opzionali e indipendenti).

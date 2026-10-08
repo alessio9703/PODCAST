@@ -1,12 +1,30 @@
 #!/usr/bin/env python3
-"""Scrive la prima stesura del copione e apre la sessione di revisione.
+"""Scrive il copione con l'API e apre (o aggiorna) la sessione di revisione.
 
+    # con la configurazione dell'episodio (tools/episode_config.py): niente altro
+    python tools/script_write.py --run-dir output/<run>
+
+    # a mano, come prima
     python tools/script_write.py --text-file T --speakers "Mario Rossi" "Giulia Bianchi" \
-        --run-dir output/2026-09-13_10-30_titolo
+        --run-dir output/2026-09-13_10-30_titolo [--format intervista --interviewer "Mario Rossi"]
 
 Scrive `conversazione.json` e `_script_session.json` nella cartella della run.
 Lo stato della conversazione va su disco perche' la revisione avviene in un
 processo diverso (vedi src/script_session.py).
+
+Da dove vengono le scelte, in ordine di precedenza:
+  1. i flag espliciti (--speakers, --format, --interviewer, --presenter,
+     --participant, --target-minutes, --document/--text-file);
+  2. episodio.json della run, se il cast e' completo;
+  3. config.yaml (durata, formato di default).
+
+Il cast si controlla PRIMA di chiamare il modello. Il copione prodotto si
+valida con le stesse regole di script_save.py: se ha errori bloccanti viene
+salvato lo stesso come versione (la chiamata e' pagata), con `errors` non
+vuoto e `approvable: false`, e script_approve.py rifiuta di approvarlo.
+
+Se la run ha gia' un copione, questo ne crea una NUOVA versione
+("riscrittura"): la storia non si cancella.
 """
 
 from __future__ import annotations
@@ -14,97 +32,150 @@ from __future__ import annotations
 import argparse
 from pathlib import Path
 
-from _common import PROJECT_ROOT, add_config_arg, bootstrap, emit, note, resolve_path, run_tool  # noqa: E402
-from src.lessons import active_lessons_summary  # noqa: E402
-from src.pdf_reader import Document, extract_text  # noqa: E402
-from src.script_session import FILENAME as SESSION_FILENAME  # noqa: E402
-from src.script_session import ScriptSession  # noqa: E402
-from src.script_writer import ScriptWriter  # noqa: E402
+from _common import add_config_arg, add_trusted_paths_arg, bootstrap, documents_confined, emit, file_arg, note, parse_args, require_by_in_web, run_dir_arg, run_tool  # noqa: E402
+from src.episode_config import EXTRACTED_TEXT_FILENAME, EpisodeConfig  # noqa: E402
+from src.pdf_reader import Document, DocumentTooLarge, extract_text  # noqa: E402
+from src.script_authoring import Cast, write_draft, writer_from_config  # noqa: E402
+from src.script_rules import FORMATS, parse_participant  # noqa: E402
+from src.script_view import script_payload  # noqa: E402
 
 
-def build_writer(config) -> ScriptWriter:  # type: ignore[no-untyped-def]
-    settings = config.script
-    return ScriptWriter(
-        api_key=config.anthropic_api_key(),
-        model=str(settings.get("model", "claude-opus-5")),
-        max_tokens=int(settings.get("max_tokens", 16000)),
-        effort=str(settings.get("effort", "high")),
-        language=str(settings.get("language", "italiano")),
-        target_minutes=int(settings.get("target_minutes", 8)),
-        words_per_minute=int(settings.get("words_per_minute", 150)),
-        max_document_chars=int(settings.get("max_document_chars", 120000)),
+def build_writer(config):  # type: ignore[no-untyped-def]
+    """Compatibilita': il writer configurato (vedi src/script_authoring.py)."""
+    return writer_from_config(config)
+
+
+def report(result, config, extra=None) -> None:  # type: ignore[no-untyped-def]
+    """JSON di risposta comune a script_write.py e script_revise.py."""
+    payload = script_payload(
+        result.script,
+        result.session,
+        script_file=result.script_path,
+        warnings=result.warnings,
+        words_per_minute=int(config.script.get("words_per_minute", 150)),
     )
-
-
-def report(script, session_path: Path, script_path: Path, speakers: list[str], extra=None):  # type: ignore[no-untyped-def]
-    payload = {
-        "titolo": script.titolo,
-        "turni": script.turni,
-        "speakers": script.speakers,
-        "turn_count": len(script.turni),
-        "chars": script.total_chars,
-        "words": script.total_words,
-        "problems": script.validate(speakers),
-        "script_file": str(script_path),
-        "session_file": str(session_path),
-        "rendered": script.render(),
-    }
+    # `problems`: chiave storica di questo tool, ora = errori bloccanti.
+    payload["problems"] = result.errors
     payload.update(extra or {})
     emit(payload)
 
 
+def _document(args, run_dir: Path, episode: EpisodeConfig | None, config) -> Document:  # type: ignore[no-untyped-def]
+    if args.text_file:
+        text_path = file_arg(args.text_file, config, args, "text_file")
+        limits = config.document_limits
+        size = text_path.stat().st_size
+        if size > limits.max_bytes:
+            raise DocumentTooLarge(
+                f"Il file {text_path.name} e' troppo grande ({size} byte, massimo {limits.max_bytes}).",
+                limit="byte",
+                maximum=limits.max_bytes,
+                value=size,
+                file=text_path,
+            )
+        return Document(path=text_path, text=text_path.read_text(encoding="utf-8"), kind="text")
+    if args.document:
+        # Stessa ricerca di doc_extract.py: un nome nudo si cerca in documenti/.
+        return extract_text(
+            args.document,
+            search_dir=config.documents_dir,
+            confined=documents_confined(args),
+            limits=config.document_limits,
+        )
+    extracted = run_dir / EXTRACTED_TEXT_FILENAME
+    if episode and episode.documento and extracted.is_file():
+        return Document(
+            path=Path(episode.documento.get("percorso") or extracted),
+            text=extracted.read_text(encoding="utf-8"),
+            kind=str(episode.documento.get("tipo") or "text"),
+            pages=episode.documento.get("pagine"),
+        )
+    raise ValueError(
+        "Manca il documento: passa --document o --text-file, oppure registralo "
+        "nella run con tools/episode_config.py --documento."
+    )
+
+
+def _cast(args, episode: EpisodeConfig | None) -> tuple[Cast, int | None]:  # type: ignore[no-untyped-def]
+    base: dict = {}
+    if episode is not None and episode.cast_complete and not args.speakers:
+        base = {
+            "speakers": episode.speakers,
+            "script_format": episode.formato,
+            "interviewer": episode.interviewer,
+            "presenter": episode.presenter,
+            "participants": episode.participants,
+            "target_minutes": episode.durata_minuti,
+        }
+    speakers = list(args.speakers or base.get("speakers") or [])
+    if not speakers:
+        raise ValueError(
+            "Mancano gli speaker: passa --speakers, oppure completa il cast con "
+            "tools/episode_config.py."
+        )
+    participants = list(base.get("participants") or [])
+    for spec in args.participant:
+        person = parse_participant(spec)
+        participants = [p for p in participants if p.get("speaker") != person["speaker"]] + [person]
+    cast = Cast(
+        speakers=speakers,
+        script_format=args.script_format or base.get("script_format"),
+        interviewer=args.interviewer or base.get("interviewer"),
+        presenter=args.presenter or base.get("presenter"),
+        participants=participants,
+    )
+    return cast, args.target_minutes or base.get("target_minutes")
+
+
 def main() -> None:
-    parser = argparse.ArgumentParser(description=__doc__)
-    source = parser.add_mutually_exclusive_group(required=True)
+    parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    source = parser.add_mutually_exclusive_group()
     source.add_argument("--text-file", help="File di testo prodotto da doc_extract.py")
-    source.add_argument("--document", help="Documento originale (estratto al volo)")
-    parser.add_argument("--speakers", nargs="+", required=True, help="Nomi degli speaker")
+    source.add_argument("--document", help="Documento originale (estratto al volo; cercato anche in documenti/)")
+    parser.add_argument("--speakers", nargs="+", default=None, help="Nomi degli speaker")
     parser.add_argument("--run-dir", required=True, help="Cartella dell'episodio")
     parser.add_argument("--target-minutes", type=int, default=None)
+    parser.add_argument("--format", dest="script_format", choices=FORMATS, default=None)
+    parser.add_argument("--interviewer", default=None)
+    parser.add_argument("--presenter", default=None)
+    parser.add_argument("--participant", action="append", default=[], metavar='"SPEAKER|NOME COGNOME|RUOLO"')
+    parser.add_argument("--by", default=None, help="Chi ha chiesto la stesura (per l'elenco versioni)")
+    add_trusted_paths_arg(parser)
     add_config_arg(parser)
-    args = parser.parse_args()
-
-    config = bootstrap(args)
-    run_dir = resolve_path(args.run_dir)
-    if not run_dir.is_dir():
-        raise FileNotFoundError(
-            f"Cartella della run inesistente: {run_dir}. Chiama prima run_init.py."
-        )
-
-    if args.text_file:
-        text_path = resolve_path(args.text_file)
-        document = Document(
-            path=text_path, text=text_path.read_text(encoding="utf-8"), kind="text"
-        )
-    else:
-        document = extract_text(args.document)
-
-    writer = build_writer(config)
-    if args.target_minutes:
-        writer.target_minutes = args.target_minutes
-
-    prompt, truncated = writer.build_prompt(document, args.speakers)
-    if truncated:
-        note("Il documento e' stato troncato per lunghezza (script.max_document_chars).")
-
-    note(f"Scrivo il copione con {writer.model} (effort={writer.effort})...")
-    script = writer.run(prompt)
-
-    session = ScriptSession.create(
-        document_path=str(document.path),
-        document_text=document.text,
-        speakers=list(args.speakers),
-        prompt=prompt,
-        path=run_dir / SESSION_FILENAME,
-        active_lessons=active_lessons_summary(PROJECT_ROOT / "prompts"),
+    # Dal web il cast arriva solo da episodio.json (passo 2, con i suoi
+    # controlli: voci risolte, nome e cognome, formati ammessi da D4), mai
+    # dalla riga di comando (revisione finale, N6).
+    args = parse_args(
+        parser,
+        web_forbidden=(
+            "--document", "--speakers", "--participant", "--presenter", "--interviewer", "--format", "--target-minutes",
+        ),
     )
-    session.record(script)
-    session.save()
 
-    script_path = script.save(run_dir / "conversazione.json")
-    note(f"Copione salvato in {script_path}")
+    require_by_in_web(args.by, "la stesura del copione")
+    config = bootstrap(args)
+    run_dir = run_dir_arg(args.run_dir, config)
 
-    report(script, session.path, script_path, args.speakers, {"revision_count": 0})
+    episode = EpisodeConfig.load(run_dir)
+    cast, target_minutes = _cast(args, episode)
+    document = _document(args, run_dir, episode, config)
+
+    result = write_draft(
+        run_dir,
+        config,
+        document=document,
+        cast=cast,
+        target_minutes=target_minutes,
+        by=args.by,
+        note=note,
+    )
+    note(f"Copione salvato in {result.script_path} (versione {result.session.version_count})")
+    for warning in result.warnings:
+        note(f"avviso: {warning}")
+    if result.errors:
+        note("ATTENZIONE: il copione ha errori bloccanti e non si potra' approvare finche' non vengono corretti.")
+
+    report(result, config)
 
 
 if __name__ == "__main__":

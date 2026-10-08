@@ -8,6 +8,11 @@ Un nome di file senza percorso viene cercato prima in `paths.documents_dir`
 
 Con --save-to scrive il testo estratto su file e ne restituisce il percorso:
 serve a script_write.py, che lavora sul testo, non sul PDF.
+
+Un documento da cui non si ricava testo esce con exit 1 ed error_type
+`DocumentNotExtractable`, con `details.motivo` fra scansione, protetto, vuoto e
+illeggibile; un'estensione non gestita con `UnsupportedDocument`. `pages` e'
+null per i formati che non hanno pagine (DOCX, testo).
 """
 
 from __future__ import annotations
@@ -16,10 +21,13 @@ import argparse
 
 from _common import (  # noqa: E402
     add_config_arg,
+    add_trusted_paths_arg,
     bootstrap,
+    documents_confined,
     emit,
+    file_arg,
     note,
-    resolve_path,
+    parse_args,
     run_tool,
 )
 from src.pdf_reader import extract_text  # noqa: E402
@@ -32,15 +40,21 @@ def main() -> None:
     parser.add_argument(
         "--preview-chars", type=int, default=600, help="Lunghezza dell'anteprima"
     )
+    add_trusted_paths_arg(parser)
     add_config_arg(parser)
-    args = parser.parse_args()
+    args = parse_args(parser)
 
     config = bootstrap(args)
-    document = extract_text(args.document, search_dir=config.documents_dir)
+    document = extract_text(
+        args.document,
+        search_dir=config.documents_dir,
+        confined=documents_confined(args),
+        limits=config.document_limits,
+    )
 
     text_file = None
     if args.save_to:
-        target_dir = resolve_path(args.save_to)
+        target_dir = file_arg(args.save_to, config, args, "save_to")
         target_dir.mkdir(parents=True, exist_ok=True)
         target = target_dir / "documento_estratto.txt"
         target.write_text(document.text, encoding="utf-8")
@@ -50,7 +64,11 @@ def main() -> None:
     emit(
         {
             "path": str(document.path),
+            "name": document.path.name,
             "kind": document.kind,
+            "size_bytes": document.size_bytes,
+            "sha256": document.sha256,
+            "extractable": True,
             "pages": document.pages,
             "chars": document.char_count,
             "words": document.word_count,

@@ -2,6 +2,7 @@
 """Diagnosi dell'installazione: cosa c'e', cosa manca, da dove.
 
     python tools/doctor.py
+    PODCAST_AGENT_WEB=1 python tools/doctor.py --web   # all'avvio dell'adattatore
 
 Primo passo consigliato dopo `pip install -r requirements.txt` (vedi
 README.md). Non chiama nessun provider e non spende: controlla solo che
@@ -12,10 +13,16 @@ A differenza degli altri tool, l'exit code qui non segue la convenzione
 resta 0/1 secondo che TUTTI i controlli OBBLIGATORI siano passati; i
 controlli facoltativi (musiche/, dipendenze opzionali) non influenzano
 l'exit code, solo il JSON.
+
+--web: l'adattatore lo lancia all'avvio. Aggiunge il controllo OBBLIGATORIO
+"web_mode": PODCAST_AGENT_WEB deve essere impostata, altrimenti i tool non
+rifiutano gli argomenti riservati all'uso locale (--config, --trusted-paths,
+--no-approval-gate, ...). Senza la variabile exit 1 (revisione finale, §8.6).
 """
 
 from __future__ import annotations
 
+import argparse
 import importlib
 import importlib.metadata
 import json
@@ -40,7 +47,7 @@ _DEPENDENCIES = [
     ("yaml", "PyYAML", True),
     ("pypdf", "pypdf", True),
     ("imageio_ffmpeg", "imageio-ffmpeg", True),
-    ("docx", "python-docx", False),
+    ("docx", "python-docx", True),
     ("lameenc", "lameenc", False),
 ]
 
@@ -134,6 +141,11 @@ def check_paths() -> list[dict[str, Any]]:
         config = load_config()
     except ConfigError as exc:
         return [_check("config.yaml", False, str(exc), True)]
+    # Le cartelle configurate fuori dal progetto si accorciano al loro nome
+    # nell'output (revisione di sicurezza C4, BASSA-5).
+    from src.redaction import register_roots
+
+    register_roots(config)
 
     results = [_check("config.yaml", True, str(config.path), True)]
     # documents_dir/voices_dir/output_dir sono di fatto obbligatori per un
@@ -150,8 +162,28 @@ def check_paths() -> list[dict[str, Any]]:
     return results
 
 
+def check_web_mode() -> dict[str, Any]:
+    from src.web_mode import WEB_MODE_ENV, web_mode
+
+    if web_mode():
+        return _check("web_mode", True, f"{WEB_MODE_ENV} impostata: i tool rifiutano gli argomenti riservati all'uso locale", True)
+    return _check(
+        "web_mode",
+        False,
+        f"{WEB_MODE_ENV} NON impostata: l'adattatore deve lanciare ogni tool con {WEB_MODE_ENV}=1, "
+        "altrimenti --config, --trusted-paths, --no-approval-gate e simili restano accettati",
+        True,
+    )
+
+
 def main() -> int:
+    parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    parser.add_argument("--web", action="store_true", help="Controlla anche che PODCAST_AGENT_WEB sia impostata (adattatore)")
+    args = parser.parse_args()
+
     checks: list[dict[str, Any]] = [check_python()]
+    if args.web:
+        checks.append(check_web_mode())
     checks.extend(check_dependencies())
 
     ffmpeg_checks, ffmpeg_exe = check_ffmpeg()
@@ -160,15 +192,19 @@ def main() -> int:
 
     all_required_ok = all(c["ok"] for c in checks if c["required"])
 
+    # Lo schermo "Diagnostica" mostra questi dettagli: niente percorsi assoluti
+    # del server (il progetto diventa ".", la home "~"), come negli errori.
+    from src.redaction import redact
+
     for c in checks:
         marker = "ok  " if c["ok"] else ("FAIL" if c["required"] else "warn")
-        print(f"  {marker} {c['name']}: {c['detail']}", file=sys.stderr)
+        print(redact(f"  {marker} {c['name']}: {c['detail']}"), file=sys.stderr)
 
-    payload = {
+    payload = redact({
         "ok": all_required_ok,
         "checks": checks,
         "ffmpeg_path": ffmpeg_exe,
-    }
+    })
     json.dump(payload, sys.stdout, ensure_ascii=False, indent=2)
     sys.stdout.write("\n")
     return 0 if all_required_ok else 1

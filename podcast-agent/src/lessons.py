@@ -29,6 +29,7 @@ from pathlib import Path
 from typing import Any, Callable
 
 from .episode_signals import SCHEMA_VERSION
+from .fileio import file_lock, write_text_atomic
 
 DB_FILENAME = "_lezioni.json"
 MD_FILENAME = "lezioni.md"
@@ -139,12 +140,19 @@ def load_db(prompts_dir: Path) -> list[dict[str, Any]]:
 
 
 def save_db(prompts_dir: Path, entries: list[dict[str, Any]]) -> Path:
+    """Scrittura atomica (temporaneo con nome unico): chi legge non vede mai
+    un file a meta'. Le modifiche passano da _db_lock() con rilettura dentro."""
     target = Path(prompts_dir) / DB_FILENAME
     target.parent.mkdir(parents=True, exist_ok=True)
-    tmp = target.with_suffix(target.suffix + ".tmp")
-    tmp.write_text(json.dumps(entries, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
-    tmp.replace(target)
-    return target
+    return write_text_atomic(target, json.dumps(entries, indent=2, ensure_ascii=False) + "\n")
+
+
+def _db_lock(prompts_dir: Path):  # type: ignore[no-untyped-def]
+    """Lock fra processi sul registro delle lezioni: con l'interfaccia web due
+    persone possono accettare o rifiutare lezioni insieme. Chi lo tiene
+    rilegge il registro dentro il lock (nessuna modifica persa)."""
+    Path(prompts_dir).mkdir(parents=True, exist_ok=True)
+    return file_lock(Path(prompts_dir) / DB_FILENAME)
 
 
 def _next_id(entries: list[dict[str, Any]]) -> str:
@@ -341,6 +349,27 @@ def _find_schema(schemi: list[dict[str, Any]], pattern: dict[str, Any]) -> dict[
 # ----------------------------------------------------------------------
 
 
+#: Limiti del testo di una lezione: entra nel prompt di TUTTI gli episodi di
+#: tutti gli utenti (revisione di sicurezza C4, MEDIA-2). Il tetto di righe di
+#: lezioni.md (lessons.max_lines) da solo non basta: una riga puo' essere enorme.
+MAX_LESSON_CHARS = 400
+MAX_LESSONS_TOTAL_CHARS = 4000
+
+
+def lesson_text_problem(testo: str) -> str | None:
+    """None = testo accettabile. Altrimenti il motivo."""
+    if len(testo) > MAX_LESSON_CHARS:
+        return f"testo troppo lungo ({len(testo)} caratteri, massimo {MAX_LESSON_CHARS})."
+    for line in testo.splitlines():
+        stripped = line.strip()
+        # Il testo non deve poter imitare intestazioni o delimitatori del prompt.
+        if stripped.startswith("#") or stripped.startswith("---"):
+            return "il testo non puo' contenere righe che iniziano con '#' o '---'."
+    if any(ord(ch) < 32 and ch not in "\n\t" for ch in testo):
+        return "il testo contiene caratteri di controllo."
+    return None
+
+
 def validate_proposal(item: dict[str, Any], schemi: list[dict[str, Any]]) -> str | None:
     """None = proposta valida. Altrimenti il motivo, esplicito, del rifiuto."""
     pattern = item.get("pattern") or {}
@@ -366,7 +395,7 @@ def validate_proposal(item: dict[str, Any], schemi: list[dict[str, Any]]) -> str
         return "testo della lezione vuoto."
     if _FORBIDDEN_TOPICS.search(testo):
         return "la lezione tocca costi, approvazione o consenso vocale: non e' materia di una lezione di stile."
-    return None
+    return lesson_text_problem(testo)
 
 
 def _duplicate_of_rejected(item: dict[str, Any], entries: list[dict[str, Any]]) -> bool:
@@ -466,30 +495,42 @@ Regole:
 def call_model(
     prompt: str,
     *,
-    api_key: str,
+    api_key: str | None = None,
     model: str,
     caller: Callable[..., str] | None = None,
+    client: Any = None,
 ) -> dict[str, Any]:
     """`caller(prompt=..., model=...) -> str` e' iniettabile per i test: senza,
-    chiama davvero l'API Anthropic con temperature 0 (proposta ripetibile,
-    non creativa) e output strutturato secondo _PROPOSE_SCHEMA.
+    chiama l'API Anthropic con temperature 0 (proposta ripetibile, non
+    creativa) e output strutturato secondo _PROPOSE_SCHEMA.
+
+    `client`: quello di Config.anthropic_client() (lo stesso della scrittura
+    del copione, quindi anche il client finto dei test). Gli errori dell'API
+    passano da classify_api_error: stessi `error_type` del copione
+    (ModelAuthError, ModelCreditExhausted, ModelRateLimited, ...), senza
+    header ne' richiesta nel messaggio.
     """
     if caller is not None:
         text = caller(prompt=prompt, model=model)
     else:
         import anthropic
 
-        client = anthropic.Anthropic(api_key=api_key)
-        response = client.messages.create(
-            model=model,
-            max_tokens=2000,
-            temperature=0,
-            messages=[{"role": "user", "content": prompt}],
-            output_config={
-                "effort": "medium",
-                "format": {"type": "json_schema", "schema": _PROPOSE_SCHEMA},
-            },
-        )
+        from .script_writer import classify_api_error
+
+        client = client if client is not None else anthropic.Anthropic(api_key=api_key)
+        try:
+            response = client.messages.create(
+                model=model,
+                max_tokens=2000,
+                temperature=0,
+                messages=[{"role": "user", "content": prompt}],
+                output_config={
+                    "effort": "medium",
+                    "format": {"type": "json_schema", "schema": _PROPOSE_SCHEMA},
+                },
+            )
+        except anthropic.APIError as exc:
+            raise classify_api_error(exc) from None
         if response.stop_reason == "refusal":
             raise LessonsError("Il modello ha rifiutato di generare la proposta.")
         text = next((b.text for b in response.content if b.type == "text"), "")
@@ -507,11 +548,12 @@ def propose(
     prompts_dir: Path,
     copione_path: Path,
     aggregated: dict[str, Any],
-    api_key: str,
+    api_key: str | None = None,
     model: str,
     max_examples_per_pattern: int,
     max_example_chars: int,
     caller: Callable[..., str] | None = None,
+    client: Any = None,
 ) -> dict[str, Any]:
     if not aggregated["schemi"]:
         return {"proposte": [], "scartate": [], "motivo_se_vuoto": "nessuno schema sopra soglia: niente da proporre."}
@@ -529,8 +571,16 @@ def propose(
         max_examples_per_pattern=max_examples_per_pattern,
         max_example_chars=max_example_chars,
     )
-    raw = call_model(prompt, api_key=api_key, model=model, caller=caller)
+    raw = call_model(prompt, api_key=api_key, model=model, caller=caller, client=client)
 
+    # La chiamata al modello sta FUORI dal lock (dura secondi); il registro si
+    # rilegge dentro, cosi' gli id non si scontrano con quelli scritti intanto.
+    with _db_lock(prompts_dir):
+        return _record_proposals(prompts_dir, raw, aggregated, model)
+
+
+def _record_proposals(prompts_dir: Path, raw: dict[str, Any], aggregated: dict[str, Any], model: str) -> dict[str, Any]:
+    entries = load_db(prompts_dir)
     proposte: list[dict[str, Any]] = []
     scartate: list[dict[str, Any]] = []
     for item in (raw.get("lezioni") or [])[:2]:
@@ -607,7 +657,7 @@ def _removal_candidates(entries: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return out
 
 
-def accept(
+def _accept(
     prompts_dir: Path,
     lezioni_md_path: Path,
     lesson_id: str,
@@ -615,6 +665,7 @@ def accept(
     text_override: str | None,
     remove_id: str | None,
     max_lines: int,
+    by: str | None = None,
 ) -> dict[str, Any]:
     entries = load_db(prompts_dir)
     entry = next((e for e in entries if e.get("id") == lesson_id), None)
@@ -624,6 +675,9 @@ def accept(
         raise LessonsError(f"La lezione '{lesson_id}' non e' in stato 'proposta' (e': {entry.get('stato')}).")
 
     testo_finale = (text_override or entry["testo"]).strip()
+    problem = lesson_text_problem(testo_finale)
+    if problem:
+        raise LessonsError(f"Lezione non accettata: {problem}")
     if _FORBIDDEN_TOPICS.search(testo_finale):
         raise LessonsError(
             "Il testo tocca costi, approvazione o consenso vocale: una lezione non puo' allentare quelle regole."
@@ -643,10 +697,16 @@ def accept(
     candidate_md = render_lezioni_md(trial)
     if _line_count(candidate_md) > max_lines and not remove_id:
         raise NeedsRemoval(_removal_candidates(entries))
+    if len(candidate_md) > MAX_LESSONS_TOTAL_CHARS:
+        raise LessonsError(
+            f"Con questa lezione lezioni.md supererebbe {MAX_LESSONS_TOTAL_CHARS} caratteri: "
+            "togline una (--remove-id) o accorcia il testo."
+        )
 
     accettata_il = _now()
     entry["stato"] = "attiva"
     entry["accettata_il"] = accettata_il
+    entry["accettata_da"] = " ".join(by.split())[:100] if by else None
     entry["testo"] = testo_finale
     if text_override:
         entry["testo_riscritto_da_utente"] = True
@@ -656,17 +716,30 @@ def accept(
         removed["rimossa_il"] = accettata_il
         removed["motivo_rimozione"] = f"tolta per far posto a {lesson_id}"
 
-    lezioni_md_path.write_text(render_lezioni_md(entries), encoding="utf-8")
+    write_text_atomic(lezioni_md_path, render_lezioni_md(entries))
     save_db(prompts_dir, entries)
     return {
         "id": lesson_id,
         "testo": testo_finale,
-        "lezioni_md": str(lezioni_md_path),
+        # Relativo: niente percorsi del server nella risposta.
+        "lezioni_md": f"{lezioni_md_path.parent.name}/{lezioni_md_path.name}",
         "rimossa": remove_id,
     }
 
 
-def reject(prompts_dir: Path, lesson_id: str, *, reason: str | None) -> dict[str, Any]:
+def accept(prompts_dir: Path, lezioni_md_path: Path, lesson_id: str, **kwargs: Any) -> dict[str, Any]:
+    """Promuove una proposta: sotto il lock del registro (vedi _db_lock)."""
+    with _db_lock(prompts_dir):
+        return _accept(prompts_dir, lezioni_md_path, lesson_id, **kwargs)
+
+
+def reject(prompts_dir: Path, lesson_id: str, *, reason: str | None, by: str | None = None) -> dict[str, Any]:
+    """Scarta una proposta: sotto il lock del registro (vedi _db_lock)."""
+    with _db_lock(prompts_dir):
+        return _reject(prompts_dir, lesson_id, reason=reason, by=by)
+
+
+def _reject(prompts_dir: Path, lesson_id: str, *, reason: str | None, by: str | None = None) -> dict[str, Any]:
     entries = load_db(prompts_dir)
     entry = next((e for e in entries if e.get("id") == lesson_id), None)
     if entry is None:
@@ -675,12 +748,13 @@ def reject(prompts_dir: Path, lesson_id: str, *, reason: str | None) -> dict[str
         raise LessonsError(f"La lezione '{lesson_id}' non e' in stato 'proposta' (e': {entry.get('stato')}).")
     entry["stato"] = "rifiutata"
     entry["rifiutata_il"] = _now()
-    entry["motivo_rifiuto"] = reason or ""
+    entry["motivo_rifiuto"] = (reason or "")[:MAX_LESSON_CHARS]
+    entry["rifiutata_da"] = " ".join(by.split())[:100] if by else None
     save_db(prompts_dir, entries)
     return {"id": lesson_id, "stato": "rifiutata", "motivo_rifiuto": entry["motivo_rifiuto"]}
 
 
-def review(
+def _review(
     prompts_dir: Path, signals_by_episode: list[dict[str, Any]], *, after_episodes: int
 ) -> dict[str, Any]:
     """Ricontrolla, con lo STESSO aggregatore deterministico usato per
@@ -721,6 +795,12 @@ def review(
     if controllate:
         save_db(prompts_dir, entries)
     return {"lezioni_non_funzionanti": segnalate, "lezioni_controllate_tutte": controllate}
+
+
+def review(prompts_dir: Path, signals_by_episode: list[dict[str, Any]], *, after_episodes: int) -> dict[str, Any]:
+    """Ricontrolla le lezioni attive: sotto il lock del registro (vedi _db_lock)."""
+    with _db_lock(prompts_dir):
+        return _review(prompts_dir, signals_by_episode, after_episodes=after_episodes)
 
 
 _TREND_WARNING = (

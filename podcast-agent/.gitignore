@@ -14,4 +14,16 @@ musiche/sottofondo/*
 __pycache__/
 *.pyc
 .venv/
+# venv copiata da un'altra cartella (tolta il 2026-10-07): mai nel repository
+.venv-vecchia-copia/
 .claude/settings.local.json
+
+# lock fra processi e temporanei delle scritture atomiche (src/fileio.py)
+*.lock
+.*.tmp
+
+# file di sistema di macOS
+.DS_Store
+
+# marcatore di una clonazione dall'esito incerto (src/voice_prep.py): stato locale
+.clonazione-*.json

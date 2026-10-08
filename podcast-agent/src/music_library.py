@@ -14,15 +14,15 @@ from __future__ import annotations
 
 import difflib
 import json
-import shutil
-import subprocess
 import unicodedata
-import wave
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from .ffmpeg_tool import find_ffmpeg, media_duration_seconds
+from .fileio import write_json_atomic
 from .registry import file_hash
+from .web_mode import web_mode
 
 CATEGORIES = ("intro", "outro", "sottofondo")
 
@@ -75,50 +75,39 @@ class MusicTrack:
     def sha256(self) -> str:
         return file_hash(self.path)
 
-    def duration_seconds(self) -> float | None:
-        """Durata del brano. None se non misurabile senza ffmpeg/ffprobe.
+    def readability_error(self) -> str | None:
+        """Il motivo per cui il file non si legge come dice la sua estensione, o None.
 
-        I .wav si misurano senza dipendenze (modulo standard `wave`). Gli
-        altri formati (mp3, m4a, ...) servono ffprobe: se manca, la durata
-        resta sconosciuta invece di bloccare l'elenco — la si conoscera' al
-        momento del mix, quando ffmpeg e' comunque richiesto.
+        ffmpeg apre ogni file con il formato forzato dall'estensione (C6): un AAC
+        chiamato .mp3, o un .wav che contiene un mp3, non si legge. Meglio dirlo
+        negli elenchi e prima di spendere che con un errore di ffmpeg al mix
+        (revisione di sicurezza C6, BASSA-1). Senza ffmpeg non si giudica.
         """
-        if self.extension == ".wav":
-            try:
-                with wave.open(str(self.path), "rb") as handle:
-                    frames = handle.getnframes()
-                    rate = handle.getframerate()
-                    return frames / rate if rate else None
-            except (wave.Error, OSError):
-                return None
-        return _ffprobe_duration(self.path)
+        if self.extension == ".wav" or find_ffmpeg() is None:
+            return None
+        if media_duration_seconds(self.path) is None:
+            return (
+                f"il file non si legge come {self.extension}: l'estensione non corrisponde al "
+                "contenuto, oppure il file e' rovinato. Ricaricalo nel formato giusto."
+            )
+        return None
 
+    def duration_seconds(self) -> float | None:
+        """Durata del brano. None se non misurabile.
 
-def _ffprobe_duration(path: Path) -> float | None:
-    ffprobe = shutil.which("ffprobe")
-    if not ffprobe:
-        return None
-    try:
-        result = subprocess.run(
-            [
-                ffprobe, "-v", "error", "-show_entries", "format=duration",
-                "-of", "default=noprint_wrappers=1:nokey=1", str(path),
-            ],
-            capture_output=True, text=True, timeout=30,
-        )
-    except (OSError, subprocess.TimeoutExpired):
-        return None
-    if result.returncode != 0:
-        return None
-    try:
-        return float(result.stdout.strip())
-    except ValueError:
-        return None
+        I .wav si misurano senza dipendenze; gli altri formati con ffprobe o,
+        nell'installazione standard, con l'ffmpeg di imageio-ffmpeg (vedi
+        src/ffmpeg_tool.media_duration_seconds). Una durata sconosciuta non
+        blocca l'elenco: la si conoscera' al momento del mix.
+        """
+        return media_duration_seconds(self.path)
 
 
 def _load_metadata(track_path: Path, category: str) -> tuple[TrackMetadata, str | None]:
     """Legge <nome>.json accanto al brano. Assente = metadati vuoti, non errore."""
     meta_path = track_path.with_suffix(".json")
+    if meta_path.is_symlink():
+        return TrackMetadata(), f"{meta_path.name} e' un link simbolico: non lo leggo."
     if not meta_path.is_file():
         return TrackMetadata(), None
 
@@ -173,12 +162,23 @@ class MusicLibrary:
             tracks: list[MusicTrack] = []
             rejected: list[Path] = []
             category_dir = self.dir / category
-            if category_dir.is_dir():
+            if category_dir.is_symlink():
+                # Una cartella di categoria collegata altrove non si legge
+                # (sicurezza C7, BASSA-3): i brani starebbero fuori da musiche/.
+                rejected.append(category_dir)
+            elif category_dir.is_dir():
                 for entry in sorted(category_dir.iterdir()):
-                    if not entry.is_file() or entry.name.startswith("."):
+                    if entry.name.startswith("."):
                         continue
-                    if entry.suffix.lower() == ".json":
-                        continue  # sidecar dei metadati, non un brano
+                    if entry.is_symlink():
+                        # Come nella libreria Voci: un link non si segue,
+                        # finisce fra i file scartati (revisione finale, N4).
+                        rejected.append(entry)
+                        continue
+                    if not entry.is_file():
+                        continue
+                    if entry.suffix.lower() in (".json", ".lock", ".tmp"):
+                        continue  # metadati accanto al brano (e loro lock), non un brano
                     if entry.suffix.lower() not in self.accepted_extensions:
                         rejected.append(entry)
                         continue
@@ -192,6 +192,24 @@ class MusicLibrary:
                             metadata_error=error,
                         )
                     )
+            # Due file con lo stesso nome (a meno dell'estensione) si leggerebbero
+            # lo stesso <nome>.json e sarebbero ambigui: nessuno dei due si usa
+            # finche' uno non viene tolto (revisione di sicurezza C5, MEDIA-1).
+            groups: dict[str, list[MusicTrack]] = {}
+            for track in tracks:
+                groups.setdefault(_normalize(track.name), []).append(track)
+            for group in groups.values():
+                if len(group) > 1:
+                    files = ", ".join(t.path.name for t in group)
+                    for track in group:
+                        index = tracks.index(track)
+                        tracks[index] = MusicTrack(
+                            category=track.category,
+                            name=track.name,
+                            path=track.path,
+                            metadata=track.metadata,
+                            metadata_error=f"piu' brani con lo stesso nome in {category}/ ({files}): tienine uno solo.",
+                        )
             self._tracks[category] = tracks
             self._rejected[category] = rejected
         return dict(self._tracks)
@@ -237,6 +255,11 @@ class MusicLibrary:
             return None, []
 
         if raw.isdigit():
+            # Dall'interfaccia un numero non vale come nome (come per le voci):
+            # l'indice resta solo per run.py, che mostra l'elenco numerato
+            # (decisione dell'utente dopo C7).
+            if web_mode():
+                return None, []
             index = int(raw)
             if 1 <= index <= len(pool):
                 return pool[index - 1], []
@@ -275,6 +298,9 @@ class MusicLibrary:
                     raise MusicLibraryError(
                         f"'{name}' ({category}) non e' utilizzabile: {track.metadata_error}"
                     )
+                unreadable = track.readability_error()
+                if unreadable:
+                    raise MusicLibraryError(f"'{name}' ({category}) non e' utilizzabile: {unreadable}")
                 return track
         raise MusicLibraryError(
             f"'{name}' non e' piu' fra i brani di {category}/ in {self.dir}: "
@@ -304,13 +330,7 @@ def write_music_choice(run_dir: Path | str, choice: dict[str, str | None]) -> Pa
     """Scrive musiche.json con i nomi gia' risolti. Operazione gratuita: non spende."""
     target = Path(run_dir) / MUSIC_CHOICE_FILENAME
     payload = {c: choice.get(c) for c in CATEGORIES}
-    target.parent.mkdir(parents=True, exist_ok=True)
-    tmp = target.with_suffix(target.suffix + ".tmp")
-    tmp.write_text(
-        json.dumps(payload, indent=2, ensure_ascii=False) + "\n", encoding="utf-8"
-    )
-    tmp.replace(target)
-    return target
+    return write_json_atomic(target, payload)
 
 
 def has_any_music(choice: dict[str, str | None]) -> bool:

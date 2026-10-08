@@ -5,8 +5,12 @@ rompe in silenzio. Questo test e' l'unica cosa che se ne accorge.
 
     python tests/test_tools_cli.py
 
-Non chiama nessuna API a pagamento: il provider vocale e' il FakeProvider, e i
-due tool che parlano con Claude vengono saltati se manca ANTHROPIC_API_KEY.
+Non chiama nessuna API a pagamento: il provider vocale e' il FakeProvider e il
+modello che scrive il copione e' tests/fake_anthropic.py. Le chiavi API vengono
+tolte dall'ambiente dei tool. L'unico test contro l'API vera di Anthropic
+(script_write + script_revise) gira solo con PODCAST_E2E_REALE=1 e la chiave
+presente: senza quel flag e' saltato anche se ANTHROPIC_API_KEY e' esportata
+(revisione finale, B3).
 """
 
 from __future__ import annotations
@@ -33,6 +37,9 @@ if not Path(PYTHON).exists():
 
 PASSED: list[str] = []
 SKIPPED: list[str] = []
+
+#: Il solo interruttore che permette una chiamata reale (e a pagamento) ad Anthropic.
+REAL_E2E = os.environ.get("PODCAST_E2E_REALE") == "1"
 
 
 def check(label: str, condition: bool, detail: str = "") -> None:
@@ -62,13 +69,22 @@ def make_wav(path: Path, seconds: float = 1.0, freq: int = 220) -> None:
         out.writeframes(data)
 
 
-def tool(name: str, *args: str, config: Path) -> tuple[int, dict, str]:
-    """Esegue un tool e ritorna (exit_code, json_stdout, stderr)."""
+def tool(name: str, *args: str, config: Path, real_api: bool = False) -> tuple[int, dict, str]:
+    """Esegue un tool e ritorna (exit_code, json_stdout, stderr).
+
+    Senza `real_api` le chiavi API non arrivano al tool: se qualcosa provasse a
+    chiamare un servizio vero fallirebbe invece di spendere.
+    """
+    env = dict(os.environ)
+    if not real_api:
+        for key in ("ANTHROPIC_API_KEY", "FISH_AUDIO_API_KEY"):
+            env.pop(key, None)
     proc = subprocess.run(
         [PYTHON, str(PROJECT_ROOT / "tools" / name), *args, "--config", str(config)],
         capture_output=True,
         text=True,
         cwd=str(PROJECT_ROOT),
+        env=env,
     )
     try:
         payload = json.loads(proc.stdout)
@@ -84,9 +100,19 @@ def write_config(
     fingerprint: str = "{}",
     fail_tts_after: str = "null",
     name: str = "config-test.yaml",
+    real_anthropic: bool = False,
 ) -> Path:
-    """config.yaml di test: percorsi assoluti nel tempdir, provider finto."""
+    """config.yaml di test: percorsi assoluti nel tempdir, provider finto.
+
+    Il copione lo scrive tests/fake_anthropic.py, salvo `real_anthropic` (solo
+    per il test reale attivato da PODCAST_E2E_REALE=1).
+    """
     config = root / name
+    fake_client = "" if real_anthropic else f"""
+  client_factory: tests.fake_anthropic:build
+  client_options:
+    responses_file: {root / 'anthropic_risposte.json'}
+    log_file: {root / 'anthropic_richieste.jsonl'}"""
     config.write_text(
         f"""
 active_provider: fake
@@ -116,7 +142,7 @@ script:
   api_key_env: ANTHROPIC_API_KEY
   max_tokens: 16000
   words_per_minute: 150
-  target_minutes: 3
+  target_minutes: 3{fake_client}
 """,
         encoding="utf-8",
     )
@@ -143,7 +169,10 @@ def main() -> None:
     config = write_config(root)
 
     print("\n[1] doc_extract.py")
-    code, out, _ = tool("doc_extract.py", str(doc), "--save-to", str(root), config=config)
+    # Documento e --save-to fuori da documenti/ e output/: e' il flusso locale
+    # del subagent, che dalla revisione di sicurezza C0+C1 richiede
+    # --trusted-paths (senza, i tool restano dentro le cartelle del progetto).
+    code, out, _ = tool("doc_extract.py", str(doc), "--save-to", str(root), "--trusted-paths", config=config)
     check("exit 0", code == 0, str(out))
     check("chiavi", {"ok", "path", "kind", "chars", "words", "preview", "text_file"} <= set(out))
     check("testo salvato su file", Path(out["text_file"]).is_file())
@@ -202,7 +231,7 @@ def main() -> None:
     voices_json = run_dir / "voci.json"
     code, out, _ = tool(
         "voices_prepare.py", "--speakers", "Mario Rossi", "Giulia Bianchi",
-        "--out", str(voices_json), "--no-approval-gate", config=config,
+        "--out", str(voices_json), "--no-approval-gate", "--no-consent-gate", config=config,
     )
     check("exit 0", code == 0)
     check("gate saltato esplicitamente", out["approval_gate"] == "bypassed")
@@ -231,7 +260,7 @@ def main() -> None:
     make_wav(root2 / "voci" / "Mario Rossi.wav")
     config_fail = write_config(root2, fail_clone=True)
     code, out, err = tool("voices_prepare.py", "--speakers", "Mario Rossi",
-                          "--no-approval-gate", config=config_fail)
+                          "--no-approval-gate", "--no-consent-gate", config=config_fail)
     check("clonazione fallita -> exit 2 (fermati, non ritentare)", code == 2, f"exit={code}")
     check("tipo errore del provider", out["error_type"] == "ProviderQuotaError", str(out))
 
@@ -268,6 +297,7 @@ def main() -> None:
     code, out, _ = tool(
         "run_finalize.py", "--run-dir", str(run_dir), "--document", str(doc),
         "--voices", str(voices_json), "--audio-paths", str(audio_paths_file),
+        "--trusted-paths",
         config=config,
     )
     check("exit 0", code == 0)
@@ -316,35 +346,64 @@ def main() -> None:
     except Exception as exc:
         check("sessione invalida -> errore chiaro", "non e' un file di sessione" in str(exc))
 
-    print("\n[10] script_write.py / script_revise.py")
-    if not os.environ.get("ANTHROPIC_API_KEY"):
-        skip("script_write end-to-end", "ANTHROPIC_API_KEY assente")
-        skip("script_revise end-to-end", "ANTHROPIC_API_KEY assente")
-        code, out, _ = tool(
-            "script_write.py", "--text-file", text_file, "--speakers", "Mario Rossi",
-            "--run-dir", str(root / "inesistente"), config=config,
-        )
-        check("run-dir inesistente -> exit 1", code == 1 and "run_init" in out["error"])
-        code, out, _ = tool(
-            "script_revise.py", "--session", str(root / "nope.json"),
-            "--instructions", "x", config=config,
-        )
-        check("sessione mancante -> exit 1", code == 1 and out["ok"] is False)
+    print("\n[10] script_write.py / script_revise.py (client Anthropic finto)")
+    from tests.fake_anthropic import queue_responses, read_log
+
+    code, out, _ = tool(
+        "script_write.py", "--text-file", text_file, "--speakers", "Mario Rossi",
+        "--run-dir", str(root / "inesistente"), config=config,
+    )
+    check("run-dir inesistente -> exit 1", code == 1 and "run_init" in out["error"])
+    code, out, _ = tool(
+        "script_revise.py", "--session", str(root / "nope.json"),
+        "--instructions", "x", config=config,
+    )
+    check("sessione mancante -> exit 1", code == 1 and out["ok"] is False)
+
+    responses = root / "anthropic_risposte.json"
+    anthropic_log = root / "anthropic_richieste.jsonl"
+    queue_responses(responses, {"json": SCRIPT})
+    code, out, err = tool(
+        "script_write.py", "--text-file", text_file,
+        "--speakers", "Mario Rossi", "Giulia Bianchi",
+        "--run-dir", str(run_dir), "--trusted-paths", config=config,
+    )
+    check("script_write exit 0", code == 0, err[-400:])
+    check("chiavi", {"titolo", "turni", "problems", "script_file", "session_file",
+                     "rendered", "revision_count"} <= set(out), str(out)[:300])
+    check("il copione e' quello del client finto", out.get("turni") == SCRIPT["turni"], str(out)[:300])
+    revised = {**SCRIPT, "turni": SCRIPT["turni"][:2]}
+    queue_responses(responses, {"json": revised})
+    code, out, err = tool(
+        "script_revise.py", "--session", out["session_file"],
+        "--instructions", "Accorcia l'introduzione a una frase", config=config,
+    )
+    check("script_revise exit 0", code == 0, err[-400:])
+    check("contatore revisioni", out["revision_count"] == 1)
+    calls = read_log(anthropic_log)
+    check("due chiamate al client finto, nessuna all'API", len(calls) == 2, str(len(calls)))
+    check("l'istruzione di revisione e' arrivata al modello",
+          "Accorcia l'introduzione" in calls[-1]["messages"][-1]["content"])
+
+    if not REAL_E2E:
+        skip("script_write/script_revise contro l'API vera", "serve PODCAST_E2E_REALE=1 (spende)")
+    elif not os.environ.get("ANTHROPIC_API_KEY"):
+        skip("script_write/script_revise contro l'API vera", "PODCAST_E2E_REALE=1 ma ANTHROPIC_API_KEY assente")
     else:
+        real_config = write_config(root, name="config-reale.yaml", real_anthropic=True)
+        real_run = Path(tool("run_init.py", "--title", "prova reale", config=real_config)[1]["run_dir"])
         code, out, err = tool(
             "script_write.py", "--text-file", text_file,
             "--speakers", "Mario Rossi", "Giulia Bianchi",
-            "--run-dir", str(run_dir), config=config,
+            "--run-dir", str(real_run), "--trusted-paths", config=real_config, real_api=True,
         )
-        check("script_write exit 0", code == 0, err[-400:])
-        check("chiavi", {"titolo", "turni", "problems", "script_file", "session_file",
-                         "rendered", "revision_count"} <= set(out))
+        check("API vera: script_write exit 0", code == 0, err[-400:])
         code, out, err = tool(
             "script_revise.py", "--session", out["session_file"],
-            "--instructions", "Accorcia l'introduzione a una frase", config=config,
+            "--instructions", "Accorcia l'introduzione a una frase", config=real_config, real_api=True,
         )
-        check("script_revise exit 0", code == 0, err[-400:])
-        check("contatore revisioni", out["revision_count"] == 1)
+        check("API vera: script_revise exit 0", code == 0, err[-400:])
+        check("API vera: contatore revisioni", out["revision_count"] == 1)
 
     print("\n[11] script_save.py — i controlli che lo schema JSON garantiva")
     code, out, _ = tool("run_init.py", "--title", "prova validazione", config=config)
@@ -477,7 +536,7 @@ def main() -> None:
     check("dry-run non ha bisogno di approvazione", code == 0
           and out["approval_gate"] == "not_needed")
 
-    code, out, _ = tool("script_approve.py", "--run-dir", str(save_dir), config=config)
+    code, out, _ = tool("script_approve.py", "--run-dir", str(save_dir), "--current", config=config)
     check("approvazione registrata", code == 0 and out["approved"] is True)
     check("legata alla versione e allo sha256",
           out["version"] == 4 and out["sha256"].startswith("sha256:"))
@@ -619,7 +678,7 @@ def main() -> None:
                     "--speakers", "Mario Rossi", "Giulia Bianchi", *extra, config=cfg)
 
     def approve15():
-        return tool("script_approve.py", "--run-dir", str(rd), config=cfg)
+        return tool("script_approve.py", "--run-dir", str(rd), "--current", config=cfg)
 
     def synth15(*extra, config_file=None):
         return tool("synthesize.py", "--script", str(script_file15), "--voices",
@@ -638,7 +697,7 @@ def main() -> None:
     code, out, _ = approve15()
     check("copione approvato", code == 0 and out["approved"] is True)
     code, out, _ = tool("voices_prepare.py", "--speakers", "Mario Rossi", "Giulia Bianchi",
-                        "--out", str(voices15), "--run-dir", str(rd), config=cfg)
+                        "--out", str(voices15), "--run-dir", str(rd), "--no-consent-gate", config=cfg)
     check("voci preparate col gate superato", code == 0 and out["approval_gate"] == "passed")
 
     # -- 1. prima sintesi, poi la stessa sintesi: zero chiamate nuove --------
@@ -721,10 +780,10 @@ def main() -> None:
     bozza2.write_text(json.dumps(script15, ensure_ascii=False), encoding="utf-8")
     tool("script_save.py", "--run-dir", str(rd2), "--script-json", str(bozza2),
          "--speakers", "Mario Rossi", "Giulia Bianchi", config=cfg)
-    tool("script_approve.py", "--run-dir", str(rd2), config=cfg)
+    tool("script_approve.py", "--run-dir", str(rd2), "--current", config=cfg)
     voices2 = rd2 / "voci.json"
     tool("voices_prepare.py", "--speakers", "Mario Rossi", "Giulia Bianchi",
-         "--out", str(voices2), "--run-dir", str(rd2), config=cfg)
+         "--out", str(voices2), "--run-dir", str(rd2), "--no-consent-gate", config=cfg)
 
     code, out, _ = tool("synthesize.py", "--script", str(rd2 / "conversazione.json"),
                         "--voices", str(voices2), "--run-dir", str(rd2), config=cfg_fail)
@@ -778,7 +837,8 @@ def main() -> None:
     check("retake: non ha toccato l'altro turno con lo stesso testo",
           hashes(segdir)[indice[4]["file"]] == duplicato_hash)
     check("retake: 2 anteprime montate", len(out["previews"]) == 2
-          and all(Path(p).is_file() for p in out["previews"]), str(out["previews"]))
+          # percorsi relativi alla cartella che contiene output/ (mai assoluti)
+          and all((rd.parent.parent / p).is_file() for p in out["previews"]), str(out["previews"]))
     check("retake: il take NON viene scelto dal tool", out["chosen_take"] == 1)
 
     code, out, _ = tool("retake.py", "--run-dir", str(rd), "--list", "3", config=cfg)

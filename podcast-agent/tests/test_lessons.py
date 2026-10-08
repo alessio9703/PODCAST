@@ -447,7 +447,8 @@ def test_accept_unico_scrittore_di_lezioni_md() -> None:
         content = md_path.read_text(encoding="utf-8")
         check("contiene la regola", "Regola di prova." in content)
         check("L1 risulta attiva nel DB", any(e["id"] == "L1" and e["stato"] == "attiva" for e in lm.load_db(prompts_dir)))
-        check("accept ritorna il path di lezioni.md", result["lezioni_md"] == str(md_path))
+        # Relativo alla cartella dei prompt: niente percorsi del server nella risposta.
+        check("accept ritorna il path di lezioni.md", result["lezioni_md"] == f"{md_path.parent.name}/{md_path.name}")
 
 
 def test_accept_tetto_di_righe() -> None:
@@ -628,9 +629,11 @@ def test_signals_fallisce_senza_bloccare_synthesize() -> None:
             fallito = True
         check("collect_and_write fallisce senza sessione (dimostra che puo' fallire)", fallito)
 
-    synth_src = (PROJECT_ROOT / "tools" / "synthesize.py").read_text(encoding="utf-8")
+    # La sintesi (tools/synthesize.py e tools/produce.py) passa da
+    # src/production.render_episode(), che raccoglie i segnali.
+    synth_src = (PROJECT_ROOT / "src" / "production.py").read_text(encoding="utf-8")
     check(
-        "synthesize.py chiama i segnali dentro un try/except che non rilancia",
+        "la sintesi chiama i segnali dentro un try/except che non rilancia",
         "collect_and_write(run_dir" in synth_src and "except Exception" in synth_src,
     )
 

@@ -22,7 +22,7 @@ from __future__ import annotations
 import argparse
 import json
 
-from _common import add_config_arg, emit, note, resolve_path, run_tool  # noqa: E402
+from _common import add_config_arg, bootstrap, emit, note, parse_args, run_dir_arg, run_tool  # noqa: E402
 from src.episode_timeline import (  # noqa: E402
     attach_texts,
     label,
@@ -31,12 +31,21 @@ from src.episode_timeline import (  # noqa: E402
     turn_at,
 )
 from src.music_mixer import MUSICHE_USATE_FILENAME  # noqa: E402
+from src.production import load_montage  # noqa: E402
 from src.segment_cache import SCRIPT_FILENAME  # noqa: E402
 from src.script_writer import PodcastScript  # noqa: E402
 
 
 def _load_offset(run_dir) -> tuple[float, float | None]:
-    """(voice_offset_seconds, voice_duration_seconds). (0, None) se non c'e' musica."""
+    """(voice_offset_seconds, voice_duration_seconds). (0, None) se non c'e' musica.
+
+    Prima dal registro dell'ultimo montaggio (_montaggio.json): musiche_usate.json
+    resta da un mix precedente anche se l'episodio e' stato rimontato senza
+    musiche. Le run montate prima di C3 non hanno il registro.
+    """
+    record = load_montage(run_dir)
+    if record is not None:
+        return float(record.get("voice_offset_seconds") or 0.0), record.get("voice_duration_seconds") if record.get("musiche") else None
     target = run_dir / MUSICHE_USATE_FILENAME
     if not target.is_file():
         return 0.0, None
@@ -54,9 +63,10 @@ def main() -> None:
     # accettato per uniformita' con gli altri tool: qui non serve nessun
     # provider, la timeline sta gia' nella cartella dell'episodio
     add_config_arg(parser)
-    args = parser.parse_args()
+    args = parse_args(parser)
 
-    run_dir = resolve_path(args.run_dir)
+    config = bootstrap(args)
+    run_dir = run_dir_arg(args.run_dir, config)
     asked_seconds = parse_timecode(args.at)
 
     script_file = run_dir / SCRIPT_FILENAME

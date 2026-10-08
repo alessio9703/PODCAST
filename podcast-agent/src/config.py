@@ -96,6 +96,53 @@ class Config:
         return dict(self.raw.get("lessons") or {})
 
     @property
+    def clone_cost_usd(self) -> float | None:
+        """Costo di una clonazione sul provider attivo, in USD (None = non noto).
+
+        Sta in `providers.<nome>.clone_cost_usd`, accanto a `options` e non
+        dentro: le opzioni vanno tali e quali al costruttore del provider.
+        """
+        providers = self.raw.get("providers") or {}
+        value = (providers.get(self.active_provider) or {}).get("clone_cost_usd")
+        if value is None:
+            return None
+        try:
+            return float(value)
+        except (TypeError, ValueError) as exc:
+            raise ConfigError(f"providers.{self.active_provider}.clone_cost_usd non e' un numero.") from exc
+
+    @property
+    def eur_rate(self) -> tuple[float, str] | None:
+        """(euro per un dollaro, data del tasso), o None se non configurato.
+
+        Decisione D3: il costo in euro si mostra solo con un tasso dichiarato e
+        datato in config.yaml (`currency.eur_per_usd`, `currency.rate_date`).
+        Nessun tasso inventato: senza, la UI mostra i dollari.
+        """
+        currency = self.raw.get("currency") or {}
+        rate, date = currency.get("eur_per_usd"), currency.get("rate_date")
+        if rate is None or not date:
+            return None
+        try:
+            return float(rate), str(date)
+        except (TypeError, ValueError) as exc:
+            raise ConfigError("currency.eur_per_usd non e' un numero.") from exc
+
+    @property
+    def document_limits(self) -> Any:
+        """Limiti sui documenti di partenza (sezione `documents:`).
+
+        Mancano nei config.yaml creati prima: valgono i default di
+        src.pdf_reader.DocumentLimits.
+        """
+        from .pdf_reader import DocumentLimits
+
+        try:
+            return DocumentLimits.from_settings(self.raw.get("documents"))
+        except (TypeError, ValueError) as exc:
+            raise ConfigError(f"Sezione 'documents' di config.yaml non valida: {exc}") from exc
+
+    @property
     def accepted_extensions(self) -> list[str]:
         exts = self.audio.get("accepted_extensions") or [".wav", ".mp3"]
         return [str(e).lower() if str(e).startswith(".") else f".{e}".lower() for e in exts]
@@ -150,6 +197,39 @@ class Config:
                 f"Aggiungila al file .env:\n    {env_name}=sk-ant-..."
             )
         return key
+
+    def anthropic_client(self) -> Any:
+        """Il client con cui si parla col modello che scrive il copione.
+
+        Di norma e' `anthropic.Anthropic` con la chiave dell'ambiente. Con
+        `script.client_factory: "modulo:funzione"` in config.yaml si usa
+        invece quello che la funzione restituisce, chiamata con
+        `script.client_options`: e' lo stesso meccanismo di
+        `providers.*.class`, e serve ai test per un client finto che non
+        chiama mai l'API (tests/fake_anthropic.py). In quel caso la chiave non
+        e' richiesta.
+        """
+        factory = self.script.get("client_factory")
+        if factory:
+            module_name, _, func_name = str(factory).partition(":")
+            if not module_name or not func_name:
+                raise ConfigError(
+                    "script.client_factory deve essere nella forma 'modulo:funzione'."
+                )
+            try:
+                module = importlib.import_module(module_name)
+            except ImportError as exc:
+                raise ConfigError(
+                    f"Impossibile importare '{module_name}' (script.client_factory): {exc}"
+                ) from exc
+            builder = getattr(module, func_name, None)
+            if not callable(builder):
+                raise ConfigError(f"'{factory}' non e' una funzione.")
+            return builder(dict(self.script.get("client_options") or {}))
+
+        import anthropic
+
+        return anthropic.Anthropic(api_key=self.anthropic_api_key())
 
 
 def load_config(path: str | Path | None = None) -> Config:

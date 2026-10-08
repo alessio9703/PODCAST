@@ -29,6 +29,8 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
+from .errors import DomainError
+from .fileio import write_json_atomic
 from .script_writer import PodcastScript
 
 FILENAME = "_script_session.json"
@@ -38,9 +40,29 @@ class ScriptSessionError(RuntimeError):
     """File di sessione mancante, illeggibile o incoerente."""
 
 
+class ScriptHasErrors(DomainError):
+    """La versione corrente ha errori bloccanti: non si puo' approvare.
+
+    Succede solo con il copione scritto dall'API (tools/script_write.py,
+    script_revise.py): la risposta del modello e' gia' pagata, quindi viene
+    salvata comunque come versione, ma con i suoi errori, e resta da
+    correggere (modifica di una battuta o nuova richiesta) prima di poterla
+    approvare. Gli altri percorsi non salvano mai un copione con errori.
+    """
+
+
+#: Che cosa ha prodotto una versione. Serve all'elenco delle versioni e a
+#: capire, mesi dopo, da dove arriva un copione.
+VERSION_KINDS = ("prima_stesura", "riscrittura", "revisione", "modifica_manuale", "ripristino")
+
+
 @dataclass
 class ScriptSession:
     document_path: str
+    #: Il testo che il modello ha visto, cioe' gia' troncato a
+    #: script.max_document_chars (il documento intero sta in
+    #: documento_estratto.txt). Le sessioni scritte prima lo hanno intero:
+    #: si leggono lo stesso.
     document_text: str
     speakers: list[str]
     prompt: str
@@ -123,19 +145,19 @@ class ScriptSession:
         session_path = Path(path)
         if not session_path.is_file():
             raise ScriptSessionError(
-                f"Sessione non trovata: {session_path}\n"
+                f"Sessione non trovata: {session_path.parent.name}/{session_path.name}\n"
                 "Serve il file creato dalla scrittura del copione. Se non c'e', "
                 "riparti dalla scrittura invece che dalla revisione."
             )
         try:
             raw = json.loads(session_path.read_text(encoding="utf-8"))
         except json.JSONDecodeError as exc:
-            raise ScriptSessionError(f"{session_path} non e' un JSON valido: {exc}") from exc
+            raise ScriptSessionError(f"{session_path.name} non e' un JSON valido: {exc}") from exc
 
         missing = {"document_path", "speakers", "prompt"} - set(raw)
         if missing:
             raise ScriptSessionError(
-                f"{session_path} non contiene i campi {sorted(missing)}: "
+                f"{session_path.name} non contiene i campi {sorted(missing)}: "
                 "non e' un file di sessione valido."
             )
         return cls(
@@ -164,14 +186,7 @@ class ScriptSession:
             raise ScriptSessionError("Nessun percorso indicato per salvare la sessione.")
         self.path = target
         self.updated_at = _now()
-        target.parent.mkdir(parents=True, exist_ok=True)
-        tmp = target.with_suffix(target.suffix + ".tmp")
-        tmp.write_text(
-            json.dumps(self.to_dict(), indent=2, ensure_ascii=False) + "\n",
-            encoding="utf-8",
-        )
-        tmp.replace(target)
-        return target
+        return write_json_atomic(target, self.to_dict())
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -195,7 +210,17 @@ class ScriptSession:
 
     # -- aggiornamento ----------------------------------------------------
 
-    def record(self, script: PodcastScript, instruction: str | None = None) -> None:
+    def record(
+        self,
+        script: PodcastScript,
+        instruction: str | None = None,
+        *,
+        kind: str | None = None,
+        errors: list[str] | None = None,
+        base_version: int | None = None,
+        by: str | None = None,
+        add_to_revisions: bool = True,
+    ) -> None:
         """Registra una nuova versione del copione.
 
         Ogni salvataggio crea una voce in `versions[]`. L'approvazione NON
@@ -206,17 +231,29 @@ class ScriptSession:
         aggirando questo modulo.
         """
         payload = script.to_dict()
-        if instruction:
+        if instruction and add_to_revisions:
+            # Le revisioni finiscono nel prompt delle revisioni successive
+            # ("gia' applicate, da non annullare"): un ripristino no, perche'
+            # "torna alla versione 2" non e' un'indicazione che il modello
+            # possa rispettare senza vedere la versione 2.
             self.revisions.append({"at": _now(), "instruction": instruction.strip()})
-        self.versions.append(
-            {
-                "version": len(self.versions) + 1,
-                "at": _now(),
-                "instruction": instruction.strip() if instruction else None,
-                "sha256": script_hash(payload),
-                "script": payload,
-            }
-        )
+        if kind is None:
+            kind = "revisione" if (instruction and self.versions) else "prima_stesura"
+        entry: dict[str, Any] = {
+            "version": len(self.versions) + 1,
+            "at": _now(),
+            "instruction": instruction.strip() if instruction else None,
+            "sha256": script_hash(payload),
+            "script": payload,
+            "kind": kind,
+        }
+        if errors:
+            entry["errors"] = list(errors)
+        if base_version is not None:
+            entry["base_version"] = base_version
+        if by:
+            entry["by"] = by
+        self.versions.append(entry)
         self.current_script = payload
 
     @property
@@ -231,17 +268,55 @@ class ScriptSession:
     def current_hash(self) -> str | None:
         return script_hash(self.current_script) if self.current_script else None
 
+    def version(self, number: int) -> dict[str, Any]:
+        """La versione `number` (da 1). Solleva se non esiste."""
+        if not 1 <= number <= len(self.versions):
+            raise ScriptSessionError(
+                f"La versione {number} non esiste: la sessione ne ha "
+                f"{len(self.versions)} (da 1 a {len(self.versions)})."
+            )
+        return self.versions[number - 1]
+
+    @property
+    def current_errors(self) -> list[str]:
+        """Errori bloccanti della versione corrente (solo copioni dall'API)."""
+        if not self.versions:
+            return []
+        return list(self.versions[-1].get("errors") or [])
+
+    def approval_view(self) -> dict[str, Any]:
+        """Lo stato dell'approvazione, come lo mostra la UI."""
+        problem = self.approval_problem() if self.current_script is not None else None
+        approved = self.approved or {}
+        return {
+            "approved": bool(self.approved) and problem is None,
+            "approved_version": approved.get("version"),
+            "approved_at": approved.get("at"),
+            "approved_by": approved.get("by"),
+            "approval_problem": problem,
+            "approvable": self.current_script is not None and not self.current_errors,
+        }
+
     # -- approvazione -----------------------------------------------------
 
-    def approve(self) -> dict[str, Any]:
+    def approve(self, by: str | None = None) -> dict[str, Any]:
         """Registra l'approvazione dell'utente sul copione CORRENTE."""
         if self.current_script is None:
             raise ScriptSessionError("Non c'e' nessun copione da approvare.")
+        if self.current_errors:
+            raise ScriptHasErrors(
+                f"La versione {self.version_count} ha errori bloccanti e non si puo' "
+                "approvare: correggili (modifica la battuta o chiedi una revisione), "
+                "poi approva la nuova versione.",
+                details={"version": self.version_count, "errors": self.current_errors},
+            )
         self.approved = {
             "version": self.version_count,
             "sha256": self.current_hash,
             "at": _now(),
         }
+        if by:
+            self.approved["by"] = by
         return self.approved
 
     def approval_problem(self, script: dict[str, Any] | None = None) -> str | None:
@@ -333,4 +408,11 @@ def _now() -> str:
     return datetime.now().replace(microsecond=0).isoformat()
 
 
-__all__ = ["ScriptSession", "ScriptSessionError", "script_hash", "FILENAME"]
+__all__ = [
+    "FILENAME",
+    "VERSION_KINDS",
+    "ScriptHasErrors",
+    "ScriptSession",
+    "ScriptSessionError",
+    "script_hash",
+]
