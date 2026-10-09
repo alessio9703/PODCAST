@@ -11,7 +11,8 @@ from __future__ import annotations
 
 import hashlib
 import json
-from typing import Any, Mapping
+from dataclasses import dataclass
+from typing import Any, Callable, Mapping
 
 CAMPI = ("approved_version", "cost_usd", "cost_eur", "clone_cost_total_usd", "turns", "turns_to_generate",
          "chars_to_generate", "voices_to_clone", "consent_missing")
@@ -37,10 +38,34 @@ def impronta_retake(dati: Mapping[str, Any]) -> str:
     return "retake:" + hashlib.sha256(testo.encode("utf-8")).hexdigest()[:32]
 
 
-# Azioni che spendono e vanno legate a una stima: azione -> (azione della stima,
-# parametri della stima dai parametri dell'azione, impronta).
+def impronta_lezioni(dati: Mapping[str, Any]) -> str:
+    """Per la stima delle proposte di lezioni (`lessons.py --propose --dry-run`)."""
+    stima = dati.get("stima") if isinstance(dati.get("stima"), Mapping) else {}
+    evidenza = dati.get("evidenza") if isinstance(dati.get("evidenza"), Mapping) else {}
+    scelti = {"stima": {k: stima.get(k) for k in ("input_tokens_stimati", "output_tokens_stimati_max", "cost_usd")},
+              "schemi": len(evidenza.get("schemi") or []), "episodi": evidenza.get("episodi_analizzati")}
+    testo = json.dumps(scelti, sort_keys=True, ensure_ascii=False, default=str)
+    return "lezioni:" + hashlib.sha256(testo.encode("utf-8")).hexdigest()[:32]
+
+
+@dataclass(frozen=True)
+class Stima:
+    """Un'azione che spende e va legata alla stima vista: quale stima rifare, con quali
+    parametri, come calcolarne l'impronta, dove sta il costo e se senza costo si ferma."""
+
+    azione: str
+    parametri: Callable[[Mapping[str, Any]], dict[str, Any]]
+    impronta: Callable[[Mapping[str, Any]], str]
+    costo: Callable[[Mapping[str, Any]], tuple[Any, Any]] = lambda d: (d.get("cost_usd"), d.get("cost_eur"))
+    costo_obbligatorio: bool = True
+
+
 STIME = {
-    "produci": ("stima", lambda p: {"run": p["run"]}, impronta_stima),
-    "genera_retake": ("stima_retake", lambda p: {k: p[k] for k in ("run", "battuta", "take", "indicazioni") if k in p},
-                      impronta_retake),
+    "produci": Stima("stima", lambda p: {"run": p["run"]}, impronta_stima),
+    "genera_retake": Stima("stima_retake", lambda p: {k: p[k] for k in ("run", "battuta", "take", "indicazioni") if k in p},
+                           impronta_retake),
+    # Il costo delle proposte c'e' solo se config.yaml ha i prezzi del modello: senza, la
+    # pagina dice che non e' noto (come per le clonazioni) e la proposta si puo' confermare.
+    "lezioni_proponi": Stima("lezioni_proponi_stima", lambda p: {}, impronta_lezioni,
+                             costo=lambda d: ((d.get("stima") or {}).get("cost_usd"), None), costo_obbligatorio=False),
 }

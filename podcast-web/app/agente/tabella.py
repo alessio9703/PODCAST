@@ -274,6 +274,10 @@ TABELLA: dict[str, Comando] = {
     ), permesso="brano_metadati", by=True, registra=True, fase="A5"),
     # --- Avanzate (A5) -----------------------------------------------------
     "lezioni_elenco": Comando("lessons.py", (), fissi=("--list",), permesso="lezioni", fase="A5"),
+    "lezioni_evidenze": Comando("lessons.py", (Arg("ultimi", "--last", INTERO, minimo=1, massimo=1000),),
+                                fissi=("--evidence",), permesso="lezioni", fase="A5"),
+    "lezioni_revisione": Comando("lessons.py", (), fissi=("--review",), permesso="lezioni", fase="A5"),
+    "lezioni_andamento": Comando("lessons.py", (), fissi=("--trend",), permesso="lezioni", fase="A5"),
     "lezioni_proponi_stima": Comando("lessons.py", (), fissi=("--propose", "--dry-run"), permesso="lezioni", fase="A5"),
     "lezioni_proponi": Comando("lessons.py", (), fissi=("--propose",), timeout=300, lungo=True,
                                permesso="lezioni", registra=True, sigkill_dopo_s=60, fase="A5"),

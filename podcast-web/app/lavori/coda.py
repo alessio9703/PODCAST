@@ -170,21 +170,21 @@ class Coda:
             # l'esito della stima.
             from app.servizi.esiti import valuta
 
-            azione_stima, parametri_stima, calcola = STIME[azione]
-            stima = await esecutore.esegui(ctx.config, azione_stima, parametri_stima(parametri))
+            regola = STIME[azione]
+            stima = await esecutore.esegui(ctx.config, regola.azione, regola.parametri(parametri))
             if not stima.ok:
                 stato, corpo = valuta(stima, ctx.pulitore)
                 corpo.pop("gettone", None)
                 ctx.registro.scrivi(utente=utente, azione=azione, run=run, esito=corpo.get("error_type", "ErroreInterno"),
                                     http=stato, dettagli={"motivo": "stima non riuscita: lavoro non accodato"})
                 return JSONResponse(corpo, status_code=stato)
-            if not impronta or calcola(stima.json) != impronta:
+            if not impronta or regola.impronta(stima.json) != impronta:
                 ctx.registro.scrivi(utente=utente, azione=azione, run=run, esito="StimaCambiata", http=409,
                                     dettagli={"motivo": "stima diversa da quella confermata: lavoro non accodato"})
                 raise ErroreController("StimaCambiata")
-            costo_usd = _numero(stima.json.get("cost_usd"))
-            costo_eur = _numero(stima.json.get("cost_eur"))
-            if costo_usd is None:
+            usd, eur = regola.costo(stima.json)
+            costo_usd, costo_eur = _numero(usd), _numero(eur)
+            if costo_usd is None and regola.costo_obbligatorio:
                 log.error("stima senza cost_usd per %s (%s): lavoro non accodato", run, azione)
                 ctx.registro.scrivi(utente=utente, azione=azione, run=run, esito="ErroreInterno", http=500,
                                     dettagli={"motivo": "stima senza costo: lavoro non accodato"})

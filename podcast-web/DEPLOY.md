@@ -126,7 +126,7 @@ ruoli. La tabella è in `app/servizi/permessi_default.json` e si può sostituire
   `POST /api/musiche/intro|outro|sottofondo` (50 MB).
   Tutte le altre accettano solo `application/json`, al massimo 256 KB.
 - **Timeout del proxy** (lettura della risposta): almeno **300 s** per le API (l'estrazione
-  di un documento lungo arriva a 240 s; in A5 il rimontaggio fino a 900 s), **senza limite
+  di un documento lungo arriva a 240 s; il rimontaggio e la forma d'onda fino a 900 s), **senza limite
   pratico (≥ 1 h) per lo SSE**, che riceve un battito ogni 15 s. I lavori lunghi (stesura,
   produzione) non tengono aperta la richiesta: rispondono subito 202 e si seguono con lo
   SSE o con il polling.
@@ -375,3 +375,14 @@ tunnel, percorso del clone, `REGISTRO_FILE`, abilitazione del sito nginx).
   accanto all'avviso di costo, senza dialogo (NOTA-8); `amministratore: ["*"]` riceve anche i
   permessi aggiunti in futuro (NOTA-9); il CMS finto firma il percorso del browser e non quello
   normalizzato dal suo client (fallisce in modo sicuro, NOTA-1).
+
+### Dopo A5
+
+- [ ] **Revisione di sicurezza delle aggiunte di A5** (non prevista dal piano, che ne fa
+  una a fine A1, A2 e A4): caricamento di registrazioni e brani (`POST /api/voci`,
+  `/api/musiche/<categoria>`), ascolto dei campioni, anteprime dei take servite da
+  sottocartelle della run (`app/file/nomi.py`, `apri_percorso_relativo`), retake e proposte
+  di lezioni legati alla stima, lezioni e diagnostica.
+- [ ] **Cancellare voci, brani e documenti** non si fa dall'interfaccia (non c'è un comando
+  dell'agente): per una voce prima si revoca il consenso dalla libreria, poi si tolgono a
+  mano registrazione e `.json` (contratto, "Caricamenti").

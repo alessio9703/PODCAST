@@ -75,7 +75,11 @@ AUTH_MODE=demo AGENT_DIR=/percorso/podcast-agent AGENT_VERSIONE_ATTESA=1.0-web .
 - `app/ingresso/` chi è l'utente (demo, cms)
 - `app/agente/` tabella dei comandi ed esecutore
 - `app/servizi/` esiti, errori, gettoni, permessi, avvio, `azioni.py` (permesso → agente → esito → registro)
-- `app/api/` rotte · `app/lavori/` coda e eventi · `app/file/` caricamenti e download
+- `app/api/` rotte: `episodi.py` (archivio, passi 1-5, 7, confronto versioni), `lavori.py` (coda, SSE),
+  `correzioni.py` (forma d'onda, retake, rimontaggio), `librerie.py` (documenti, voci, musiche),
+  `avanzate.py` (lezioni, impostazioni, diagnostica), `conferme.py` (gettoni)
+- `app/lavori/` coda e eventi · `app/file/` caricamenti e download
+- `app/servizi/stima.py` impronte: produzione, retake e proposte di lezioni partono solo con la stima vista
 - `app/registro.py` registro attività · `static/` interfaccia · `deploy/` esempi di installazione
 - `tests/agente_finto.py` lo script che fa la parte dei tool nei test
 - `strumenti/demo.py` copia dell'agente con i servizi finti, per provare l'interfaccia in locale

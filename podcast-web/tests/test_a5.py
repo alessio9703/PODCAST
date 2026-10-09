@@ -326,3 +326,87 @@ def test_forma_onda_e_battuta_al_tempo(client, agente):
     assert argv(agente, "turn_at.py") == ["--run-dir=run-uno", "--at=4:12"]
     for al in ("-1", "4:12; x", "--by=x", "a"):
         assert client.get(f"/api/episodi/run-uno/battuta?al={al}").status_code == 400, al
+
+
+# --- Lezioni, impostazioni, diagnostica -------------------------------------------
+
+from app.servizi.stima import impronta_lezioni  # noqa: E402
+
+STIMA_LEZIONI = {"ok": True, "dry_run": True, "evidenza": {"episodi_analizzati": 4, "schemi": [{"id": "s1"}]},
+                 "stima": {"input_tokens_stimati": 900, "output_tokens_stimati_max": 800, "cost_usd": None,
+                           "cost_basis": "non disponibile"}}
+
+
+def test_letture_delle_lezioni(client, agente):
+    for url, attesi in (("/api/lezioni", ["--list"]), ("/api/lezioni/evidenze?ultimi=5", ["--last=5", "--evidence"]),
+                        ("/api/lezioni/revisione", ["--review"]), ("/api/lezioni/andamento", ["--trend"])):
+        assert client.get(url).status_code == 200, url
+        assert argv(agente, "lessons.py") == attesi, url
+
+
+def test_lezioni_solo_con_il_permesso(ambiente, agente):
+    from tests.conftest import header_firmati, SEGRETO
+    amb = {**ambiente, "AUTH_MODE": "cms", "LIL_SEGRETO": SEGRETO}
+    with client_per(amb) as c:
+        for metodo, url, corpo in (("GET", "/api/lezioni", None), ("POST", "/api/lezioni/L1/accettazione", {}),
+                                   ("POST", "/api/lezioni/proposta", {"impronta": "x"}), ("GET", "/api/diagnostica", None)):
+            h = {**header_firmati(metodo, url, ruoli="autore,approvatore,gestore_voci"), "X-LIL-Richiesta": "1"}
+            r = c.request(metodo, url, json=corpo, headers=h)
+            assert r.status_code == 403, url
+        h = {**header_firmati("GET", "/api/lezioni", ruoli="amministratore"), "X-LIL-Richiesta": "1"}
+        assert c.get("/api/lezioni", headers=h).status_code == 200
+    assert [x["argv"] for x in agente.chiamate("lessons.py")] == [["--list"]]
+
+
+def test_proposta_legata_alla_stima_anche_senza_costo(client, agente, ambiente):
+    agente.scenario("lessons.py", [{"exit": 0, "json": STIMA_LEZIONI},
+                                   {"exit": 0, "json": {"ok": True, "proposte": [{"id": "P1", "testo": "x"}]}}])
+    r = client.get("/api/lezioni/proposta/stima")
+    imp = r.json()["dati"]["impronta"]
+    assert imp == impronta_lezioni(STIMA_LEZIONI)
+    agente.scenario("lessons.py", [{"exit": 0, "json": STIMA_LEZIONI},
+                                   {"exit": 0, "json": {"ok": True, "proposte": [{"id": "P1", "testo": "x"}]}}])
+    r = client.post("/api/lezioni/proposta", json={"impronta": imp})
+    assert r.status_code == 202, r.text
+    aspetta(client, finito(r.json()["dati"]["lavoro"]))
+    assert [c["argv"] for c in agente.chiamate("lessons.py")][-2:] == [["--propose", "--dry-run"], ["--propose"]]
+    # stima cambiata (nel frattempo un episodio in piu'): non parte
+    agente.scenario("lessons.py", {"exit": 0, "json": {**STIMA_LEZIONI, "evidenza": {"episodi_analizzati": 5, "schemi": [{}]}}})
+    r = client.post("/api/lezioni/proposta", json={"impronta": imp})
+    assert r.status_code == 409 and r.json()["error_type"] == "StimaCambiata"
+
+
+def test_accettazione_con_scelta_della_lezione_da_togliere(client, agente, ambiente):
+    agente.scenario("lessons.py", [
+        {"exit": 3, "json": {"ok": False, "error_type": "LessonRemovalRequired", "error": "tetto raggiunto",
+                             "details": {"campo": "remove_id", "lezione": "P2", "candidates": [{"id": "L1"}, {"id": "L3"}]}}},
+        {"exit": 0, "json": {"ok": True}}])
+    r = client.post("/api/lezioni/P2/accettazione", json={"testo": "Frasi brevi."})
+    assert r.status_code == 409 and r.json()["error_type"] == "LessonRemovalRequired"
+    assert argv(agente, "lessons.py") == ["--accept=P2", "--text=Frasi brevi.", "--by=Utente Demo"]
+    g = r.json()["gettone"]
+    r = client.post(f"/api/conferme/{g}", json={"scelta": "L3"})
+    assert r.status_code == 200, r.text
+    assert argv(agente, "lessons.py") == ["--accept=P2", "--text=Frasi brevi.", "--remove-id=L3", "--by=Utente Demo"]
+    assert righe_registro(ambiente)[-1]["azione"] == "lezioni_accetta"
+
+
+def test_rifiuto_vuole_il_motivo(client, agente):
+    assert client.post("/api/lezioni/P1/rifiuto", json={}).status_code in (400, 422)
+    assert client.post("/api/lezioni/P1/rifiuto", json={"motivo": "Troppo generica"}).status_code == 200
+    assert argv(agente, "lessons.py") == ["--reject=P1", "--reason=Troppo generica", "--by=Utente Demo"]
+
+
+def test_diagnostica_anche_quando_un_controllo_non_passa(client, agente):
+    agente.scenario("doctor.py", {"exit": 1, "json": {"ok": False, "ffmpeg_path": "/opt/x/ffmpeg", "checks": [
+        {"name": "ffmpeg", "ok": False, "required": True, "detail": "/opt/x/ffmpeg non trovato"},
+        {"name": "web_mode", "ok": True, "required": True, "detail": "ok"}]}})
+    r = client.get("/api/diagnostica")
+    assert r.status_code == 200 and r.json()["dati"]["ok"] is False
+    assert "/opt/x" not in r.text and "ffmpeg_path" not in r.text
+    assert argv(agente, "doctor.py") == ["--web"]
+
+
+def test_impostazioni(client, agente):
+    r = client.get("/api/impostazioni")
+    assert r.status_code == 200 and "impostazioni" in r.json()["dati"]

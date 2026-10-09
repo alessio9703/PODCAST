@@ -252,3 +252,8 @@ progress { width: 100%; height: 12px; accent-color: var(--primario); }
 .take { list-style: none; padding: 0; margin: 8px 0; }
 .take-riga { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 8px 0; border-bottom: 1px solid var(--bordo-tenue); }
 .take-riga label { flex: 1 1 160px; }
+
+/* Lezioni */
+.lezioni { list-style: none; padding: 0; margin: 0; }
+.lezione { padding: 12px 0; border-bottom: 1px solid var(--bordo-tenue); }
+.lezione:last-child { border-bottom: 0; }
