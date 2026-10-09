@@ -32,7 +32,10 @@ async def conferma(gettone: str, request: Request, corpo: RispostaConferma | Non
                    utente: Utente = Depends(utente_corrente)) -> JSONResponse:
     ctx = contesto(request)
     g = ctx.gettoni.consuma(gettone, utente.id)
-    cmd = TABELLA[g.azione]
+    cmd = TABELLA.get(g.azione)
+    if cmd is None:
+        # Gettoni dei caricamenti (FileEsistente): si usano solo rimandando il file.
+        raise ErroreController("GettoneNonValido")
     regola = cmd.conferme.get(g.error_type)
     if regola is None:
         raise ErroreController(
@@ -43,7 +46,8 @@ async def conferma(gettone: str, request: Request, corpo: RispostaConferma | Non
         if cmd.lungo:
             if ctx.coda is None:
                 raise ErroreController("NonPronto")
-            return await ctx.coda.accoda_risposta(request, utente, g.azione, g.parametri, flag_conferme=(regola.flag,))
+            return await ctx.coda.accoda(utente, g.azione, g.parametri, flag_conferme=(regola.flag,),
+                                         risposta_a=g.error_type)
         stato, risposta, _ = await esegui_e_valuta(ctx, utente, g.azione, g.parametri, flag_conferme=(regola.flag,),
                                                   risposta_a=g.error_type)
         return JSONResponse(risposta, status_code=stato)

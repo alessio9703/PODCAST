@@ -62,8 +62,9 @@ solo nel log del controller. Segreto in `LIL_SEGRETO` (almeno 32 byte); per la r
 `LIL_SEGRETO_PRECEDENTE` resta accettato finché il CMS non usa quello nuovo.
 
 Il CMS deve **togliere** dalle richieste del browser ogni header `X-LIL-*` prima di aggiungere
-i propri (a parte `X-LIL-Richiesta` e `X-LIL-Nome-File`, che vengono dalla pagina e non
-danno identità).
+i propri. Fanno eccezione, e vanno inoltrati così come sono, i tre header che vengono dalla
+pagina e non danno identità: `X-LIL-Richiesta`, `X-LIL-Nome-File` e `X-LIL-Gettone` (la
+conferma della sostituzione di un file). L'elenco completo è in §3.
 
 ## 2. Ruoli
 
@@ -98,6 +99,12 @@ ruoli. La tabella è in `app/servizi/permessi_default.json` e si può sostituire
   non passa, l'interfaccia ripiega sul polling (`?dopo=N`).
 - Le richieste che cambiano qualcosa portano l'header `X-LIL-Richiesta: 1` (difesa CSRF):
   il proxy lo inoltra.
+- **Header della pagina da inoltrare intatti**: `X-LIL-Richiesta`, `X-LIL-Nome-File`,
+  `X-LIL-Gettone` (confermare la sostituzione di un file già presente), `Range` (ascolto
+  dell'audio), `Last-Event-ID` (ripresa dello SSE). Tutti gli altri `X-LIL-*` del browser si
+  tolgono (§1).
+- **Rotte con corpo binario**: oggi solo `POST /api/documenti` (in A5 anche voci e brani).
+  Tutte le altre accettano solo `application/json`, al massimo 256 KB.
 
 ## 4. Da fare prima della produzione
 
@@ -136,3 +143,47 @@ sotto), NOTA-1 (impronta del gettone tolta, la conferma registra a quale domanda
   `PERMESSI_FILE` all'avvio (NOTA-5); tetto alla lettura di stdout dei tool (NOTA-6); elenco
   delle opzioni vietate per singolo tool in `verifica_tabella` (NOTA-7); confrontare gli id
   dei candidati di `LessonRemovalRequired` come stringhe (NOTA-8).
+
+### Dalla revisione di A2
+
+Medie corrette nella fase (vedi `docs/avanzamento/A2.md`): coda con il posto prenotato
+prima della stima (MEDIA-1), interruzione che arriva anche durante l'avvio del processo e
+spegnimento che aspetta il lavoro (MEDIA-2), corpo binario solo sulle rotte di caricamento
+(MEDIA-3).
+
+- [ ] **systemd** (da A2, "Da verificare nelle prossime fasi"): con `KillMode=control-group`
+  (default) systemd manda il suo SIGTERM a tutto il gruppo, quindi un secondo SIGTERM alla
+  produzione, e dopo `TimeoutStopSec` un SIGKILL. Usare `KillMode=mixed` (SIGTERM solo al
+  controller, che lo inoltra una volta alla produzione) e `TimeoutStopSec` ≥ 180 s (30 s di
+  uvicorn + 120 s di attesa del lavoro + margine). Da provare sul VPS.
+- [ ] **Sostituzione e file accanto** (A2 BASSA-1): la sostituzione toglie i file con la stessa
+  chiave, compresi `.json` e `.lock`. Per i documenti non conta; **prima delle voci e dei brani
+  (A5) va limitata ai file con un'estensione della libreria**, altrimenti cancellerebbe il
+  `.json` del consenso.
+- [ ] **K7 al momento del rename** (A2 BASSA-2): il blocco "niente sostituzione durante un
+  lavoro" si controlla all'inizio del caricamento; ricontrollarlo subito prima del `rename`
+  (indispensabile per le voci in A5).
+- [ ] **Limite SSE** (A2 BASSA-3): con richieste simultanee si arriva a 5 stream per utente
+  invece di 4 (il contatore sale dentro il generatore). Innocuo; si può contare prima.
+- [ ] **Nomi lunghi in byte** (A2 BASSA-4): 150 caratteri accentati possono superare i 255 byte
+  del filesystem (ext4) → 500 invece di 415. Aggiungere un limite di 200 byte UTF-8.
+- [ ] **Timeout di stesura e revisione** (A2 BASSA-5): dopo il SIGTERM l'attesa non ha limite;
+  se il comando non si chiudesse la coda resterebbe ferma. Aggiungere un'attesa massima (es.
+  2 minuti) e poi SIGKILL al gruppo, **solo** per azioni senza clonazione (mai per `produci`).
+- [ ] **Registro all'esito anche per errori del controller e allo spegnimento** (A2 BASSA-6).
+- [ ] **Stima fallita prima della produzione** (A2 BASSA-7): oggi si accoda lo stesso e il
+  registro non ha il costo. Valutare se rifiutare la produzione (la stima non costa).
+- [ ] **Spegnimento e azioni protette** (A2 BASSA-8): allo spegnimento il loop cancella anche
+  le azioni brevi protette; per `ritenta_clonazione` (fino a 11 minuti) un SIGTERM può portare
+  a `CloneOutcomeUnknown`. Aspettare le azioni protette in corso nel lifespan prima di uscire.
+- [ ] Note di A2: con uvicorn reale le letture brevi **non** si fermano quando il browser si
+  chiude (NOTA-1; K23 invece vale: nessuna scrittura si ferma), aggiungere un controllo di
+  `request.is_disconnected()` alle letture lunghe come `documents_list --name`; `%zz` nel nome
+  del file passa la decodifica (finisce rifiutato o salvato con `%` letterale, NOTA-2); il
+  gettone di `ConsentRequired` è inutile e quello di `CloneOutcomeUnknown` è di chi ha prodotto
+  (approvatore), che di default non ha `voce_clonazione`: in A3 la UI dice di chiedere a chi
+  gestisce le voci, oppure si lega il gettone al permesso (NOTA-4); le librerie devono stare
+  **dentro** la cartella dell'agente (`config.yaml`), da controllare all'avvio (NOTA-5); I/O
+  bloccante nel loop per `fsync` e letture (NOTA-6); azzeramento di `_eventi.jsonl` riconosciuto
+  solo se il file nuovo è più corto (NOTA-7); log rumoroso al superamento del limite del
+  corpo (NOTA-8).

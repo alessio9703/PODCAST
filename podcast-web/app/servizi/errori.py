@@ -19,6 +19,8 @@ ERRORI_CONTROLLER: dict[str, int] = {
     "FileEsistente": 409,
     "GettoneNonValido": 409,
     "LavoroGiaInCorso": 409,
+    "LavoroAnnullato": 409,
+    "TroppeConnessioni": 429,
     "FileTroppoGrande": 413,
     "FileNonAmmesso": 415,
     "ErroreInterno": 500,
@@ -36,6 +38,7 @@ MESSAGGI_DEFAULT: dict[str, str] = {
     "GettoneNonValido": "La conferma non e' piu' valida: ripeti l'operazione.",
     "ErroreInterno": "Errore interno del controller. L'errore e' stato registrato.",
     "CodaPiena": "Troppi lavori in attesa: riprova fra qualche minuto.",
+    "TroppeConnessioni": "Troppe pagine aperte che seguono l'avanzamento.",
     "NonPronto": "Servizio non pronto.",
     "Timeout": "L'operazione ha impiegato troppo tempo ed e' stata fermata.",
 }
@@ -67,7 +70,7 @@ class ErroreController(Exception):
             "esito": "controller",
             "error_type": self.error_type,
             "messaggio": self.messaggio,
-            "riprovabile": self.error_type in ("CodaPiena", "Timeout", "LavoroGiaInCorso"),
+            "riprovabile": self.error_type in ("CodaPiena", "Timeout", "LavoroGiaInCorso", "TroppeConnessioni"),
         }
         if self.details:
             corpo["details"] = self.details

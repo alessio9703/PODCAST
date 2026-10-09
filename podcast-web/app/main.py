@@ -19,7 +19,8 @@ from fastapi.responses import JSONResponse
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from app.agente.tabella import verifica_tabella
-from app.api import conferme, sessione
+from app.api import conferme, episodi, lavori, librerie, sessione
+from app.lavori.coda import Coda
 from app.config import Config, carica_config
 from app.ingresso import crea_ingresso
 from app.registro import Registro
@@ -34,7 +35,11 @@ log = logging.getLogger("podcast_web")
 
 METODI_CHE_CAMBIANO = frozenset({"POST", "PUT", "PATCH", "DELETE"})
 HEADER_RICHIESTA = "x-lil-richiesta"
-TIPI_AMMESSI = ("application/json", "application/octet-stream")
+TIPO_JSON = "application/json"
+TIPO_BINARIO = "application/octet-stream"
+# Le sole rotte che ricevono un corpo binario (caricamenti, con il loro limite in
+# streaming). Altrove si accetta solo JSON, con il limite di CORPO_JSON_MAX.
+CARICAMENTI = frozenset({("POST", "/api/documenti")})
 SENZA_INGRESSO = frozenset({"/salute"})
 # Corpo massimo delle richieste non binarie (JSON): i caricamenti hanno il loro limite.
 CORPO_JSON_MAX = 256 * 1024
@@ -56,7 +61,7 @@ def _errore(exc: ErroreController) -> JSONResponse:
 
 
 class LimiteCorpo:
-    """Middleware ASGI: un corpo non binario oltre CORPO_JSON_MAX -> 413, contato
+    """Middleware ASGI: fuori dalle rotte di caricamento, un corpo oltre CORPO_JSON_MAX -> 413, contato
     mentre arriva (vale anche senza Content-Length o con un valore falso), prima
     che FastAPI lo tenga tutto in memoria."""
 
@@ -68,11 +73,10 @@ class LimiteCorpo:
         if scope["type"] != "http":
             await self.app(scope, receive, send)
             return
-        intestazioni = {k.lower(): v for k, v in scope.get("headers", [])}
-        tipo = intestazioni.get(b"content-type", b"").split(b";")[0].strip().lower()
-        if tipo == b"application/octet-stream":
+        if (scope.get("method"), scope.get("path")) in CARICAMENTI:
             await self.app(scope, receive, send)
             return
+        intestazioni = {k.lower(): v for k, v in scope.get("headers", [])}
         lunghezza = intestazioni.get(b"content-length", b"")
         if lunghezza.isdigit() and int(lunghezza) > self.massimo:
             await _errore(ErroreController("FileTroppoGrande", "Richiesta troppo grande."))(scope, receive, send)
@@ -132,9 +136,15 @@ def crea_app(config: Config | None = None, *, router_extra: list[Any] | None = N
             impostazioni=impostazioni,
         )
         app.state.ingresso = app.state.ctx.ingresso
+        coda = Coda(app.state.ctx)
+        app.state.ctx.coda = coda
+        coda.avvia()
         app.state.salute.segna_pronto()
         log.info("controller pronto (AUTH_MODE=%s)", config.auth_mode)
-        yield
+        try:
+            yield
+        finally:
+            await coda.chiudi()
 
     app = FastAPI(lifespan=lifespan, docs_url=None, redoc_url=None, openapi_url=None)
     app.state.salute = StatoSalute(config)
@@ -154,7 +164,8 @@ def crea_app(config: Config | None = None, *, router_extra: list[Any] | None = N
                     tipo = request.headers.get("content-type", "").split(";")[0].strip().lower()
                     lunghezza = request.headers.get("content-length")
                     ha_corpo = tipo or (lunghezza not in (None, "0")) or request.headers.get("transfer-encoding")
-                    if ha_corpo and tipo not in TIPI_AMMESSI:
+                    ammesso = TIPO_BINARIO if (request.method, percorso) in CARICAMENTI else TIPO_JSON
+                    if ha_corpo and tipo != ammesso:
                         raise ErroreController("FileNonAmmesso", "Tipo di contenuto non ammesso.")
             risposta = await call_next(request)
         except ErroreController as exc:
@@ -198,6 +209,9 @@ def crea_app(config: Config | None = None, *, router_extra: list[Any] | None = N
     app.add_middleware(LimiteCorpo)
     app.include_router(sessione.router)
     app.include_router(conferme.router)
+    app.include_router(episodi.router)
+    app.include_router(librerie.router)
+    app.include_router(lavori.router)
     for router in router_extra or []:
         app.include_router(router)
     return app
