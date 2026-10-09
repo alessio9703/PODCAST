@@ -18,6 +18,9 @@ from pathlib import Path
 from app.servizi.errori import ErroreController
 
 NOME_FILE_MAX = 150
+# Limite in byte UTF-8: il temporaneo `.<nome>.<12 hex>.tmp` deve restare sotto i 255 byte
+# di un nome di file (ext4, APFS).
+NOME_FILE_MAX_BYTE = 200
 ESTENSIONI_VIETATE = frozenset({".json", ".lock", ".tmp"})
 ESTENSIONI_DOCUMENTI = (".pdf", ".docx", ".txt", ".md", ".markdown", ".rst", ".text")
 ESTENSIONI_TESTO = frozenset({".txt", ".md", ".markdown", ".rst", ".text"})
@@ -42,8 +45,8 @@ def nome_caricato(valore_header: str | None, estensioni: tuple[str, ...] | froze
         nome = unicodedata.normalize("NFC", decodifica_header(valore_header))
     except ValueError:
         raise _rifiuta("Il nome del file non e' UTF-8 valido.") from None
-    if not nome or nome != nome.strip() or len(nome) > NOME_FILE_MAX:
-        raise _rifiuta(f"Nome del file vuoto, con spazi ai bordi o piu' lungo di {NOME_FILE_MAX} caratteri.")
+    if not nome or nome != nome.strip() or len(nome) > NOME_FILE_MAX or len(nome.encode("utf-8")) > NOME_FILE_MAX_BYTE:
+        raise _rifiuta(f"Nome del file vuoto, con spazi ai bordi o troppo lungo (massimo {NOME_FILE_MAX} caratteri).")
     if "/" in nome or "\\" in nome or ".." in nome or _CONTROLLO.search(nome) or ha_invisibili(nome):
         raise _rifiuta("Il nome del file contiene caratteri non ammessi.")
     if nome[0] in ".-":

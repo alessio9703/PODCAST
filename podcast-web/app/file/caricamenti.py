@@ -20,7 +20,7 @@ import stat
 from dataclasses import dataclass
 from typing import AsyncIterator, Callable
 
-from app.file.nomi import ESTENSIONI_TESTO, chiave_nome
+from app.file.nomi import ESTENSIONI_TESTO, ESTENSIONI_VIETATE, chiave_nome
 from app.servizi.errori import ErroreController
 
 log = logging.getLogger("podcast_web.file")
@@ -59,11 +59,16 @@ class _ControlloTesto:
             raise ErroreController("FileNonAmmesso", "Il file di testo non e' in UTF-8.") from None
 
 
-def esistenti_con_chiave(dir_fd: int, chiave: str) -> list[str]:
-    """File (non nascosti) della cartella con la stessa chiave del nome."""
+def esistenti_con_chiave(dir_fd: int, chiave: str, estensioni: frozenset[str] | tuple[str, ...]) -> list[str]:
+    """File (non nascosti) della cartella con la stessa chiave del nome e con
+    un'estensione della libreria. MAI `.json`, `.lock`, `.tmp`: accanto a una voce
+    il `.json` e' il suo consenso, accanto a un brano la sua licenza (A2 BASSA-1)."""
     trovati = []
     for voce in os.scandir(dir_fd):
         if voce.name.startswith("."):
+            continue
+        estensione = os.path.splitext(voce.name)[1].lower()
+        if estensione in ESTENSIONI_VIETATE or estensione not in estensioni:
             continue
         if chiave_nome(voce.name) == chiave:
             trovati.append(voce.name)
@@ -78,11 +83,18 @@ async def salva(
     massimo: int,
     lunghezza_dichiarata: str | None,
     firma_ok: Callable[[str, bytes], bool],
+    estensioni: frozenset[str] | tuple[str, ...],
     sostituzione_ammessa: bool,
+    prima_del_rename: Callable[[list[str]], None] | None = None,
 ) -> Caricato:
     """Scrive il file nella cartella `dir_fd`. Con un nome che collide e senza
     `sostituzione_ammessa` solleva `FileEsistente` (prima di leggere il corpo:
-    nessun byte su disco)."""
+    nessun byte su disco).
+
+    `prima_del_rename(esistenti)` gira dopo tutti i controlli che possono fallire,
+    subito prima del rename: e' il posto dei controlli che devono valere in quel
+    momento (nessun lavoro in corso) e del consumo del gettone (A2 BASSA-2). Se
+    solleva, il temporaneo si toglie e niente cambia."""
     if lunghezza_dichiarata is not None:
         if not lunghezza_dichiarata.isascii() or not lunghezza_dichiarata.isdigit():
             raise ErroreController("RichiestaNonValida", "Content-Length non valido.")
@@ -90,7 +102,7 @@ async def salva(
             raise ErroreController("FileTroppoGrande", f"Il file supera il limite di {massimo // (1024 * 1024)} MB.")
     estensione = os.path.splitext(nome)[1].lower()
     chiave = chiave_nome(nome)
-    esistenti = esistenti_con_chiave(dir_fd, chiave)
+    esistenti = esistenti_con_chiave(dir_fd, chiave, estensioni)
     if esistenti and not sostituzione_ammessa:
         raise ErroreController("FileEsistente", "Esiste gia' un file con questo nome: confermi la sostituzione?",
                                {"campo": "nome", "esistenti": esistenti})
@@ -130,7 +142,7 @@ async def salva(
         os.close(fd)
         fd = -1
         # Ricontrollo dopo la lettura: un altro caricamento puo' essere arrivato nel frattempo.
-        esistenti = esistenti_con_chiave(dir_fd, chiave)
+        esistenti = esistenti_con_chiave(dir_fd, chiave, estensioni)
         if esistenti and not sostituzione_ammessa:
             raise ErroreController("FileEsistente", "Esiste gia' un file con questo nome: confermi la sostituzione?",
                                    {"campo": "nome", "esistenti": esistenti})
@@ -140,6 +152,8 @@ async def salva(
                 raise ErroreController("FileNonAmmesso", "Al posto del file c'e' un elemento non sostituibile.")
         except FileNotFoundError:
             pass
+        if prima_del_rename is not None:
+            prima_del_rename(esistenti)
         os.rename(temporaneo, nome, src_dir_fd=dir_fd, dst_dir_fd=dir_fd)
         scritto = True
         sostituiti = []

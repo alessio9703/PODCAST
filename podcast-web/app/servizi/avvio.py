@@ -74,8 +74,25 @@ async def verifica_avvio(config: Config) -> dict[str, Any]:
     audio = dati.get("audio") or {}
     if not isinstance(documenti.get("max_bytes"), int) or not isinstance(audio.get("accepted_extensions"), list):
         raise ErroreAvvio("settings_show.py: mancano documenti.max_bytes o audio.accepted_extensions")
+    verifica_cartelle(config, dati.get("cartelle") or {})
     log.info("avvio: agente %s, doctor --web superato", config.agent_versione_attesa)
     return dati
+
+
+CARTELLE_LIBRERIE = ("documenti", "voci", "musiche", "archivio")
+
+
+def verifica_cartelle(config: Config, cartelle: dict[str, Any]) -> None:
+    """Le librerie e l'archivio devono essere cartelle vere DENTRO AGENT_DIR (non link):
+    e' li' che il controller carica e scarica i file (A2 NOTA-5). `settings_show` le da'
+    per nome: una cartella configurata fuori dall'agente non si trova qui."""
+    for chiave in CARTELLE_LIBRERIE:
+        nome = cartelle.get(chiave)
+        if not isinstance(nome, str) or not nome or "/" in nome or "\\" in nome or nome.startswith(".") or ".." in nome:
+            raise ErroreAvvio(f"cartella '{chiave}' dell'agente non valida in settings_show: {nome!r}")
+        percorso = config.agent_dir / nome
+        if percorso.is_symlink() or not percorso.is_dir():
+            raise ErroreAvvio(f"la cartella '{chiave}' ({nome}) deve esistere dentro AGENT_DIR e non essere un link")
 
 
 class StatoSalute:

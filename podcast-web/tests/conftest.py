@@ -61,6 +61,8 @@ def crea_agente_finto(radice: Path) -> AgenteFinto:
         shutil.copy(QUI / "agente_finto.py", radice / "tools" / tool)
     (radice / "output" / "run-uno").mkdir(parents=True)
     (radice / "documenti").mkdir()
+    (radice / "voci_disponibili").mkdir()
+    (radice / "musiche").mkdir()
     (radice / "VERSION").write_text("1.0-web\n")
     return AgenteFinto(radice)
 

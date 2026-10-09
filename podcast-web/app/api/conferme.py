@@ -58,6 +58,10 @@ async def conferma(gettone: str, request: Request, corpo: RispostaConferma | Non
             if not isinstance(valore, str) or not valore:
                 raise ErroreController("GettoneNonValido")
             parametri[param] = valore
+        if TABELLA[regola.azione].lungo:
+            if ctx.coda is None:
+                raise ErroreController("NonPronto")
+            return await ctx.coda.accoda(utente, regola.azione, parametri, da_gettone=True, risposta_a=g.error_type)
         stato, risposta, _ = await esegui_e_valuta(ctx, utente, regola.azione, parametri, da_gettone=True,
                                                   risposta_a=g.error_type)
         return JSONResponse(risposta, status_code=stato)

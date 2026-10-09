@@ -73,6 +73,14 @@ class Gettoni:
             self._attivi[gettone.valore] = gettone
         return gettone
 
+    def leggi(self, valore: str, utente_id: str) -> Gettone:
+        """Come `consuma`, ma il gettone resta valido: per i controlli preliminari
+        (il consumo vero avviene dopo i controlli che possono fallire)."""
+        gettone = self.consuma(valore, utente_id)
+        with self._lock:
+            self._attivi[gettone.valore] = gettone
+        return gettone
+
     def consuma(self, valore: str, utente_id: str) -> Gettone:
         """Restituisce il gettone e lo toglie (monouso). Un gettone inesistente,
         scaduto o di un altro utente da' sempre lo stesso errore."""

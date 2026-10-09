@@ -156,34 +156,32 @@ spegnimento che aspetta il lavoro (MEDIA-2), corpo binario solo sulle rotte di c
   produzione, e dopo `TimeoutStopSec` un SIGKILL. Usare `KillMode=mixed` (SIGTERM solo al
   controller, che lo inoltra una volta alla produzione) e `TimeoutStopSec` ≥ 180 s (30 s di
   uvicorn + 120 s di attesa del lavoro + margine). Da provare sul VPS.
-- [ ] **Sostituzione e file accanto** (A2 BASSA-1): la sostituzione toglie i file con la stessa
-  chiave, compresi `.json` e `.lock`. Per i documenti non conta; **prima delle voci e dei brani
-  (A5) va limitata ai file con un'estensione della libreria**, altrimenti cancellerebbe il
-  `.json` del consenso.
-- [ ] **K7 al momento del rename** (A2 BASSA-2): il blocco "niente sostituzione durante un
-  lavoro" si controlla all'inizio del caricamento; ricontrollarlo subito prima del `rename`
-  (indispensabile per le voci in A5).
+Corrette dopo A2 (test in `tests/test_correzioni_a2.py`): BASSA-1 (una sostituzione tocca
+solo i file con un'estensione della libreria, mai `.json`, `.lock`, `.tmp`), BASSA-2 (il blocco
+"nessun lavoro in corso" si ricontrolla subito prima del rename, e il gettone si consuma solo
+lì), BASSA-4 (nome del file al massimo 200 byte UTF-8), BASSA-5 (SIGKILL al gruppo 60 s dopo il
+SIGTERM solo per stesura, revisione e proposte di lezioni; mai per produzione, retake e voci,
+controllato da `verifica_tabella`), BASSA-6 (registro con l'esito anche per errori del
+controller e allo spegnimento), BASSA-7 (senza una stima con il costo la produzione non si
+accoda), BASSA-8 (`ritenta_clonazione` è un lavoro della coda), NOTA-4 (vedi sotto), NOTA-5
+(all'avvio le cartelle delle librerie e dell'archivio devono esistere dentro `AGENT_DIR` e non
+essere link, altrimenti il controller non parte).
+
+**Clonazione dall'esito incerto (NOTA-4)**: chi ha il ruolo `gestore_voci` la risolve con
+`POST /api/voci/<nome>/clonazione-verificata`, anche se la produzione l'ha lanciata un altro.
+Il controller mette in coda `--confirm-clone-retry` solo se l'agente dice che per quella voce
+c'è davvero una clonazione incerta (`clonazione_incerta`): la domanda dell'esito 3 la conserva
+l'agente, e la risposta va nel registro (`risposta_a: CloneOutcomeUnknown`). Le librerie
+devono stare dentro la cartella dell'agente (`config.yaml`): il controller le cerca lì per
+nome.
+
 - [ ] **Limite SSE** (A2 BASSA-3): con richieste simultanee si arriva a 5 stream per utente
   invece di 4 (il contatore sale dentro il generatore). Innocuo; si può contare prima.
-- [ ] **Nomi lunghi in byte** (A2 BASSA-4): 150 caratteri accentati possono superare i 255 byte
-  del filesystem (ext4) → 500 invece di 415. Aggiungere un limite di 200 byte UTF-8.
-- [ ] **Timeout di stesura e revisione** (A2 BASSA-5): dopo il SIGTERM l'attesa non ha limite;
-  se il comando non si chiudesse la coda resterebbe ferma. Aggiungere un'attesa massima (es.
-  2 minuti) e poi SIGKILL al gruppo, **solo** per azioni senza clonazione (mai per `produci`).
-- [ ] **Registro all'esito anche per errori del controller e allo spegnimento** (A2 BASSA-6).
-- [ ] **Stima fallita prima della produzione** (A2 BASSA-7): oggi si accoda lo stesso e il
-  registro non ha il costo. Valutare se rifiutare la produzione (la stima non costa).
-- [ ] **Spegnimento e azioni protette** (A2 BASSA-8): allo spegnimento il loop cancella anche
-  le azioni brevi protette; per `ritenta_clonazione` (fino a 11 minuti) un SIGTERM può portare
-  a `CloneOutcomeUnknown`. Aspettare le azioni protette in corso nel lifespan prima di uscire.
 - [ ] Note di A2: con uvicorn reale le letture brevi **non** si fermano quando il browser si
   chiude (NOTA-1; K23 invece vale: nessuna scrittura si ferma), aggiungere un controllo di
   `request.is_disconnected()` alle letture lunghe come `documents_list --name`; `%zz` nel nome
   del file passa la decodifica (finisce rifiutato o salvato con `%` letterale, NOTA-2); il
-  gettone di `ConsentRequired` è inutile e quello di `CloneOutcomeUnknown` è di chi ha prodotto
-  (approvatore), che di default non ha `voce_clonazione`: in A3 la UI dice di chiedere a chi
-  gestisce le voci, oppure si lega il gettone al permesso (NOTA-4); le librerie devono stare
-  **dentro** la cartella dell'agente (`config.yaml`), da controllare all'avvio (NOTA-5); I/O
+  gettone di `ConsentRequired` è inutile (NOTA-4, resta: formato uniforme); I/O
   bloccante nel loop per `fsync` e letture (NOTA-6); azzeramento di `_eventi.jsonl` riconosciuto
   solo se il file nuovo è più corto (NOTA-7); log rumoroso al superamento del limite del
   corpo (NOTA-8).

@@ -112,6 +112,10 @@ class Comando:
     conferme: Mapping[str, Conferma] = field(default_factory=dict)
     registra: bool = False          # scrive nel registro attivita'
     solo_da_gettone: bool = False   # non si lancia da una rotta, solo da una conferma
+    # Lavori lunghi: secondi dopo il SIGTERM (timeout o interruzione) oltre i quali il
+    # gruppo di processi riceve SIGKILL. SOLO per azioni senza clonazione ne' sintesi
+    # (stesura, revisione, proposte di lezioni): mai per produzione, retake, voci.
+    sigkill_dopo_s: float | None = None
     fase: str = "A2"
 
 
@@ -177,10 +181,10 @@ TABELLA: dict[str, Comando] = {
     ), permesso="episodio_modifica", registra=True),
     # --- Passo 4 · Copione -------------------------------------------------
     "scrivi_copione": Comando("script_write.py", (_run(),), timeout=600, lungo=True,
-                              permesso="copione_scrivi", by=True, registra=True),
+                              permesso="copione_scrivi", by=True, registra=True, sigkill_dopo_s=60),
     "revisiona_copione": Comando("script_revise.py", (
         _run(), Arg("istruzioni", "--instructions", TESTO, obbligatorio=True, max_len=4000),
-    ), timeout=600, lungo=True, permesso="copione_scrivi", by=True, registra=True),
+    ), timeout=600, lungo=True, permesso="copione_scrivi", by=True, registra=True, sigkill_dopo_s=60),
     "copione": Comando("script_show.py", (_run(),)),
     "modifica_battuta": Comando("script_edit.py", (
         _run(),
@@ -218,8 +222,8 @@ TABELLA: dict[str, Comando] = {
     "revoca_consenso": Comando("voice_meta.py", (Arg("nome", "--name", NOME, obbligatorio=True),),
                                fissi=("--revoke-consent",), permesso="voce_consenso", by=True, registra=True),
     "ritenta_clonazione": Comando("voice_meta.py", (Arg("nome", "--name", NOME, obbligatorio=True),),
-                                  fissi=("--confirm-clone-retry",), timeout=660, permesso="voce_clonazione",
-                                  by=True, registra=True, solo_da_gettone=True),
+                                  fissi=("--confirm-clone-retry",), timeout=660, lungo=True,
+                                  permesso="voce_clonazione", by=True, registra=True, solo_da_gettone=True),
     # --- Passo 6 · Generazione ---------------------------------------------
     "produci": Comando("produce.py", (_run(),), fissi=("--events",), timeout=None, lungo=True,
                        permesso="produrre", registra=True, conferme={
@@ -272,7 +276,7 @@ TABELLA: dict[str, Comando] = {
     "lezioni_elenco": Comando("lessons.py", (), fissi=("--list",), permesso="lezioni", fase="A5"),
     "lezioni_proponi_stima": Comando("lessons.py", (), fissi=("--propose", "--dry-run"), permesso="lezioni", fase="A5"),
     "lezioni_proponi": Comando("lessons.py", (), fissi=("--propose",), timeout=300, lungo=True,
-                               permesso="lezioni", registra=True, fase="A5"),
+                               permesso="lezioni", registra=True, sigkill_dopo_s=60, fase="A5"),
     "lezioni_accetta": Comando("lessons.py", (
         Arg("id", "--accept", TESTO, obbligatorio=True, max_len=20),
         Arg("testo", "--text", TESTO, max_len=400),
@@ -288,6 +292,9 @@ TABELLA: dict[str, Comando] = {
 
 # Opzione nascosta per LessonRemovalRequired: non si passa mai dal browser.
 _OPZIONI_DA_SCELTA = {"remove_id": "--remove-id"}
+
+# Tool che clonano, sintetizzano o aspettano una clonazione: mai SIGKILL dal controller.
+TOOL_CON_CLONAZIONE = frozenset({"produce.py", "retake.py", "voice_meta.py", "mix.py"})
 
 # Tool che il controller non lancia MAI (il contratto li esclude dal web).
 TOOL_VIETATI = frozenset({"voices_prepare.py", "synthesize.py", "run_finalize.py", "script_save.py", "signals.py"})
@@ -322,6 +329,8 @@ def verifica_tabella() -> None:
         for opz in opzioni:
             if opz in OPZIONI_VIETATE or opz == "--by" or opz.startswith("--no-") and opz != "--no-licenza":
                 raise ErroreTabella(f"{nome}: opzione non ammessa {opz}")
+        if cmd.sigkill_dopo_s is not None and (cmd.tool in TOOL_CON_CLONAZIONE or not cmd.lungo):
+            raise ErroreTabella(f"{nome}: SIGKILL ammesso solo per lavori lunghi senza clonazione ne' sintesi")
         if any(a.opzione in FLAG_CONFERMA for a in cmd.argomenti):
             raise ErroreTabella(f"{nome}: un flag di conferma non puo' essere un argomento del browser")
         if set(cmd.fissi) & FLAG_CONFERMA and not cmd.solo_da_gettone:

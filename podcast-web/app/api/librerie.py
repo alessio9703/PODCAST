@@ -94,13 +94,28 @@ async def carica_documento(request: Request, utente: Utente = Depends(utente_cor
     chiave = chiave_nome(nome)
     sostituzione = False
     valore_gettone = request.headers.get(HEADER_GETTONE)
-    if valore_gettone:
-        g = ctx.gettoni.consuma(valore_gettone, utente.id)
-        if g.azione != "sostituisci_documento" or g.details.get("chiave") != chiave:
+
+    def gettone_valido(g) -> None:
+        if g.azione != "sostituisci_documento" or g.details.get("libreria") != "documenti" or g.details.get("chiave") != chiave:
             raise ErroreController("GettoneNonValido")
+
+    def nessun_lavoro() -> None:
+        if ctx.coda is not None and ctx.coda.lavoro_in_corso() is not None:
+            raise ErroreController("LavoroGiaInCorso", "C'e' un lavoro in corso: sostituisci il file quando e' finito.")
+
+    if valore_gettone:
+        # Si controlla senza consumarlo: il consumo avviene solo subito prima del rename.
+        gettone_valido(ctx.gettoni.leggi(valore_gettone, utente.id))
+        nessun_lavoro()
         sostituzione = True
-    if sostituzione and ctx.coda is not None and ctx.coda.lavoro_in_corso() is not None:
-        raise ErroreController("LavoroGiaInCorso", "C'e' un lavoro in corso: sostituisci il file quando e' finito.")
+
+    def prima_del_rename(esistenti: list[str]) -> None:
+        if esistenti:
+            # Controlli nel momento della sostituzione (A2 BASSA-2), poi il gettone si consuma.
+            nessun_lavoro()
+            if not valore_gettone:
+                raise ErroreController("FileEsistente")
+            gettone_valido(ctx.gettoni.consuma(valore_gettone, utente.id))
     massimo = int((ctx.impostazioni.get("documenti") or {}).get("max_bytes") or 20 * 1024 * 1024)
     dir_fd = apri_cartella(_cartella_documenti(request))
     try:
@@ -108,7 +123,8 @@ async def carica_documento(request: Request, utente: Utente = Depends(utente_cor
             caricato = await caricamenti.salva(
                 dir_fd=dir_fd, nome=nome, flusso=request.stream(), massimo=massimo,
                 lunghezza_dichiarata=request.headers.get("content-length"),
-                firma_ok=caricamenti.firma_documento, sostituzione_ammessa=sostituzione,
+                firma_ok=caricamenti.firma_documento, estensioni=ESTENSIONI_DOCUMENTI,
+                sostituzione_ammessa=sostituzione, prima_del_rename=prima_del_rename,
             )
         except ErroreController as exc:
             if exc.error_type == "FileEsistente":
@@ -164,6 +180,31 @@ async def registra_consenso(nome: str, corpo: Consenso, request: Request,
 @router.delete("/voci/{nome}/consenso")
 async def revoca_consenso(nome: str, request: Request, utente: Utente = Depends(utente_corrente)) -> JSONResponse:
     return await esegui_azione(request, utente, "revoca_consenso", {"nome": nome})
+
+
+@router.post("/voci/{nome}/clonazione-verificata")
+async def clonazione_verificata(nome: str, request: Request, utente: Utente = Depends(utente_corrente)) -> JSONResponse:
+    """Risposta a un `CloneOutcomeUnknown` da parte di chi gestisce le voci, anche se
+    la produzione l'ha lanciata un altro (A2 NOTA-4).
+
+    La domanda dell'esito 3 la conserva l'agente (`clonazione_incerta` della voce):
+    si mette in coda `--confirm-clone-retry` SOLO se l'agente dice che per quella voce
+    c'e' davvero una clonazione dall'esito incerto. Permesso `voce_clonazione`;
+    registro con `risposta_a: CloneOutcomeUnknown`. Poi si rilancia la produzione."""
+    ctx = contesto(request)
+    ctx.permessi.richiedi(utente, "voce_clonazione")
+    stato, corpo, _ = await esegui_e_valuta(ctx, utente, "stato_voce", {"nome": nome})
+    if stato != 200:
+        return JSONResponse(corpo, status_code=stato)
+    dati = corpo["dati"]
+    if dati.get("clonazione_incerta") is not True:
+        raise ErroreController("RichiestaNonValida", "Per questa voce non c'e' una clonazione da verificare.",
+                               {"campo": "nome"})
+    nome_esatto = dati.get("voce") if isinstance(dati.get("voce"), str) else nome
+    if ctx.coda is None:
+        raise ErroreController("NonPronto")
+    return await ctx.coda.accoda(utente, "ritenta_clonazione", {"nome": nome_esatto}, da_gettone=True,
+                                 risposta_a="CloneOutcomeUnknown")
 
 
 # --- Musiche ---------------------------------------------------------------

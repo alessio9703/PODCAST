@@ -98,9 +98,14 @@ def test_clonazione_incerta_lancia_ritenta_con_lo_speaker(client, agente, ambien
     g = ctx.gettoni.crea(utente_id="demo", azione="produci", run="run-uno", error_type="CloneOutcomeUnknown",
                          details={"speaker": "Mario Rossi", "dal": "2026-10-08T10:00:00", "provider": "fish"}, parametri={"run": "run-uno"})
     r = client.post(f"/api/conferme/{g.valore}", json={})
-    assert r.status_code == 200, r.text
+    assert r.status_code == 202, r.text  # lavoro della coda (A2 BASSA-8)
+    lavoro = r.json()["dati"]["lavoro"]
+    fine = time.monotonic() + 15
+    while client.get(f"/api/lavori/{lavoro}").json()["dati"]["stato"] != "finito" and time.monotonic() < fine:
+        time.sleep(0.05)
     assert agente.chiamate("voice_meta.py")[-1]["argv"] == ["--name=Mario Rossi", "--confirm-clone-retry", "--by=Utente Demo"]
-    assert righe_registro(ambiente)[-1]["azione"] == "ritenta_clonazione"
+    riga = righe_registro(ambiente)[-1]
+    assert riga["azione"] == "ritenta_clonazione" and riga["esito"] == "ok" and riga["dettagli"]["risposta_a"] == "CloneOutcomeUnknown"
 
 
 def test_ritenta_clonazione_non_si_lancia_da_una_rotta(client, agente):

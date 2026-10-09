@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
 import secrets
 import signal
 import time
@@ -87,6 +88,7 @@ class Coda:
         self._evento = asyncio.Event()
         self._cambio = asyncio.Condition()
         self._worker: asyncio.Task[None] | None = None
+        self._compiti: set[asyncio.Task[Any]] = set()
         self._chiusura = False
         # Run con un accodamento in corso (fra i controlli e l'append c'e' l'await
         # della stima): contano come lavori, cosi' due richieste ravvicinate non passano entrambe.
@@ -159,13 +161,24 @@ class Coda:
         costo_usd = costo_eur = None
         if azione == "produci":
             # Stima subito prima della produzione: il costo nel registro viene
-            # dall'agente, mai dal browser.
+            # dall'agente, mai dal browser. Senza un costo la produzione non parte
+            # (A2 BASSA-7): si risponde con l'esito della stima.
+            from app.servizi.esiti import valuta
+
             stima = await esecutore.esegui(ctx.config, "stima", {"run": run})
-            if stima.ok and stima.json:
-                costo_usd = _numero(stima.json.get("cost_usd"))
-                costo_eur = _numero(stima.json.get("cost_eur"))
-            else:
-                log.warning("stima prima della produzione non riuscita (%s)", (stima.json or {}).get("error_type"))
+            if not stima.ok:
+                stato, corpo = valuta(stima, ctx.pulitore)
+                corpo.pop("gettone", None)
+                ctx.registro.scrivi(utente=utente, azione=azione, run=run, esito=corpo.get("error_type", "ErroreInterno"),
+                                    http=stato, dettagli={"motivo": "stima non riuscita: produzione non accodata"})
+                return JSONResponse(corpo, status_code=stato)
+            costo_usd = _numero(stima.json.get("cost_usd"))
+            costo_eur = _numero(stima.json.get("cost_eur"))
+            if costo_usd is None:
+                log.error("stima senza cost_usd per %s: produzione non accodata", run)
+                ctx.registro.scrivi(utente=utente, azione=azione, run=run, esito="ErroreInterno", http=500,
+                                    dettagli={"motivo": "stima senza costo: produzione non accodata"})
+                raise ErroreController("ErroreInterno", "La stima non ha dato un costo: la produzione non e' partita.")
 
         lavoro = Lavoro(id=secrets.token_hex(8), azione=azione, run=run, utente=utente, parametri=dict(parametri),
                         flag_conferme=flag_conferme, risposta_a=risposta_a)
@@ -270,6 +283,28 @@ class Coda:
                 lavoro.processo.send_signal(signal.SIGTERM)
             except ProcessLookupError:
                 pass
+            attesa = TABELLA[lavoro.azione].sigkill_dopo_s
+            if attesa is not None:
+                compito = asyncio.ensure_future(self._sigkill_dopo(lavoro.processo, attesa, lavoro.id))
+                self._compiti.add(compito)
+                compito.add_done_callback(self._compiti.discard)
+
+    async def _sigkill_dopo(self, processo: asyncio.subprocess.Process, attesa: float, id_lavoro: str) -> None:
+        """Solo per le azioni con `sigkill_dopo_s` (stesura, revisione, proposte: niente
+        clonazione ne' sintesi): se dopo il SIGTERM non escono, SIGKILL al gruppo."""
+        try:
+            await asyncio.wait_for(processo.wait(), attesa)
+        except asyncio.TimeoutError:
+            log.error("lavoro %s: ancora vivo %ss dopo il SIGTERM, SIGKILL al gruppo", id_lavoro, attesa)
+            try:
+                os.killpg(processo.pid, signal.SIGKILL)
+            except (ProcessLookupError, PermissionError):
+                pass
+
+    def _registra_esito_controller(self, lavoro: Lavoro, motivo: str) -> None:
+        esito = (lavoro.esito or {}).get("error_type", "ErroreInterno")
+        self._ctx.registro.scrivi(utente=lavoro.utente, azione=lavoro.azione, run=lavoro.run, esito=esito,
+                                  http=lavoro.http, lavoro=lavoro.id, dettagli={"motivo": motivo})
 
     def _chiudi_annullato(self, lavoro: Lavoro, motivo: str, da: Utente | None = None) -> None:
         lavoro.stato = "annullato"
@@ -292,10 +327,18 @@ class Coda:
             try:
                 await self._esegui(lavoro)
             except asyncio.CancelledError:
+                # Solo allo spegnimento, dopo il SIGTERM e l'attesa: l'esito vero
+                # non si conosce, il registro lo dice (A2 BASSA-6).
+                if lavoro.esito is None:
+                    lavoro.http = 409
+                    lavoro.esito = ErroreController(
+                        "LavoroAnnullato", "Servizio spento prima della fine del lavoro: controlla l'episodio nell'Archivio.").corpo()
+                    self._registra_esito_controller(lavoro, "spegnimento: esito non noto")
                 raise
             except Exception:
                 log.exception("lavoro %s: errore del controller", lavoro.id)
                 lavoro.http, lavoro.esito = 500, ErroreController("ErroreInterno").corpo()
+                self._registra_esito_controller(lavoro, "errore del controller")
             finally:
                 lavoro.stato = "finito" if lavoro.stato != "annullato" else lavoro.stato
                 lavoro.finito_il = lavoro.finito_il or adesso_iso()
