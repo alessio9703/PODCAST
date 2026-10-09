@@ -1,0 +1,25 @@
+{
+  "_nota": "Ruolo -> permessi. '*' = tutti. Si sostituisce con PERMESSI_FILE. I permessi sono quelli di app/servizi/permessi.py (PERMESSI).",
+  "ruoli": {
+    "autore": [
+      "leggere",
+      "documento_carica",
+      "episodio_modifica",
+      "copione_scrivi",
+      "copione_modifica"
+    ],
+    "approvatore": [
+      "leggere",
+      "copione_approva",
+      "produrre"
+    ],
+    "gestore_voci": [
+      "leggere",
+      "voce_consenso",
+      "voce_clonazione",
+      "voce_carica",
+      "voce_nome"
+    ],
+    "amministratore": ["*"]
+  }
+}
