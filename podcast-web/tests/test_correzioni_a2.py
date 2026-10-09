@@ -13,7 +13,8 @@ from app.agente.tabella import Comando, ErroreTabella, verifica_tabella
 from app.ingresso.cms import codifica_header
 from tests.conftest import client_per, header_firmati, righe_registro
 from tests.test_caricamenti_download import PDF, carica, residui
-from tests.test_lavori import PRODUCE, STIMA, aspetta, finito
+from tests.test_lavori import PRODUCE, PRODUCI, STIMA, aspetta, finito
+from app.servizi.stima import impronta_stima
 
 
 # --- BASSA-1: mai .json, .lock, .tmp in una sostituzione ---------------------
@@ -114,7 +115,7 @@ def test_interruzione_della_produzione_senza_sigkill(client, agente, monkeypatch
     agente.scenario("estimate.py", STIMA)
     inviati = []
     monkeypatch.setattr(os, "killpg", lambda *a: inviati.append(a))
-    client.post("/api/episodi/run-uno/produzione")
+    client.post("/api/episodi/run-uno/produzione", json=PRODUCI)
     aspetta(client, lambda d: d["in_corso"] and d["in_corso"]["stato"] == "in_corso")
     time.sleep(0.5)
     client.post("/api/episodi/run-uno/interruzione")
@@ -143,7 +144,7 @@ def test_registro_allo_spegnimento(ambiente, agente, monkeypatch):
     agente.scenario("estimate.py", STIMA)
     monkeypatch.setattr("app.lavori.coda.ATTESA_SPEGNIMENTO_S", 0.5)
     with client_per(ambiente) as c:
-        c.post("/api/episodi/run-uno/produzione", headers={"X-LIL-Richiesta": "1"})
+        c.post("/api/episodi/run-uno/produzione", json=PRODUCI, headers={"X-LIL-Richiesta": "1"})
         fine = time.monotonic() + 10
         while time.monotonic() < fine and not (agente.radice / "chiamate.jsonl").read_text().count("produce.py"):
             time.sleep(0.05)
@@ -158,7 +159,7 @@ def test_registro_allo_spegnimento(ambiente, agente, monkeypatch):
 
 def test_stima_fallita_produzione_non_accodata(client, agente, ambiente):
     agente.scenario("estimate.py", {"exit": 1, "json": {"ok": False, "error_type": "ScriptMissing", "error": "manca il copione", "exit_code": 1}})
-    r = client.post("/api/episodi/run-uno/produzione")
+    r = client.post("/api/episodi/run-uno/produzione", json=PRODUCI)
     assert r.status_code == 422 and r.json()["error_type"] == "ScriptMissing"
     assert agente.chiamate("produce.py") == [] and client.get("/api/lavori").json()["dati"]["in_attesa"] == []
     riga = righe_registro(ambiente)[-1]
@@ -167,7 +168,7 @@ def test_stima_fallita_produzione_non_accodata(client, agente, ambiente):
 
 def test_stima_senza_costo(client, agente):
     agente.scenario("estimate.py", {"exit": 0, "json": {"ok": True, "cost_usd": None}})
-    r = client.post("/api/episodi/run-uno/produzione")
+    r = client.post("/api/episodi/run-uno/produzione", json={"impronta": impronta_stima({"ok": True, "cost_usd": None})})
     assert r.status_code == 500 and agente.chiamate("produce.py") == []
 
 

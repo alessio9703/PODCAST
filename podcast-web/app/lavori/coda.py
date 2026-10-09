@@ -34,6 +34,7 @@ from app.agente.tabella import TABELLA
 from app.ingresso import Utente
 from app.registro import adesso_iso
 from app.servizi.errori import ErroreController
+from app.servizi.stima import impronta_stima
 
 log = logging.getLogger("podcast_web.lavori")
 
@@ -58,6 +59,7 @@ class Lavoro:
     esito: dict[str, Any] | None = None
     interruzione_richiesta: bool = False
     sigterm_inviato: bool = False
+    impronta: str | None = None
     processo: asyncio.subprocess.Process | None = None
     fatto: asyncio.Event = field(default_factory=asyncio.Event)
 
@@ -130,6 +132,7 @@ class Coda:
     async def accoda(
         self, utente: Utente, azione: str, parametri: Mapping[str, Any], *,
         flag_conferme: tuple[str, ...] = (), risposta_a: str | None = None, da_gettone: bool = False,
+        impronta: str | None = None,
     ) -> JSONResponse:
         from app.servizi.azioni import controlla_azione
 
@@ -149,13 +152,14 @@ class Coda:
             self._prenotate.add(run)
         self._n_prenotate += 1
         try:
-            return await self._accoda_prenotato(utente, azione, parametri, run, flag_conferme, risposta_a)
+            return await self._accoda_prenotato(utente, azione, parametri, run, flag_conferme, risposta_a, impronta)
         finally:
             self._prenotate.discard(run)
             self._n_prenotate -= 1
 
     async def _accoda_prenotato(self, utente: Utente, azione: str, parametri: Mapping[str, Any], run: str | None,
-                                flag_conferme: tuple[str, ...], risposta_a: str | None) -> JSONResponse:
+                                flag_conferme: tuple[str, ...], risposta_a: str | None,
+                                impronta: str | None) -> JSONResponse:
         ctx = self._ctx
 
         costo_usd = costo_eur = None
@@ -172,6 +176,10 @@ class Coda:
                 ctx.registro.scrivi(utente=utente, azione=azione, run=run, esito=corpo.get("error_type", "ErroreInterno"),
                                     http=stato, dettagli={"motivo": "stima non riuscita: produzione non accodata"})
                 return JSONResponse(corpo, status_code=stato)
+            if not impronta or impronta_stima(stima.json) != impronta:
+                ctx.registro.scrivi(utente=utente, azione=azione, run=run, esito="StimaCambiata", http=409,
+                                    dettagli={"motivo": "stima diversa da quella confermata: produzione non accodata"})
+                raise ErroreController("StimaCambiata")
             costo_usd = _numero(stima.json.get("cost_usd"))
             costo_eur = _numero(stima.json.get("cost_eur"))
             if costo_usd is None:
@@ -181,7 +189,7 @@ class Coda:
                 raise ErroreController("ErroreInterno", "La stima non ha dato un costo: la produzione non e' partita.")
 
         lavoro = Lavoro(id=secrets.token_hex(8), azione=azione, run=run, utente=utente, parametri=dict(parametri),
-                        flag_conferme=flag_conferme, risposta_a=risposta_a)
+                        flag_conferme=flag_conferme, risposta_a=risposta_a, impronta=impronta)
         dettagli: dict[str, Any] = {}
         if flag_conferme:
             dettagli["conferme"] = list(flag_conferme)
@@ -404,7 +412,7 @@ class Coda:
                               "error": "Interrotto appena partito, prima di fare qualunque cosa: si puo' rilanciare."}
         stato, corpo = chiudi_esito(ctx, lavoro.utente, lavoro.azione, lavoro.parametri, risultato,
                                     flag_conferme=lavoro.flag_conferme, risposta_a=lavoro.risposta_a,
-                                    lavoro=lavoro.id)
+                                    lavoro=lavoro.id, extra_gettone={"impronta": lavoro.impronta} if lavoro.impronta else None)
         lavoro.http, lavoro.esito = stato, corpo
 
 

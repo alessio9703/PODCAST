@@ -96,6 +96,7 @@ def controlla_azione(ctx: Contesto, utente: Utente, azione: str, parametri: Mapp
 def chiudi_esito(
     ctx: Contesto, utente: Utente, azione: str, parametri: Mapping[str, Any], risultato: esecutore.Risultato, *,
     flag_conferme: tuple[str, ...] = (), risposta_a: str | None = None, lavoro: str | None = None,
+    extra_gettone: dict[str, Any] | None = None,
 ) -> tuple[int, dict[str, Any]]:
     """Dal risultato dell'agente alla risposta: formato unico, gettone per gli
     esiti 3 (dell'utente che ha lanciato l'azione), riga nel registro."""
@@ -105,7 +106,7 @@ def chiudi_esito(
     if corpo.get("esito") == "decisione":
         gettone = ctx.gettoni.crea(
             utente_id=utente.id, azione=azione, run=run, error_type=corpo["error_type"],
-            details=(risultato.json or {}).get("details") or {}, parametri=dict(parametri),
+            details=(risultato.json or {}).get("details") or {}, parametri=dict(parametri), extra=extra_gettone,
         )
         corpo["gettone"] = gettone.valore
         corpo["scade_il"] = gettone.scade_il

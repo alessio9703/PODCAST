@@ -59,11 +59,17 @@ async def revisione(run: str, corpo: Revisione, request: Request, utente: Utente
     return await _coda(request).accoda(utente, "revisiona_copione", {"run": run, "istruzioni": corpo.istruzioni})
 
 
+class Produzione(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    impronta: str
+
+
 @router.post("/episodi/{run}/produzione")
-async def produzione(run: str, request: Request, utente: Utente = Depends(utente_corrente)) -> JSONResponse:
-    """Stima (costo nel registro) e produzione in coda. Esiti 3 (consenso, clonazione
-    incerta, brano sostituito) arrivano con il gettone nell'esito del lavoro."""
-    return await _coda(request).accoda(utente, "produci", {"run": run})
+async def produzione(run: str, corpo: Produzione, request: Request, utente: Utente = Depends(utente_corrente)) -> JSONResponse:
+    """Produzione in coda, legata alla stima vista (`impronta` di GET .../stima): il
+    controller rifa' la stima e, se e' cambiata, risponde 409 `StimaCambiata`. Esiti 3
+    (consenso, clonazione incerta, brano sostituito) arrivano con il gettone."""
+    return await _coda(request).accoda(utente, "produci", {"run": run}, impronta=corpo.impronta)
 
 
 @router.post("/episodi/{run}/interruzione")

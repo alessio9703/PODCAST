@@ -1,7 +1,14 @@
 # DEPLOY · podcast-web per il dev
 
-> Bozza iniziata in A1. In A4 si aggiungono: VPS raggiungibile solo dal CMS (firewall o
-> tunnel), HTTPS fra CMS e VPS, unità systemd, backup, timeout del proxy.
+> Per il dev che collega il CMS di LIFE e installa il controller sulla VPS. Indice:
+> §1 header firmati · §2 ruoli · §3 proxy del CMS · §4 rete e HTTPS · §5 installazione
+> sulla VPS · §6 avvio, salute, log · §7 backup · §8 aggiornamenti · §9 da fare prima della
+> produzione. Per provare tutto sul Mac prima: `README.md` (CMS finto, `AUTH_MODE=cms`).
+
+```
+browser ──HTTPS──► CMS di LIFE (login, firma) ──HTTPS──► nginx sulla VPS ──► 127.0.0.1:8765 podcast-web
+                                                         (solo il CMS)         └─► podcast-agent/tools/*.py
+```
 
 ## 1. Header firmati dal CMS
 
@@ -31,8 +38,18 @@ v1
 <X-LIL-Nome, esattamente come nell'header (percent-encoded)>
 ```
 
-Se il CMS riscrive il percorso (es. riceve `/podcast/api/io` e inoltra `/api/io`), firma
-quello **inoltrato**. Il corpo non è firmato: lo protegge l'HTTPS fra CMS e VPS.
+Il percorso da firmare è quello della richiesta **in uscita** dal CMS, così come la costruisce
+il suo client HTTP (dopo l'eventuale normalizzazione: codifica di spazi e caratteri non ASCII).
+Il corpo non è firmato: lo protegge l'HTTPS fra CMS e VPS.
+
+**Origine dedicata (obbligatorio).** L'interfaccia usa percorsi assoluti (`/`, `/api/…`,
+`/static/…`): va inoltrata **alla radice** di un'origine (schema + host + porta) usata **solo**
+per LIL Podcast, ad esempio `https://podcast.life.com`, dove il CMS serve soltanto il login e
+l'inoltro al controller. Niente prefissi riscritti (`/podcast/api/…` non funziona) e niente
+altre pagine del CMS sulla stessa origine: la difesa CSRF del controller non vale fra pagine
+della stessa origine, quindi un difetto (XSS) in un'altra pagina lì sopra potrebbe avviare
+produzioni o registrare consensi a nome dell'utente. Il controller vieta di incorniciare la
+pagina (`frame-ancestors 'none'`, `X-Frame-Options: DENY`): non va mostrata in un iframe.
 
 Esempio (segreto `0123456789abcdef0123456789abcdef`, ASCII):
 
@@ -57,6 +74,8 @@ def header_lil(segreto: bytes, metodo: str, percorso: str, utente: str, ruoli: l
 
 Regole di verifica: tutti gli header presenti, timestamp entro **60 s** dall'ora del
 server (orologi sincronizzati con NTP su CMS e VPS), firma confrontata a tempo costante.
+Il segreto è la stringa così com'è, in UTF-8 (se è generato con `openssl rand -hex 32` si
+usano i 64 caratteri esadecimali come testo, non i byte che rappresentano).
 Se qualcosa non torna la risposta è `401` con un corpo fisso, senza dettagli: il motivo è
 solo nel log del controller. Segreto in `LIL_SEGRETO` (almeno 32 byte); per la rotazione
 `LIL_SEGRETO_PRECEDENTE` resta accettato finché il CMS non usa quello nuovo.
@@ -105,8 +124,163 @@ ruoli. La tabella è in `app/servizi/permessi_default.json` e si può sostituire
   tolgono (§1).
 - **Rotte con corpo binario**: oggi solo `POST /api/documenti` (in A5 anche voci e brani).
   Tutte le altre accettano solo `application/json`, al massimo 256 KB.
+- **Timeout del proxy** (lettura della risposta): almeno **300 s** per le API (l'estrazione
+  di un documento lungo arriva a 240 s; in A5 il rimontaggio fino a 900 s), **senza limite
+  pratico (≥ 1 h) per lo SSE**, che riceve un battito ogni 15 s. I lavori lunghi (stesura,
+  produzione) non tengono aperta la richiesta: rispondono subito 202 e si seguono con lo
+  SSE o con il polling.
+- **Pagine e statici**: anche `GET /` e `/static/…` vanno inoltrati con la firma (il
+  controller li protegge come le API). `GET /salute` è l'unica rotta senza firma.
+- **Cookie**: i cookie della sessione del CMS non vanno inoltrati al controller (non li usa).
+- **CORS e cookie del CMS**: la difesa CSRF del controller (`X-LIL-Richiesta`, solo JSON o
+  binario) presuppone che il CMS non permetta richieste da altri siti con la sessione
+  dell'utente: cookie di sessione `SameSite=Lax` o `Strict`, nessun
+  `Access-Control-Allow-Origin` generico sulle rotte inoltrate.
 
-## 4. Da fare prima della produzione
+## 4. Rete e HTTPS
+
+- **La VPS riceve solo dal CMS.** Due modi equivalenti, a scelta:
+  - **firewall**: solo l'IP (o gli IP) del CMS può raggiungere la porta 443 della VPS
+    (`ufw allow from <IP del CMS> to any port 443 proto tcp`, tutto il resto chiuso, SSH solo
+    dalla rete di amministrazione); nginx ripete il controllo (`deploy/nginx-vps.conf`,
+    `allow`/`deny`) e, meglio ancora, chiede un certificato client al CMS (mTLS);
+  - **tunnel**: WireGuard o SSH fra CMS e VPS, e nginx in ascolto solo sull'indirizzo del
+    tunnel (il controller resta comunque su 127.0.0.1, dietro nginx).
+- **HTTPS fino alla VPS**: TLS fra CMS e nginx (certificato della VPS, TLS 1.2+). Il corpo
+  delle richieste non è firmato: lo protegge questo canale.
+- **Il controller ascolta solo su 127.0.0.1** (`HOST=127.0.0.1`, il default): davanti c'è
+  nginx. Non esporre mai la porta 8765.
+- **Orologi sincronizzati** (NTP) su CMS e VPS: la firma vale 60 s.
+- **Log**: nessun log, né sul CMS né su nginx, deve registrare `X-LIL-Firma` (il formato di
+  default di nginx non registra gli header). Un gettone di conferma può comparire nel
+  percorso (`/api/conferme/<gettone>`) negli access log: tenerli riservati (valgono 5
+  minuti e sono legati all'utente).
+
+## 5. Installazione sulla VPS
+
+Esempio con Debian/Ubuntu, utente di servizio `lilpodcast`, codice in `/srv/lil`.
+
+```bash
+sudo useradd --system --home /var/lib/podcast-web --shell /usr/sbin/nologin lilpodcast
+sudo install -d -o lilpodcast -g lilpodcast -m 0700 /var/lib/podcast-web
+sudo install -d -o lilpodcast -g lilpodcast -m 0750 /srv/lil
+# codice: podcast-agent e podcast-web dallo stesso repository, al tag concordato
+# il repository contiene podcast-agent/ e podcast-web/: si clona IN /srv/lil, al tag concordato
+sudo -u lilpodcast git clone --branch <tag> <repository> /srv/lil
+#   -> /srv/lil/podcast-agent e /srv/lil/podcast-web (i percorsi dell'unità systemd)
+# niente credenziali in /srv/lil/.git/config (usare una deploy key in sola lettura)
+
+# agente: venv, dipendenze, .env con le chiavi (0600), config.yaml di produzione
+cd /srv/lil/podcast-agent && sudo -u lilpodcast python3 -m venv .venv \
+  && sudo -u lilpodcast .venv/bin/pip install -r requirements.txt
+sudo -u lilpodcast install -m 0600 /dev/null .env      # poi FISH_AUDIO_API_KEY=… ANTHROPIC_API_KEY=…
+sudo -u lilpodcast env PODCAST_AGENT_WEB=1 .venv/bin/python tools/doctor.py --web
+
+# controller: venv con le versioni fissate
+cd /srv/lil/podcast-web && sudo -u lilpodcast python3 -m venv .venv \
+  && sudo -u lilpodcast .venv/bin/pip install -r requirements.lock
+
+# configurazione (deploy/.env.example commentato)
+sudo install -d -m 0750 -o root -g lilpodcast /etc/podcast-web
+sudo install -m 0640 -o root -g lilpodcast deploy/.env.example /etc/podcast-web/podcast-web.env
+#   AUTH_MODE=cms, AGENT_DIR=/srv/lil/podcast-agent, AGENT_VERSIONE_ATTESA=1.0-web,
+#   LIL_SEGRETO=<openssl rand -hex 32, lo stesso nel CMS>,
+#   REGISTRO_FILE=/var/lib/podcast-web/registro/registro_attivita.jsonl
+
+sudo cp deploy/podcast-web.service /etc/systemd/system/
+sudo systemctl daemon-reload && sudo systemctl enable --now podcast-web
+sudo cp deploy/nginx-vps.conf /etc/nginx/sites-available/podcast-web   # adattare nome, IP, certificati
+sudo ln -s /etc/nginx/sites-available/podcast-web /etc/nginx/sites-enabled/podcast-web
+sudo nginx -t && sudo systemctl reload nginx
+```
+
+Note:
+- Le librerie (`documenti/`, `voci_disponibili/`, `musiche/`) e `output/` devono stare
+  **dentro** `podcast-agent/` (come nel `config.yaml` del repository): il controller le cerca
+  lì e non parte se mancano o sono link.
+- Il registro attività deve stare in una cartella dell'utente di servizio con permessi 0700
+  (il controller la crea così se non esiste) e il file 0600; altrimenti non parte.
+- L'unità systemd usa `KillMode=mixed` e `TimeoutStopSec=180`: **non cambiarli**. Con il
+  default systemd manderebbe un secondo SIGTERM alla produzione in corso (vietato dal
+  contratto durante la preparazione delle voci) e la ucciderebbe dopo 90 s.
+- `ProtectSystem=strict`: il servizio scrive solo in `/srv/lil/podcast-agent` e
+  `/var/lib/podcast-web`.
+
+## 6. Avvio, salute, log
+
+- All'avvio il controller controlla configurazione, `VERSION` dell'agente,
+  `doctor.py --web`, cartelle delle librerie e permessi del registro. Se qualcosa non va
+  esce con un codice diverso da zero e il motivo nel log: `journalctl -u podcast-web`.
+- **`GET /salute`** (senza firma): `200 {"ok": true}` o `503 {"ok": false}`, senza
+  dettagli. Ricontrolla `VERSION` ogni 5 minuti. Il CMS può usarla per mostrare "servizio
+  non disponibile".
+- **Allarmi sul log**:
+  - `REGISTRO ATTIVITA' NON SCRITTO` (livello CRITICAL): un'azione è avvenuta ma la riga
+    non è nel registro (disco pieno?). La riga completa è nel messaggio: va riportata a mano.
+  - `errore dell'adattatore` (ERROR): un comando ha rifiutato gli argomenti del controller
+    (`InvalidArguments`, `NotAllowedInWebMode`, `ByRequired`): è un difetto del controller.
+  - `cms: richiesta rifiutata` (WARNING): firme non valide; molte di seguito indicano un
+    problema di configurazione (segreto, orologi, percorso firmato) o un tentativo d'accesso.
+
+## 7. Backup
+
+Ogni notte (e prima di ogni aggiornamento), con il servizio fermo o con uno snapshot del
+disco, così i file scritti insieme restano coerenti:
+
+| Cosa | Perché |
+|---|---|
+| `podcast-agent/output/` | gli episodi: copioni, versioni, approvazioni, segmenti, mp3 |
+| `podcast-agent/documenti/` | i documenti caricati |
+| `podcast-agent/voci_disponibili/` **con i `.json`** | le registrazioni e il **consenso** di ogni voce |
+| `podcast-agent/musiche/` **con i `.json`** | i brani e le **licenze** dichiarate |
+| `podcast-agent/voices_registry.json` | voci clonate e **revoche** del consenso (una revoca persa riabiliterebbe una voce) |
+| `podcast-agent/prompts/lezioni.md`, `prompts/_lezioni.json` | le lezioni attive e il loro registro |
+| `podcast-agent/.env`, `config.yaml` | chiavi (in un archivio cifrato) e configurazione |
+| `REGISTRO_FILE` (es. `/var/lib/podcast-web/registro/`) | il registro attività: chi ha approvato, consentito, revocato, prodotto |
+| `/etc/podcast-web/podcast-web.env` | configurazione del controller (contiene `LIL_SEGRETO`: cifrare) |
+
+I file `*.lock` e `.*.tmp` non servono. Il registro attività è append-only: non va mai
+riscritto né "pulito"; per ruotarlo si ferma il servizio, si archivia il file e se ne crea
+uno nuovo (0600).
+
+**Il registro attività va copiato anche fuori dal server, spesso** (es. ogni ora, su un
+archivio in sola aggiunta o con syslog remoto): è la prova di chi ha revocato un consenso, e
+serve proprio quando il disco del server va ripristinato.
+
+### Ripristino
+
+Un backup è una fotografia: se dopo il backup una persona ha **revocato** il consenso alla
+propria voce, il ripristino lo riporterebbe a "registrato". Vince sempre la revoca, quindi:
+
+1. servizio fermo (`systemctl stop podcast-web`);
+2. ripristinare i file della tabella sopra;
+3. ricavare le revoche avvenute dopo il backup dalla copia **più recente** del registro
+   attività (quella tenuta fuori dal server):
+   ```bash
+   cd /srv/lil/podcast-web
+   .venv/bin/python -m strumenti.revoche_dal_registro /percorso/copia/registro_attivita.jsonl \
+     --dopo 2026-10-09T02:00:00+00:00          # istante del backup ripristinato
+   ```
+   lo script stampa un comando `voice_meta.py --revoke-consent` per ogni revoca: eseguirli
+   dalla cartella di `podcast-agent` come utente di servizio (`sudo -u lilpodcast …`);
+4. i consensi registrati dopo il backup sono persi: vanno chiesti e confermati di nuovo
+   (passo 5 o libreria Voci), così come approvazioni e produzioni successive;
+5. riavviare (`systemctl start podcast-web`) e controllare `/salute`.
+
+## 8. Aggiornamenti
+
+- **Agente**: dopo un aggiornamento di `podcast-agent`, `VERSION` cambia; si aggiorna
+  `AGENT_VERSIONE_ATTESA` solo dopo aver verificato che il controller la supporti (contratto
+  d'interfaccia). Con una versione diversa il controller non parte, e `/salute` diventa 503
+  entro 5 minuti se l'agente viene cambiato a controller acceso.
+- **Controller**: `pip install -r requirements.lock` (versioni fissate), poi
+  `systemctl restart podcast-web`. Un riavvio interrompe il lavoro in corso con un SIGTERM
+  (si riprende dall'Archivio) e svuota la coda dei lavori in attesa.
+- **Segreto**: per cambiarlo senza interruzioni si mette il nuovo in `LIL_SEGRETO` e il
+  vecchio in `LIL_SEGRETO_PRECEDENTE`, si riavvia, si aggiorna il CMS, poi si toglie il
+  vecchio e **si riavvia di nuovo** (finché non si riavvia, il vecchio resta valido).
+
+## 9. Da fare prima della produzione
 
 Elenco alimentato dalle revisioni di sicurezza (rapporti in `docs/avanzamento/<fase>-sicurezza.md`).
 Le gravità alte e medie sono corrette nella fase; qui restano le basse e le note.
@@ -151,30 +325,10 @@ prima della stima (MEDIA-1), interruzione che arriva anche durante l'avvio del p
 spegnimento che aspetta il lavoro (MEDIA-2), corpo binario solo sulle rotte di caricamento
 (MEDIA-3).
 
-- [ ] **systemd** (da A2, "Da verificare nelle prossime fasi"): con `KillMode=control-group`
-  (default) systemd manda il suo SIGTERM a tutto il gruppo, quindi un secondo SIGTERM alla
-  produzione, e dopo `TimeoutStopSec` un SIGKILL. Usare `KillMode=mixed` (SIGTERM solo al
-  controller, che lo inoltra una volta alla produzione) e `TimeoutStopSec` ≥ 180 s (30 s di
-  uvicorn + 120 s di attesa del lavoro + margine). Da provare sul VPS.
-Corrette dopo A2 (test in `tests/test_correzioni_a2.py`): BASSA-1 (una sostituzione tocca
-solo i file con un'estensione della libreria, mai `.json`, `.lock`, `.tmp`), BASSA-2 (il blocco
-"nessun lavoro in corso" si ricontrolla subito prima del rename, e il gettone si consuma solo
-lì), BASSA-4 (nome del file al massimo 200 byte UTF-8), BASSA-5 (SIGKILL al gruppo 60 s dopo il
-SIGTERM solo per stesura, revisione e proposte di lezioni; mai per produzione, retake e voci,
-controllato da `verifica_tabella`), BASSA-6 (registro con l'esito anche per errori del
-controller e allo spegnimento), BASSA-7 (senza una stima con il costo la produzione non si
-accoda), BASSA-8 (`ritenta_clonazione` è un lavoro della coda), NOTA-4 (vedi sotto), NOTA-5
-(all'avvio le cartelle delle librerie e dell'archivio devono esistere dentro `AGENT_DIR` e non
-essere link, altrimenti il controller non parte).
-
-**Clonazione dall'esito incerto (NOTA-4)**: chi ha il ruolo `gestore_voci` la risolve con
-`POST /api/voci/<nome>/clonazione-verificata`, anche se la produzione l'ha lanciata un altro.
-Il controller mette in coda `--confirm-clone-retry` solo se l'agente dice che per quella voce
-c'è davvero una clonazione incerta (`clonazione_incerta`): la domanda dell'esito 3 la conserva
-l'agente, e la risposta va nel registro (`risposta_a: CloneOutcomeUnknown`). Le librerie
-devono stare dentro la cartella dell'agente (`config.yaml`): il controller le cerca lì per
-nome.
-
+- [ ] **systemd: provare lo spegnimento sulla VPS** (da A2): l'unità `deploy/podcast-web.service`
+  usa già `KillMode=mixed` e `TimeoutStopSec=180` (§5). Prova da fare: lanciare una produzione
+  con i servizi finti, `systemctl stop podcast-web` durante la sintesi, controllare che arrivi
+  un solo SIGTERM (esito `ProductionInterrupted`) e che si riprenda dall'Archivio.
 - [ ] **Limite SSE** (A2 BASSA-3): con richieste simultanee si arriva a 5 stream per utente
   invece di 4 (il contatore sale dentro il generatore). Innocuo; si può contare prima.
 - [ ] Note di A2: con uvicorn reale le letture brevi **non** si fermano quando il browser si
@@ -185,3 +339,38 @@ nome.
   bloccante nel loop per `fsync` e letture (NOTA-6); azzeramento di `_eventi.jsonl` riconosciuto
   solo se il file nuovo è più corto (NOTA-7); log rumoroso al superamento del limite del
   corpo (NOTA-8).
+
+### Dalla revisione di A4
+
+Medie corrette nella fase (vedi `docs/avanzamento/A4.md`): produzione legata all'impronta della
+stima vista (MEDIA-1), origine dedicata e interfaccia non incorniciabile (MEDIA-2), procedura
+di ripristino con le revoche ricavate dal registro (MEDIA-3). Corrette anche le incoerenze del
+documento segnalate in NOTA-2 e NOTA-5 (segreto come testo, rotazione con doppio riavvio,
+tunnel, percorso del clone, `REGISTRO_FILE`, abilitazione del sito nginx).
+
+- [ ] **Il CMS verifica il certificato della VPS** (A4 BASSA-1): TLS con verifica del nome e
+  della catena (o certificato fissato), mai `verify=false`: il corpo delle richieste non è
+  firmato.
+- [ ] **Codice in sola lettura per il servizio** (A4 BASSA-2): codice di proprietà di root (o
+  di un utente di deploy); l'utente di servizio scrive solo `output/`, `documenti/`,
+  `voci_disponibili/`, `musiche/`, `voices_registry.json`, `prompts/lezioni.md`,
+  `prompts/_lezioni.json` e i loro lock; restringere `ReadWritePaths` di conseguenza.
+- [ ] **Limiti di risorse nell'unità systemd** (A4 BASSA-3): `MemoryMax`, `TasksMax`. Un crash
+  del controller fa arrivare il SIGKILL di systemd anche alla produzione in corso (si riprende
+  dall'Archivio; una clonazione in corso diventa `CloneOutcomeUnknown`).
+- [ ] **nginx: 60 MB solo dove serve** (A4 BASSA-4): `client_max_body_size 1m` di base, 60m
+  solo sulle rotte di caricamento.
+- [ ] **Mai `AUTH_MODE=demo` sulla VPS** (A4 BASSA-5): dietro nginx ogni utente del CMS
+  diventerebbe l'utente demo con tutti i ruoli. Controllare `/etc/podcast-web/podcast-web.env`
+  a ogni installazione; valutare un rifiuto all'avvio di `AUTH_MODE=demo` fuori dallo sviluppo.
+- [ ] **CMS finto e DNS rebinding** (A4 BASSA-6): strumento solo locale, ma non controlla
+  `Host` e fa il login con un GET; aggiungere lo stesso controllo dell'ingresso demo se lo si
+  usa a lungo.
+- [ ] Note di A4: il CMS non deve comprimere `text/event-stream` (NOTA-3); il percorso
+  `/api/conferme/<gettone>` finisce negli access log (log riservati, NOTA-4); nell'interfaccia
+  `decodeURIComponent` dell'hash fuori dal `try` e `seg()` che accetta `.`/`..` (solo
+  disservizio, NOTA-6); il consenso si registra con un clic sulla casella, senza un secondo
+  passaggio (NOTA-7: valutare una conferma); la prima stesura del copione parte con un clic
+  accanto all'avviso di costo, senza dialogo (NOTA-8); `amministratore: ["*"]` riceve anche i
+  permessi aggiunti in futuro (NOTA-9); il CMS finto firma il percorso del browser e non quello
+  normalizzato dal suo client (fallisce in modo sicuro, NOTA-1).

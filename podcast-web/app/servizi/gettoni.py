@@ -41,6 +41,7 @@ class Gettone:
     scadenza: float               # time.monotonic()
     scade_il: str                 # per il browser
     creato: float = field(default_factory=time.monotonic)
+    extra: dict[str, Any] = field(default_factory=dict)  # dati del controller (es. impronta della stima)
 
 
 class Gettoni:
@@ -55,7 +56,7 @@ class Gettoni:
 
     def crea(
         self, *, utente_id: str, azione: str, run: str | None, error_type: str,
-        details: dict[str, Any] | None, parametri: dict[str, Any],
+        details: dict[str, Any] | None, parametri: dict[str, Any], extra: dict[str, Any] | None = None,
     ) -> Gettone:
         ora = time.monotonic()
         scade_il = (datetime.now(timezone.utc) + timedelta(seconds=self._durata)).isoformat(timespec="seconds")
@@ -63,7 +64,7 @@ class Gettoni:
             valore=secrets.token_urlsafe(32), utente_id=utente_id, azione=azione, run=run,
             error_type=error_type,
             parametri=json.loads(json.dumps(parametri)), details=json.loads(json.dumps(details or {})),
-            scadenza=ora + self._durata, scade_il=scade_il,
+            scadenza=ora + self._durata, scade_il=scade_il, extra=dict(extra or {}),
         )
         with self._lock:
             self._pulisci(ora)

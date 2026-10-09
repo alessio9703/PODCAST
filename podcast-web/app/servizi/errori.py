@@ -20,6 +20,7 @@ ERRORI_CONTROLLER: dict[str, int] = {
     "GettoneNonValido": 409,
     "LavoroGiaInCorso": 409,
     "LavoroAnnullato": 409,
+    "StimaCambiata": 409,
     "TroppeConnessioni": 429,
     "FileTroppoGrande": 413,
     "FileNonAmmesso": 415,
@@ -39,6 +40,7 @@ MESSAGGI_DEFAULT: dict[str, str] = {
     "ErroreInterno": "Errore interno del controller. L'errore e' stato registrato.",
     "CodaPiena": "Troppi lavori in attesa: riprova fra qualche minuto.",
     "TroppeConnessioni": "Troppe pagine aperte che seguono l'avanzamento.",
+    "StimaCambiata": "La stima è cambiata da quando l'hai vista: ricontrolla costo e voci prima di generare.",
     "NonPronto": "Servizio non pronto.",
     "Timeout": "L'operazione ha impiegato troppo tempo ed e' stata fermata.",
 }

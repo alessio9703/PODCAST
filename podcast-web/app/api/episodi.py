@@ -18,6 +18,7 @@ from app.ingresso import Utente, utente_corrente
 from app.file import download
 from app.file.nomi import apri_cartella
 from app.servizi.azioni import contesto, esegui_azione, esegui_e_valuta
+from app.servizi.stima import impronta_stima
 from app.servizi.errori import ErroreController
 
 router = APIRouter(prefix="/api")
@@ -168,7 +169,11 @@ async def ripristina(run: str, corpo: Ripristino, request: Request, utente: Uten
 
 @router.get("/episodi/{run}/stima")
 async def stima(run: str, request: Request, utente: Utente = Depends(utente_corrente)) -> JSONResponse:
-    return await esegui_azione(request, utente, "stima", {"run": run})
+    """La stima con la sua `impronta`, da rimandare per produrre (A4 MEDIA-1)."""
+    stato, corpo, risultato = await esegui_e_valuta(contesto(request), utente, "stima", {"run": run})
+    if corpo.get("ok") and risultato.json:
+        corpo["dati"]["impronta"] = impronta_stima(risultato.json)
+    return JSONResponse(corpo, status_code=stato)
 
 
 # --- Passo 7 · Episodio ----------------------------------------------------

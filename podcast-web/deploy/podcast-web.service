@@ -1,0 +1,46 @@
+# /etc/systemd/system/podcast-web.service
+# Controller web di LIL Podcast. Un solo processo (la coda dei lavori e i gettoni sono in memoria).
+[Unit]
+Description=LIL Podcast · controller web
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=lilpodcast
+Group=lilpodcast
+WorkingDirectory=/srv/lil/podcast-web
+EnvironmentFile=/etc/podcast-web/podcast-web.env
+Environment=HOME=/var/lib/podcast-web
+ExecStart=/srv/lil/podcast-web/.venv/bin/python -m app
+
+# Spegnimento: SIGTERM SOLO al controller, che manda UN SIGTERM al lavoro in corso
+# (la produzione si ferma fra una battuta e l'altra) e lo aspetta fino a 120 s, dopo
+# fino a 30 s per le connessioni aperte. Con il default (control-group) systemd
+# manderebbe un secondo SIGTERM anche alla produzione: vietato dal contratto
+# durante la preparazione delle voci.
+KillMode=mixed
+KillSignal=SIGTERM
+TimeoutStopSec=180
+Restart=on-failure
+RestartSec=5
+
+# Isolamento
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/srv/lil/podcast-agent /var/lib/podcast-web
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+LockPersonality=true
+RestrictRealtime=true
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+CapabilityBoundingSet=
+SystemCallArchitectures=native
+
+[Install]
+WantedBy=multi-user.target

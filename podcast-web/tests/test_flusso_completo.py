@@ -14,6 +14,7 @@ battuta 3 -> ripresa (SSE) -> episodio -> download con Range -> Archivio -> regi
 
 from __future__ import annotations
 
+import re
 import time
 from pathlib import Path
 from typing import Any
@@ -122,7 +123,12 @@ def test_flusso_completo(flusso):
     # 6 · Produzione interrotta alla battuta 3, poi ripresa
     fermo = radice / "fermo-sintesi"
     fermo.write_text("fermo")
-    lavoro = api("POST", f"/api/episodi/{run}/produzione", 202)["dati"]["lavoro"]
+    # La produzione e' legata alla stima vista: quella di prima dei consensi non vale piu'.
+    r = api("POST", f"/api/episodi/{run}/produzione", 409, json={"impronta": stima["impronta"]})
+    assert r["error_type"] == "StimaCambiata"
+    stima = api("GET", f"/api/episodi/{run}/stima")["dati"]
+    assert stima["consent_missing"] == []
+    lavoro = api("POST", f"/api/episodi/{run}/produzione", 202, json={"impronta": stima["impronta"]})["dati"]["lavoro"]
     fine = time.monotonic() + 120
     while time.monotonic() < fine:
         eventi = api("GET", f"/api/episodi/{run}/eventi/elenco")["dati"]["eventi"]
@@ -137,7 +143,9 @@ def test_flusso_completo(flusso):
     assert esito["error_type"] == "ProductionInterrupted" and esito["details"]["missing"] == [4, 5], esito
     assert api("GET", f"/api/episodi/{run}/stato")["dati"]["stato"] == "interrotta"
 
-    lavoro = api("POST", f"/api/episodi/{run}/produzione", 202)["dati"]["lavoro"]
+    stima = api("GET", f"/api/episodi/{run}/stima")["dati"]
+    assert stima["turns_to_generate"] == 2  # si pagano solo le mancanti
+    lavoro = api("POST", f"/api/episodi/{run}/produzione", 202, json={"impronta": stima["impronta"]})["dati"]["lavoro"]
     with client.stream("GET", f"/api/episodi/{run}/eventi") as r:
         assert r.status_code == 200
         testo = "".join(r.iter_text())
@@ -163,7 +171,7 @@ def test_flusso_completo(flusso):
     # Registro attivita'
     righe = righe_registro(ambiente)
     azioni = [(r["azione"], r["esito"]) for r in righe]
-    for attesa in [("carica_documento", "ok"), ("crea_episodio", "ok"), ("modifica_configurazione", "ok"),
+    for attesa in [("produci", "StimaCambiata"), ("carica_documento", "ok"), ("crea_episodio", "ok"), ("modifica_configurazione", "ok"),
                    ("scegli_musiche", "ok"), ("scrivi_copione", "accodato"), ("scrivi_copione", "ok"),
                    ("modifica_battuta", "ok"), ("modifica_battuta", "VersionConflict"), ("approva_copione", "ok"),
                    ("produci", "accodato"), ("interrompi", "richiesta"), ("produci", "ProductionInterrupted"), ("produci", "ok")]:
@@ -173,7 +181,10 @@ def test_flusso_completo(flusso):
     assert accodate[0]["costo_stimato_usd"] > 0 and accodate[0]["costo_stimato_eur"] is not None
     assert all(r["utente"] == "ua" for r in righe)
 
-    # Mai percorsi del server verso il browser
+    # Mai percorsi del server ne' voice_id verso il browser (gli id veri del provider finto).
+    voice_id = re.findall(r'"voice_id"\s*:\s*"([^"]+)"', (radice / "voices_registry.json").read_text())
+    assert voice_id, "il registro delle voci dovrebbe avere i voice_id clonati"
     for testo in api.tutte:
         assert str(radice) not in testo and str(Path.home()) not in testo
-        assert "voice_id" not in testo
+        assert not any(v in testo for v in voice_id)
+        assert '"voice_id"' not in testo

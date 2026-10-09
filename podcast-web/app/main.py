@@ -52,9 +52,10 @@ HEADER_SICUREZZA = {
     "Content-Security-Policy": (
         "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; "
         "media-src 'self'; connect-src 'self'; object-src 'none'; base-uri 'none'; "
-        "form-action 'self'; frame-ancestors 'self'"
+        "form-action 'self'; frame-ancestors 'none'"
     ),
     "Cross-Origin-Opener-Policy": "same-origin",
+    "X-Frame-Options": "DENY",
 }
 
 

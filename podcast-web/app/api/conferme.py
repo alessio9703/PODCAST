@@ -47,7 +47,7 @@ async def conferma(gettone: str, request: Request, corpo: RispostaConferma | Non
             if ctx.coda is None:
                 raise ErroreController("NonPronto")
             return await ctx.coda.accoda(utente, g.azione, g.parametri, flag_conferme=(regola.flag,),
-                                         risposta_a=g.error_type)
+                                         risposta_a=g.error_type, impronta=g.extra.get("impronta"))
         stato, risposta, _ = await esegui_e_valuta(ctx, utente, g.azione, g.parametri, flag_conferme=(regola.flag,),
                                                   risposta_a=g.error_type)
         return JSONResponse(risposta, status_code=stato)

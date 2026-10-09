@@ -11,6 +11,7 @@ import pytest
 
 from app.lavori.eventi import Lettore
 from app.servizi.esiti import Pulitore
+from app.servizi.stima import impronta_stima
 from tests.conftest import client_per, header_firmati, righe_registro
 
 # Un produce.py finto: scrive eventi, aspetta finche' esiste `fermo`, e al SIGTERM
@@ -46,6 +47,7 @@ print(json.dumps({"ok": True, "run": run, "file": "ep.mp3", "output": "output/x/
 '''
 
 STIMA = {"exit": 0, "json": {"ok": True, "cost_usd": 2.5, "cost_eur": 2.25, "turns": 3}}
+PRODUCI = {"impronta": impronta_stima(STIMA["json"])}  # la stima che l'utente ha visto
 
 
 @pytest.fixture
@@ -71,7 +73,7 @@ def finito(id_lavoro):
 
 
 def test_produzione_in_coda_con_stima_e_registro(client, produce, ambiente):
-    r = client.post("/api/episodi/run-uno/produzione")
+    r = client.post("/api/episodi/run-uno/produzione", json=PRODUCI)
     assert r.status_code == 202, r.text
     lavoro = r.json()["dati"]["lavoro"]
     dati = aspetta(client, finito(lavoro))
@@ -87,10 +89,10 @@ def test_produzione_in_coda_con_stima_e_registro(client, produce, ambiente):
 
 def test_un_lavoro_per_run_e_un_worker(client, produce):
     (produce.radice / "fermo").write_text("")
-    primo = client.post("/api/episodi/run-uno/produzione").json()["dati"]["lavoro"]
-    r = client.post("/api/episodi/run-uno/produzione")
+    primo = client.post("/api/episodi/run-uno/produzione", json=PRODUCI).json()["dati"]["lavoro"]
+    r = client.post("/api/episodi/run-uno/produzione", json=PRODUCI)
     assert r.status_code == 409 and r.json()["error_type"] == "LavoroGiaInCorso"
-    secondo = client.post("/api/episodi/run-due/produzione").json()["dati"]
+    secondo = client.post("/api/episodi/run-due/produzione", json=PRODUCI).json()["dati"]
     assert secondo["stato"] == "in_coda" and secondo["posizione"] == 2
     dati = client.get("/api/lavori").json()["dati"]
     assert dati["in_corso"]["lavoro"] == primo and [l["lavoro"] for l in dati["in_attesa"]] == [secondo["lavoro"]]
@@ -103,10 +105,10 @@ def test_coda_piena(ambiente, produce):
         c.headers.update({"X-LIL-Richiesta": "1"})
         (produce.radice / "fermo").write_text("")
         (produce.radice / "output" / "run-tre").mkdir()
-        assert c.post("/api/episodi/run-uno/produzione").status_code == 202
+        assert c.post("/api/episodi/run-uno/produzione", json=PRODUCI).status_code == 202
         aspetta(c, lambda d: d["in_corso"] is not None)
-        assert c.post("/api/episodi/run-due/produzione").status_code == 202
-        r = c.post("/api/episodi/run-tre/produzione")
+        assert c.post("/api/episodi/run-due/produzione", json=PRODUCI).status_code == 202
+        r = c.post("/api/episodi/run-tre/produzione", json=PRODUCI)
         assert r.status_code == 503 and r.json()["error_type"] == "CodaPiena"
         (produce.radice / "fermo").unlink()
 
@@ -115,16 +117,16 @@ def test_argomenti_e_permessi_prima_di_accodare(ambiente_cms, produce):
     with client_per(ambiente_cms) as c:
         p = "/api/episodi/run-uno/produzione"
         h = {**header_firmati("POST", p, ruoli="autore"), "X-LIL-Richiesta": "1"}
-        assert c.post(p, headers=h).status_code == 403
+        assert c.post(p, json=PRODUCI, headers=h).status_code == 403
         p = "/api/episodi/manca/produzione"
         h = {**header_firmati("POST", p, ruoli="approvatore"), "X-LIL-Richiesta": "1"}
-        assert c.post(p, headers=h).status_code == 404
+        assert c.post(p, json=PRODUCI, headers=h).status_code == 404
         assert produce.chiamate("estimate.py") == []
 
 
 def test_interruzione_un_solo_sigterm(client, produce, ambiente):
     (produce.radice / "fermo").write_text("")
-    lavoro = client.post("/api/episodi/run-uno/produzione").json()["dati"]["lavoro"]
+    lavoro = client.post("/api/episodi/run-uno/produzione", json=PRODUCI).json()["dati"]["lavoro"]
     aspetta(client, lambda d: d["in_corso"] and d["in_corso"]["stato"] == "in_corso")
     ev = produce.radice / "output" / "run-uno" / "_eventi.jsonl"
     fine = time.monotonic() + 10
@@ -144,8 +146,8 @@ def test_interruzione_un_solo_sigterm(client, produce, ambiente):
 
 def test_interrompere_un_lavoro_in_attesa(client, produce):
     (produce.radice / "fermo").write_text("")
-    client.post("/api/episodi/run-uno/produzione")
-    secondo = client.post("/api/episodi/run-due/produzione").json()["dati"]["lavoro"]
+    client.post("/api/episodi/run-uno/produzione", json=PRODUCI)
+    secondo = client.post("/api/episodi/run-due/produzione", json=PRODUCI).json()["dati"]["lavoro"]
     r = client.post("/api/episodi/run-due/interruzione")
     assert r.json()["dati"]["stato"] == "annullato"
     assert client.get(f"/api/lavori/{secondo}").json()["dati"]["stato"] == "annullato"
@@ -156,9 +158,9 @@ def test_interrompere_vuole_il_permesso(ambiente_cms, produce):
     (produce.radice / "fermo").write_text("")
     with client_per(ambiente_cms) as c:
         p = "/api/episodi/run-uno/produzione"
-        c.post(p, headers={**header_firmati("POST", p, ruoli="approvatore"), "X-LIL-Richiesta": "1"})
+        c.post(p, json=PRODUCI, headers={**header_firmati("POST", p, ruoli="approvatore"), "X-LIL-Richiesta": "1"})
         p = "/api/episodi/run-uno/interruzione"
-        r = c.post(p, headers={**header_firmati("POST", p, ruoli="autore"), "X-LIL-Richiesta": "1"})
+        r = c.post(p, json=PRODUCI, headers={**header_firmati("POST", p, ruoli="autore"), "X-LIL-Richiesta": "1"})
         assert r.status_code == 403
         (produce.radice / "fermo").unlink()
 
@@ -171,7 +173,7 @@ def test_esito_3_del_lavoro_con_gettone_e_conferma_in_coda(client, produce, ambi
         {"exit": 3, "json": {"ok": False, "error_type": "MusicChanged", "error": "brano sostituito", "exit_code": 3}},
         {"exit": 0, "json": {"ok": True}},
     ])
-    lavoro = client.post("/api/episodi/run-uno/produzione").json()["dati"]["lavoro"]
+    lavoro = client.post("/api/episodi/run-uno/produzione", json=PRODUCI).json()["dati"]["lavoro"]
     esito = aspetta(client, finito(lavoro))["recenti"][0]["esito"]
     assert esito["esito"] == "decisione" and esito["gettone"]
     r = client.post(f"/api/conferme/{esito['gettone']}", json={})
@@ -196,7 +198,7 @@ def test_stesura_e_revisione_in_coda_con_by(client, agente):
 def test_esito_visibile_solo_a_chi_ha_lanciato(ambiente_cms, produce):
     with client_per(ambiente_cms) as c:
         p = "/api/episodi/run-uno/produzione"
-        lavoro = c.post(p, headers={**header_firmati("POST", p, ruoli="approvatore"), "X-LIL-Richiesta": "1"}).json()["dati"]["lavoro"]
+        lavoro = c.post(p, json=PRODUCI, headers={**header_firmati("POST", p, ruoli="approvatore"), "X-LIL-Richiesta": "1"}).json()["dati"]["lavoro"]
         fine = time.monotonic() + 15
         while time.monotonic() < fine:
             v = c.get(f"/api/lavori/{lavoro}", headers=header_firmati("GET", f"/api/lavori/{lavoro}", utente="altro")).json()["dati"]
@@ -230,7 +232,7 @@ def test_lettore_righe_complete_link_e_pulizia(tmp_path):
 
 
 def test_polling(client, produce):
-    lavoro = client.post("/api/episodi/run-uno/produzione").json()["dati"]["lavoro"]
+    lavoro = client.post("/api/episodi/run-uno/produzione", json=PRODUCI).json()["dati"]["lavoro"]
     aspetta(client, finito(lavoro))
     dati = client.get("/api/episodi/run-uno/eventi/elenco").json()["dati"]
     assert [e["evento"] for e in dati["eventi"]] == ["iniziata", "fase_iniziata", "battuta", "battuta", "battuta", "finita"]
@@ -251,7 +253,7 @@ def leggi_sse(testo):
 
 
 def test_sse_segue_la_produzione_e_si_chiude(client, produce):
-    client.post("/api/episodi/run-uno/produzione")
+    client.post("/api/episodi/run-uno/produzione", json=PRODUCI)
     with client.stream("GET", "/api/episodi/run-uno/eventi") as r:
         assert r.headers["content-type"].startswith("text/event-stream")
         assert r.headers["x-accel-buffering"] == "no"
@@ -264,7 +266,7 @@ def test_sse_segue_la_produzione_e_si_chiude(client, produce):
 
 
 def test_sse_last_event_id(client, produce):
-    lavoro = client.post("/api/episodi/run-uno/produzione").json()["dati"]["lavoro"]
+    lavoro = client.post("/api/episodi/run-uno/produzione", json=PRODUCI).json()["dati"]["lavoro"]
     aspetta(client, finito(lavoro))
     with client.stream("GET", "/api/episodi/run-uno/eventi", headers={"Last-Event-ID": "4"}) as r:
         eventi = leggi_sse("".join(r.iter_text()))
@@ -344,7 +346,7 @@ def test_produci_ravvicinati_sulla_stessa_run(client, produce, monkeypatch):
 
     async def tre():
         u = ctx.ingresso._utente
-        return await asyncio.gather(*(ctx.coda.accoda(u, "produci", {"run": "run-uno"}) for _ in range(3)),
+        return await asyncio.gather(*(ctx.coda.accoda(u, "produci", {"run": "run-uno"}, impronta=PRODUCI["impronta"]) for _ in range(3)),
                                     return_exceptions=True)
     esiti = client.portal.call(tre)
     accodati = [e for e in esiti if not isinstance(e, Exception)]
@@ -368,8 +370,8 @@ def test_coda_piena_con_stime_in_volo(ambiente, produce, monkeypatch):
 
         async def due():
             u = ctx.ingresso._utente
-            return await asyncio.gather(ctx.coda.accoda(u, "produci", {"run": "run-uno"}),
-                                        ctx.coda.accoda(u, "produci", {"run": "run-due"}), return_exceptions=True)
+            return await asyncio.gather(ctx.coda.accoda(u, "produci", {"run": "run-uno"}, impronta=PRODUCI["impronta"]),
+                                        ctx.coda.accoda(u, "produci", {"run": "run-due"}, impronta=PRODUCI["impronta"]), return_exceptions=True)
         esiti = c.portal.call(due)
         assert sorted(type(e).__name__ for e in esiti) == ["ErroreController", "JSONResponse"]
         ctx.coda._attesa.clear()
@@ -393,7 +395,7 @@ def test_interruzione_durante_l_avvio_del_processo(client, produce, monkeypatch)
     inviati = []
     originale_send = asyncio.subprocess.Process.send_signal
     monkeypatch.setattr(asyncio.subprocess.Process, "send_signal", lambda self, s: (inviati.append(s), originale_send(self, s)))
-    lavoro = client.post("/api/episodi/run-uno/produzione").json()["dati"]["lavoro"]
+    lavoro = client.post("/api/episodi/run-uno/produzione", json=PRODUCI).json()["dati"]["lavoro"]
     esito = aspetta(client, finito(lavoro))["recenti"][0]["esito"]
     # il processo riceve il SIGTERM (uno solo) appena esiste: se non ha ancora i suoi
     # gestori esce subito (Interrupted), altrimenti si ferma fra una battuta e l'altra
@@ -405,9 +407,9 @@ def test_interruzione_durante_l_avvio_del_processo(client, produce, monkeypatch)
 
 def test_interruzione_prima_dell_avvio_non_lancia(client, produce, ambiente):
     (produce.radice / "fermo").write_text("")
-    client.post("/api/episodi/run-uno/produzione")
+    client.post("/api/episodi/run-uno/produzione", json=PRODUCI)
     aspetta(client, lambda d: d["in_corso"] is not None)
-    secondo = client.post("/api/episodi/run-due/produzione").json()["dati"]["lavoro"]
+    secondo = client.post("/api/episodi/run-due/produzione", json=PRODUCI).json()["dati"]["lavoro"]
     lavoro = client.app.state.ctx.coda.trova(secondo)
     client.app.state.ctx.coda._sigterm(lavoro, motivo="test")  # richiesta mentre e' ancora in coda
     (produce.radice / "fermo").unlink()
@@ -429,7 +431,7 @@ def test_spegnimento_durante_l_avvio_aspetta_il_lavoro(ambiente, produce, monkey
         return await originale(*a, **k)
     monkeypatch.setattr(modulo.esecutore, "avvia_processo", avvio_lento)
     with client_per(ambiente) as c:
-        c.post("/api/episodi/run-uno/produzione", headers={"X-LIL-Richiesta": "1"})
+        c.post("/api/episodi/run-uno/produzione", json=PRODUCI, headers={"X-LIL-Richiesta": "1"})
         fine = time.monotonic() + 5
         while not partito and time.monotonic() < fine:
             time.sleep(0.02)

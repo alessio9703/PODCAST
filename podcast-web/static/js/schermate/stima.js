@@ -138,7 +138,12 @@ export async function mostraStima(pagina, { run }) {
       opzioni: [{ testo: "Annulla", valore: false }, { testo: `Genera · ${costo(stima)}`, valore: true, primaria: true }],
     });
     if (!ok) return;
-    const { corpo: r } = await invia(`/api/episodi/${seg(run)}/produzione`, {});
+    const { corpo: r } = await invia(`/api/episodi/${seg(run)}/produzione`, { impronta: stima.impronta });
+    if (!r.ok && r.error_type === "StimaCambiata") {
+      await ricarica();
+      mostraErrore(errore, r);
+      return;
+    }
     if (!r.ok) { mostraErrore(errore, r); return; }
     location.hash = `#/episodi/${seg(run)}/6`;
   }
