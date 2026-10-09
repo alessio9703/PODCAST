@@ -36,6 +36,8 @@ METODI_CHE_CAMBIANO = frozenset({"POST", "PUT", "PATCH", "DELETE"})
 HEADER_RICHIESTA = "x-lil-richiesta"
 TIPI_AMMESSI = ("application/json", "application/octet-stream")
 SENZA_INGRESSO = frozenset({"/salute"})
+# Corpo massimo delle richieste non binarie (JSON): i caricamenti hanno il loro limite.
+CORPO_JSON_MAX = 256 * 1024
 
 HEADER_SICUREZZA = {
     "X-Content-Type-Options": "nosniff",
@@ -51,6 +53,59 @@ HEADER_SICUREZZA = {
 
 def _errore(exc: ErroreController) -> JSONResponse:
     return JSONResponse(exc.corpo(), status_code=exc.status)
+
+
+class LimiteCorpo:
+    """Middleware ASGI: un corpo non binario oltre CORPO_JSON_MAX -> 413, contato
+    mentre arriva (vale anche senza Content-Length o con un valore falso), prima
+    che FastAPI lo tenga tutto in memoria."""
+
+    def __init__(self, app: Any, massimo: int = CORPO_JSON_MAX) -> None:
+        self.app = app
+        self.massimo = massimo
+
+    async def __call__(self, scope: Any, receive: Any, send: Any) -> None:
+        if scope["type"] != "http":
+            await self.app(scope, receive, send)
+            return
+        intestazioni = {k.lower(): v for k, v in scope.get("headers", [])}
+        tipo = intestazioni.get(b"content-type", b"").split(b";")[0].strip().lower()
+        if tipo == b"application/octet-stream":
+            await self.app(scope, receive, send)
+            return
+        lunghezza = intestazioni.get(b"content-length", b"")
+        if lunghezza.isdigit() and int(lunghezza) > self.massimo:
+            await _errore(ErroreController("FileTroppoGrande", "Richiesta troppo grande."))(scope, receive, send)
+            return
+        letti = 0
+        superato = False
+        massimo = self.massimo
+
+        async def receive_contato() -> Any:
+            # Oltre il limite l'app vede una disconnessione: smette di leggere e
+            # non esegue niente; la risposta 413 la manda questo middleware.
+            nonlocal letti, superato
+            if superato:
+                return {"type": "http.disconnect"}
+            messaggio = await receive()
+            if messaggio["type"] == "http.request":
+                letti += len(messaggio.get("body", b""))
+                if letti > massimo:
+                    superato = True
+                    return {"type": "http.disconnect"}
+            return messaggio
+
+        async def send_filtrato(messaggio: Any) -> None:
+            if not superato:
+                await send(messaggio)
+
+        try:
+            await self.app(scope, receive_contato, send_filtrato)
+        except Exception:
+            if not superato:
+                raise
+        if superato:
+            await _errore(ErroreController("FileTroppoGrande", "Richiesta troppo grande."))(scope, receive, send)
 
 
 def crea_app(config: Config | None = None, *, router_extra: list[Any] | None = None) -> FastAPI:
@@ -104,6 +159,11 @@ def crea_app(config: Config | None = None, *, router_extra: list[Any] | None = N
             risposta = await call_next(request)
         except ErroreController as exc:
             risposta = _errore(exc)
+        except Exception:
+            # Anche un errore imprevisto esce nel formato unico e con gli header di
+            # sicurezza (prima finiva nel ServerErrorMiddleware, senza header).
+            log.exception("errore imprevisto su %s %s", request.method, request.url.path)
+            risposta = _errore(ErroreController("ErroreInterno"))
         for nome, valore in HEADER_SICUREZZA.items():
             risposta.headers.setdefault(nome, valore)
         if request.url.path.startswith("/api/") or request.url.path in SENZA_INGRESSO:
@@ -135,6 +195,7 @@ def crea_app(config: Config | None = None, *, router_extra: list[Any] | None = N
         log.exception("errore imprevisto su %s %s", request.method, request.url.path)
         return _errore(ErroreController("ErroreInterno"))
 
+    app.add_middleware(LimiteCorpo)
     app.include_router(sessione.router)
     app.include_router(conferme.router)
     for router in router_extra or []:

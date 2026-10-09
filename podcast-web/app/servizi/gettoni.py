@@ -1,16 +1,21 @@
 """Gettoni di conferma per gli esiti 3.
 
 Un gettone e' casuale (`secrets`), vale pochi minuti, si usa UNA volta ed e'
-legato a utente, azione, run e domanda (error_type + impronta di `details`).
+legato a utente, azione, run e domanda (l'error_type e i `details` dell'esito 3).
 Conserva gli argomenti della richiesta originale: confermando, il controller
-rilancia QUEGLI argomenti con il flag che la tabella associa all'error_type, e il
-browser non puo' cambiare niente. Stanno in memoria (un solo processo uvicorn):
-un riavvio li perde, e l'utente ripete l'operazione.
+rilancia QUEGLI argomenti con cio' che la tabella associa all'error_type, e il
+browser non puo' cambiare niente. I `details` servono per le conferme che ne usano
+i dati (la voce di `CloneOutcomeUnknown`, i candidati di `LessonRemovalRequired`).
+La domanda non si ricontrolla alla conferma: se nel frattempo la situazione e'
+cambiata di nuovo (es. un brano sostituito una seconda volta), vale la semantica
+del flag dell'agente, entro la durata del gettone.
+
+Stanno in memoria (un solo processo uvicorn): un riavvio li perde, e l'utente
+ripete l'operazione.
 """
 
 from __future__ import annotations
 
-import hashlib
 import json
 import secrets
 import threading
@@ -31,17 +36,11 @@ class Gettone:
     azione: str
     run: str | None
     error_type: str
-    impronta: str
     parametri: dict[str, Any]
     details: dict[str, Any]
     scadenza: float               # time.monotonic()
     scade_il: str                 # per il browser
     creato: float = field(default_factory=time.monotonic)
-
-
-def impronta_details(error_type: str, details: Any) -> str:
-    testo = json.dumps([error_type, details], sort_keys=True, ensure_ascii=False, default=str)
-    return hashlib.sha256(testo.encode("utf-8")).hexdigest()
 
 
 class Gettoni:
@@ -62,7 +61,7 @@ class Gettoni:
         scade_il = (datetime.now(timezone.utc) + timedelta(seconds=self._durata)).isoformat(timespec="seconds")
         gettone = Gettone(
             valore=secrets.token_urlsafe(32), utente_id=utente_id, azione=azione, run=run,
-            error_type=error_type, impronta=impronta_details(error_type, details or {}),
+            error_type=error_type,
             parametri=json.loads(json.dumps(parametri)), details=json.loads(json.dumps(details or {})),
             scadenza=ora + self._durata, scade_il=scade_il,
         )

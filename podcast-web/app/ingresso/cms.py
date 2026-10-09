@@ -46,6 +46,7 @@ HEADER_NOME = "X-LIL-Nome"
 HEADER_RUOLI = "X-LIL-Ruoli"
 HEADER_TIMESTAMP = "X-LIL-Timestamp"
 HEADER_FIRMA = "X-LIL-Firma"
+HEADER_IDENTITA = (HEADER_UTENTE, HEADER_NOME, HEADER_RUOLI, HEADER_TIMESTAMP, HEADER_FIRMA)
 
 VERSIONE_FIRMA = "v1"
 _ID = re.compile(r"^[A-Za-z0-9._@-]{1,100}$")
@@ -99,6 +100,8 @@ class IngressoCms(Ingresso):
 
     def identifica(self, request: Request) -> Utente:
         h = request.headers
+        if any(len(h.getlist(nome)) > 1 for nome in HEADER_IDENTITA):
+            raise self._rifiuta("header di identita' duplicati")
         utente = h.get(HEADER_UTENTE)
         nome = h.get(HEADER_NOME)
         ruoli = h.get(HEADER_RUOLI)

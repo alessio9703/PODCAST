@@ -44,7 +44,8 @@ async def conferma(gettone: str, request: Request, corpo: RispostaConferma | Non
             if ctx.coda is None:
                 raise ErroreController("NonPronto")
             return await ctx.coda.accoda_risposta(request, utente, g.azione, g.parametri, flag_conferme=(regola.flag,))
-        stato, risposta, _ = await esegui_e_valuta(ctx, utente, g.azione, g.parametri, flag_conferme=(regola.flag,))
+        stato, risposta, _ = await esegui_e_valuta(ctx, utente, g.azione, g.parametri, flag_conferme=(regola.flag,),
+                                                  risposta_a=g.error_type)
         return JSONResponse(risposta, status_code=stato)
     if regola.azione:
         parametri: dict[str, Any] = {}
@@ -53,7 +54,8 @@ async def conferma(gettone: str, request: Request, corpo: RispostaConferma | Non
             if not isinstance(valore, str) or not valore:
                 raise ErroreController("GettoneNonValido")
             parametri[param] = valore
-        stato, risposta, _ = await esegui_e_valuta(ctx, utente, regola.azione, parametri, da_gettone=True)
+        stato, risposta, _ = await esegui_e_valuta(ctx, utente, regola.azione, parametri, da_gettone=True,
+                                                  risposta_a=g.error_type)
         return JSONResponse(risposta, status_code=stato)
     assert regola.scelta is not None
     param, chiave, campo_id = regola.scelta
@@ -62,5 +64,6 @@ async def conferma(gettone: str, request: Request, corpo: RispostaConferma | Non
     if scelta is None or scelta not in candidati:
         # Il gettone e' gia' consumato: una scelta sbagliata si ripete dall'inizio.
         raise ErroreController("RichiestaNonValida", "Scegli una delle opzioni proposte.", {"campo": "scelta"})
-    stato, risposta, _ = await esegui_e_valuta(ctx, utente, g.azione, g.parametri, parametri_nascosti={param: scelta})
+    stato, risposta, _ = await esegui_e_valuta(ctx, utente, g.azione, g.parametri, parametri_nascosti={param: scelta},
+                                              risposta_a=g.error_type)
     return JSONResponse(risposta, status_code=stato)

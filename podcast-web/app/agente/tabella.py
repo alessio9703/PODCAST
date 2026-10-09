@@ -37,6 +37,7 @@ RUOLO_VALORE = "ruolo_valore"  # {ruolo: valore} -> --opz=RUOLO=valore ripetuto
 RUOLI_ELENCO = "ruoli_elenco"  # [ruolo, ...] -> --opz=RUOLO ripetuto
 SCELTA_RIPETUTA = "scelta_ripetuta"  # [scelta, ...] -> --opz=scelta ripetuto
 
+_RE_INTERO = re.compile(r"[0-9]{1,9}")
 _RE_RUN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,150}$")
 _CONTROLLO = re.compile(r"[\x00-\x1f\x7f]")
 _CONTROLLO_TESTO = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]")  # ammessi \t \n \r
@@ -296,10 +297,21 @@ OPZIONI_VIETATE = frozenset({
 })
 
 
+# Flag e opzioni che confermano una scelta dell'utente: arrivano SOLO da un gettone
+# (Conferma.flag, parametri nascosti) o da un'azione `solo_da_gettone`.
+FLAG_CONFERMA = frozenset({
+    "--accept-changed-music", "--accept-incomplete-name", "--accetta-nome-incompleto",
+    "--confirm-clone-retry", "--remove-id",
+})
+
+
 def verifica_tabella() -> None:
-    """Controllo di coerenza all'avvio e nei test: nessun tool o opzione vietata."""
+    """Controllo di coerenza all'avvio e nei test: nessun tool o opzione vietata,
+    flag di conferma solo dove li porta un gettone."""
     from app.servizi.permessi import PERMESSI
 
+    if not set(_OPZIONI_DA_SCELTA.values()) <= FLAG_CONFERMA:
+        raise ErroreTabella("le opzioni dei parametri nascosti devono essere flag di conferma")
     for nome, cmd in TABELLA.items():
         if cmd.tool in TOOL_VIETATI or "/" in cmd.tool or not cmd.tool.endswith(".py"):
             raise ErroreTabella(f"{nome}: tool non ammesso {cmd.tool}")
@@ -310,9 +322,17 @@ def verifica_tabella() -> None:
         for opz in opzioni:
             if opz in OPZIONI_VIETATE or opz == "--by" or opz.startswith("--no-") and opz != "--no-licenza":
                 raise ErroreTabella(f"{nome}: opzione non ammessa {opz}")
+        if any(a.opzione in FLAG_CONFERMA for a in cmd.argomenti):
+            raise ErroreTabella(f"{nome}: un flag di conferma non puo' essere un argomento del browser")
+        if set(cmd.fissi) & FLAG_CONFERMA and not cmd.solo_da_gettone:
+            raise ErroreTabella(f"{nome}: flag di conferma fisso in un'azione che non viene solo da un gettone")
         for c in cmd.conferme.values():
+            if c.flag is not None and c.flag not in FLAG_CONFERMA:
+                raise ErroreTabella(f"{nome}: {c.flag} non e' un flag di conferma noto")
             if c.azione and c.azione not in TABELLA:
                 raise ErroreTabella(f"{nome}: conferma verso un'azione inesistente {c.azione}")
+            if c.azione and not TABELLA[c.azione].solo_da_gettone:
+                raise ErroreTabella(f"{nome}: la conferma lancia {c.azione}, che deve essere solo_da_gettone")
         posizionali = [a for a in cmd.argomenti if a.opzione is None]
         if posizionali and cmd.argomenti[-1].opzione is not None:
             raise ErroreTabella(f"{nome}: i posizionali vanno in fondo")
@@ -360,7 +380,7 @@ def controlla_run(valore: Any, output_dir: Path) -> str:
 
 def _intero(arg: Arg, valore: Any) -> int:
     if isinstance(valore, bool) or not isinstance(valore, int):
-        if isinstance(valore, str) and valore.isdigit() and len(valore) < 10:
+        if isinstance(valore, str) and _RE_INTERO.fullmatch(valore):
             valore = int(valore)
         else:
             raise ErroreArgomento(arg.param, "serve un numero intero")

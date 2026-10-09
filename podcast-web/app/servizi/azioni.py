@@ -26,6 +26,9 @@ from app.servizi.permessi import Permessi
 
 log = logging.getLogger("podcast_web.azioni")
 
+AVVISO_REGISTRO = ("L'operazione e' stata eseguita, ma non e' stato possibile scriverla nel registro attivita'. "
+                   "L'errore e' stato segnalato all'amministratore.")
+
 
 @dataclass
 class Contesto:
@@ -72,6 +75,7 @@ async def esegui_e_valuta(
     flag_conferme: tuple[str, ...] = (),
     parametri_nascosti: Mapping[str, str] | None = None,
     da_gettone: bool = False,
+    risposta_a: str | None = None,
 ) -> tuple[int, dict[str, Any], esecutore.Risultato]:
     """Il cuore comune a rotte e conferme. Solleva ErroreController per gli
     errori del controller (permesso, argomenti)."""
@@ -104,16 +108,19 @@ async def esegui_e_valuta(
         corpo["scade_il"] = gettone.scade_il
     if cmd.registra:
         usd, eur = _costi(risultato.json)
-        ctx.registro.scrivi(
+        scritto = ctx.registro.scrivi(
             utente=utente, azione=azione, run=run,
             esito="ok" if corpo["ok"] else corpo["error_type"],
             exit_code=risultato.exit_code, http=stato, costo_stimato_usd=usd, costo_stimato_eur=eur,
-            dettagli=_dettagli_registro(azione, parametri, flag_conferme, risultato.json),
+            dettagli=_dettagli_registro(azione, parametri, flag_conferme, risultato.json, risposta_a),
         )
+        if not scritto:
+            corpo["avviso"] = AVVISO_REGISTRO
     return stato, corpo, risultato
 
 
-def _dettagli_registro(azione: str, parametri: Mapping[str, Any], flag: tuple[str, ...], dati: Any) -> dict[str, Any]:
+def _dettagli_registro(azione: str, parametri: Mapping[str, Any], flag: tuple[str, ...], dati: Any,
+                       domanda: str | None = None) -> dict[str, Any]:
     """Pochi dati utili e senza percorsi: versioni, battute, voci, flag di conferma."""
     dettagli: dict[str, Any] = {}
     for chiave in ("versione", "battuta", "nome", "documento", "titolo", "versione_attesa"):
@@ -121,6 +128,8 @@ def _dettagli_registro(azione: str, parametri: Mapping[str, Any], flag: tuple[st
             dettagli[chiave] = parametri[chiave]
     if flag:
         dettagli["conferme"] = list(flag)
+    if domanda:
+        dettagli["risposta_a"] = domanda
     if isinstance(dati, dict):
         for chiave in ("version", "sha256", "approved_version"):
             if chiave in dati and isinstance(dati[chiave], (int, str)):

@@ -106,29 +106,29 @@ Le gravità alte e medie sono corrette nella fase; qui restano le basse e le not
 
 ### Dalla revisione di A1
 
-- [ ] **Header di identità duplicati** (A1 BASSA-1): il CMS deve togliere ogni `X-LIL-*` del
-  browser; nel controller, rifiutare con 401 un header di identità presente più volte.
+Corrette dopo A1 (con test in `tests/test_correzioni_a1.py`): BASSA-1 (header di identità
+duplicati → 401), BASSA-4 (header di sicurezza anche sui 500), BASSA-5 (interi solo con
+cifre ASCII), BASSA-6 (timeout dei comandi brevi: segnali a tutto il gruppo di processi),
+BASSA-8 (flag di conferma solo da gettone, controllato da `verifica_tabella`), BASSA-9
+(corpo JSON massimo 256 KB, contato anche senza `Content-Length`), BASSA-10 (registro: vedi
+sotto), NOTA-1 (impronta del gettone tolta, la conferma registra a quale domanda risponde).
+
+- [ ] **Il CMS toglie gli `X-LIL-*` del browser** (A1 BASSA-1): il controller ora rifiuta
+  gli header di identità duplicati, quindi un CMS che li lascia passare produce 401.
 - [ ] **Replay entro 60 s** (A1 BASSA-2): il CMS non registra `X-LIL-Firma` nei log, TLS fino
   al VPS. Se serve chiudere il caso: `X-LIL-Nonce` nella stringa canonica e cache delle
   firme già viste per i metodi che cambiano qualcosa.
 - [ ] **Nome con caratteri bidirezionali o invisibili** (A1 BASSA-3): rifiutare (o togliere)
   le categorie Unicode `Cf` in `X-LIL-Nome`.
-- [ ] **Header di sicurezza anche sulle risposte 500 da eccezione imprevista** (A1 BASSA-4).
-- [ ] **Interi con cifre Unicode** (`"²"`) danno 500 invece di 400 (A1 BASSA-5): usare
-  `str.isascii() and str.isdigit()` in `tabella._intero`.
-- [ ] **Timeout dei comandi brevi**: SIGTERM al gruppo di processi, non solo al principale,
-  così non restano figli (ffmpeg) vivi (A1 BASSA-6).
 - [ ] **Pulizia dei percorsi**: la rete di sicurezza non vede un percorso dentro una frase né
   nelle chiavi dei dizionari (A1 BASSA-7). L'agente garantisce già messaggi senza percorsi
   assoluti; valutare un controllo per sottostringa della cartella dell'agente nelle chiavi.
-- [ ] **`verifica_tabella`**: controllare anche che nessun flag di conferma compaia fra
-  argomenti e `fissi` (A1 BASSA-8).
-- [ ] **Limite al corpo delle richieste JSON** (es. 1 MB) prima del parsing (A1 BASSA-9; il
-  proxy del CMS può già limitarlo).
-- [ ] **Registro attività** (A1 BASSA-10): monitorare lo spazio su disco (la riga si scrive
-  dopo l'azione); all'avvio controllare permessi del file (0600) e della cartella (0700) già
-  esistenti.
-- [ ] Note di A1: impronta del gettone calcolata ma non usata (NOTA-1); `--by` è il nome
+- [ ] **Registro attività** (A1 BASSA-10): se una riga non si scrive (disco pieno) l'azione
+  resta fatta, la risposta porta un `avviso` e la riga completa finisce nel log del servizio
+  come `CRITICAL` con "REGISTRO ATTIVITA' NON SCRITTO": **allarme sul log** e riportarla a
+  mano nel registro. Monitorare lo spazio su disco. All'avvio file e cartella del registro
+  devono essere dell'utente del servizio, 0600 e 0700, altrimenti il controller non parte.
+- [ ] Note di A1: `--by` è il nome
   visualizzato, due persone con lo stesso nome si distinguono solo nel registro, che ha
   l'id (NOTA-2); il gettone sta nel percorso e finisce negli access log: tenere gli access
   log riservati o spostarlo nel corpo (NOTA-3); in cms la difesa CSRF dipende anche dalla

@@ -104,19 +104,28 @@ def interpreta(azione: str, exit_code: int | None, stdout: bytes, stderr: bytes,
     return Risultato(azione=azione, exit_code=exit_code, json=dati, stderr=testo_err, durata_s=durata, timeout=timeout)
 
 
-async def termina(processo: asyncio.subprocess.Process, attesa: float = ATTESA_DOPO_SIGTERM_S) -> None:
-    """Per i comandi brevi oltre il timeout: un SIGTERM, poi SIGKILL se non esce.
-    (I lavori lunghi hanno la loro interruzione, con un solo SIGTERM: `app/lavori`.)"""
-    if processo.returncode is not None:
-        return
+def _segnale_al_gruppo(pid: int, segnale: int) -> None:
     try:
-        processo.send_signal(signal.SIGTERM)
-        await asyncio.wait_for(processo.wait(), attesa)
-    except (ProcessLookupError, asyncio.TimeoutError):
+        os.killpg(pid, segnale)
+    except (ProcessLookupError, PermissionError):
+        pass
+
+
+async def termina(processo: asyncio.subprocess.Process, attesa: float = ATTESA_DOPO_SIGTERM_S) -> None:
+    """Per i comandi BREVI oltre il timeout: SIGTERM a tutto il gruppo di processi
+    (il tool e i suoi figli, es. ffmpeg: ogni comando ha una sessione sua), poi
+    SIGKILL al gruppo se non esce, e comunque SIGKILL ai figli rimasti.
+    (I lavori lunghi hanno la loro interruzione, con un solo SIGTERM: `app/lavori`.)"""
+    if processo.returncode is None:
+        _segnale_al_gruppo(processo.pid, signal.SIGTERM)
         try:
-            os.killpg(processo.pid, signal.SIGKILL)
-        except (ProcessLookupError, PermissionError):
+            await asyncio.wait_for(processo.wait(), attesa)
+        except asyncio.TimeoutError:
             pass
+    # Il pid del tool e' l'id del gruppo: finche' il gruppo ha membri non viene
+    # riusato, quindi qui non si colpiscono processi estranei.
+    _segnale_al_gruppo(processo.pid, signal.SIGKILL)
+    if processo.returncode is None:
         await processo.wait()
 
 
