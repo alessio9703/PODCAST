@@ -29,6 +29,8 @@
   --neutro-sfondo: #ececea; --neutro-testo: #3d3f42;
   --presentatore-sfondo: #e4ecfa; --presentatore-testo: #1d3f7a;
   --tag-sfondo: #f1ecfb; --tag-testo: #4b2a8a;
+  --aggiunto-sfondo: #dcefdf; --aggiunto-testo: #1d4d26;
+  --rimosso-sfondo: #f8dede; --rimosso-testo: #7d1818;
 
   /* forme e spazi */
   --raggio: 8px;

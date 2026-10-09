@@ -203,7 +203,8 @@ export async function mostraCopione(pagina, { run }) {
       v.current ? h("span", { class: "badge badge-neutro" }, "corrente") : null,
       v.approved ? h("span", { class: "badge badge-ok" }, "approvata") : null,
       v.approved_but_outdated ? h("span", { class: "badge badge-attenzione" }, "approvata in passato") : null,
-      h("span", { class: "nota" }, ` ${v.instruction ? `«${v.instruction}»` : (v.kind || "").replace("_", " ")} · ${dataOra(v.at)}${v.by ? ` · ${v.by}` : ""}`)))));
+      h("span", { class: "nota" }, ` ${v.instruction ? `«${v.instruction}»` : (v.kind || "").replace("_", " ")} · ${dataOra(v.at)}${v.by ? ` · ${v.by}` : ""}`),
+      !v.current ? h("a", { class: "pulsante-link", href: `#/episodi/${seg(run)}/confronto/${v.version}`, "aria-label": `Confronta la versione ${v.version} con la corrente` }, " Confronta") : null))));
   }
 
   await ricarica();

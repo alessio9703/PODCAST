@@ -1,11 +1,12 @@
 // Passo 7 · Episodio (07-Episodio.dc.html): intestazione, lettore con le sezioni,
-// trascrizione cliccabile, file da scaricare. Le correzioni (retake, "Cosa dice",
-// cambio musiche) e la forma d'onda arrivano in A5.
+// trascrizione cliccabile, file da scaricare, correzioni di una battuta: "Cosa dice"
+// (correggi il testo: nuova versione da approvare, poi si rigenera solo quella battuta).
 
-import { h, sostituisci, durata, giorno } from "../dom.js";
-import { leggi, seg } from "../api.js";
+import { h, sostituisci, durata, giorno, nuovoId } from "../dom.js";
+import { leggi, modifica, seg } from "../api.js";
 import { intestazionePasso, statoRun, boxErrore, sezione, badgeStato, piede } from "../componenti.js";
-import { mostraErrore } from "../stati.js";
+import { mostraErrore, pulisciErrore, conferma } from "../stati.js";
+import { puo } from "../sessione.js";
 
 const FORMATI = { conversazione: "Conversazione", intervista: "Intervista" };
 const SEZIONI = { intro: "Intro", parlato: "Parlato", outro: "Outro" };
@@ -25,17 +26,75 @@ export async function mostraEpisodio(pagina, { run }) {
   const finale = ep.file_finale;
   const audio = finale ? h("audio", { controls: true, preload: "metadata", src: url(finale.nome), class: "lettore" }) : null;
   const righe = [];
+  const pannello = h("div", { id: "correzioni", "aria-live": "polite" });
 
   const trascrizione = h("ol", { class: "trascrizione" }, (ep.trascrizione || []).map((t) => {
     const testo = [h("span", { class: "nota" }, `${t.inizio_label || "—"} · ${RUOLI[t.ruolo] || t.speaker} · `), t.testo_parlato || t.testo];
-    const voce = audio && typeof t.inizio_finale === "number"
-      ? h("button", { type: "button", class: "battuta-ascolta", "aria-label": `Ascolta dalla battuta ${t.n}, ${t.speaker}`,
-        onclick: () => { audio.currentTime = t.inizio_finale; audio.play().catch(() => {}); } }, testo)
-      : h("p", {}, testo);
-    const li = h("li", { class: "riga-trascrizione", dataset: { inizio: t.inizio_finale ?? "", fine: t.fine_finale ?? "" } }, voce);
+    const voce = h("button", { type: "button", class: "battuta-ascolta", "aria-label": `Battuta ${t.n}, ${t.speaker}: ascolta e correggi`,
+      onclick: () => {
+        seleziona(t);
+        if (audio && typeof t.inizio_finale === "number") { audio.currentTime = t.inizio_finale; audio.play().catch(() => {}); }
+      } }, testo);
+    const li = h("li", { class: "riga-trascrizione", dataset: { n: String(t.n), inizio: t.inizio_finale ?? "", fine: t.fine_finale ?? "" } }, voce);
     righe.push(li);
     return li;
   }));
+
+  // --- Correzioni della battuta scelta ---------------------------------------
+  function seleziona(t) {
+    for (const li of righe) li.classList.toggle("scelta-correzione", li.dataset.n === String(t.n));
+    const tempi = typeof t.inizio_finale === "number" ? ` · ${orario(t.inizio_finale)}–${orario(t.fine_finale)}` : "";
+    const corpo = h("div", {});
+    const scelte = h("div", { class: "scelte", role: "group", "aria-label": "Cosa non va in questa battuta?" });
+    const scegli = (quale) => {
+      sostituisci(scelte,
+        h("button", { type: "button", class: "scelta scelta-estesa", "aria-pressed": String(quale === "come"), onclick: () => scegli("come") },
+          h("span", { class: "forte" }, "Come è detta"), h("span", { class: "nota" }, "Stesso testo, nuova resa")),
+        h("button", { type: "button", class: "scelta scelta-estesa", "aria-pressed": String(quale === "cosa"), onclick: () => scegli("cosa") },
+          h("span", { class: "forte" }, "Cosa dice"), h("span", { class: "nota" }, "Correggi il testo · nuova approvazione")));
+      if (quale === "cosa") cosaDice(t, corpo);
+      else if (quale === "come") comeEDetta(t, corpo);
+      else sostituisci(corpo);
+    };
+    scegli(null);
+    sostituisci(pannello, sezione(`Battuta ${t.n} · ${RUOLI[t.ruolo] || t.speaker}${tempi}`,
+      h("p", { class: "forte" }, "Cosa non va in questa battuta?"), scelte, corpo));
+  }
+
+  async function cosaDice(t, corpo) {
+    if (!puo("copione_modifica")) { sostituisci(corpo, h("p", { class: "nota" }, "Serve il permesso di modificare il copione.")); return; }
+    sostituisci(corpo, h("p", { class: "nota", role: "status" }, "Carico il copione…"));
+    const box = boxErrore();
+    const { corpo: c } = await leggi(`/api/episodi/${seg(run)}/copione`);
+    if (!c.ok) { sostituisci(corpo, box); mostraErrore(box, c); return; }
+    const copione = c.dati;
+    const attuale = (copione.turni_strutturati || []).find((x) => x.n === t.n);
+    if (!attuale) { sostituisci(corpo, h("p", { class: "nota" }, "Questa battuta non c'è più nel copione attuale.")); return; }
+    const id = nuovoId("cosa-dice");
+    const area = h("textarea", { id, rows: "4", maxlength: "5000" }, attuale.testo);
+    sostituisci(corpo,
+      h("label", { for: id, class: "etichetta" }, "Testo della battuta"),
+      area,
+      h("p", { class: "nota" }, "Le indicazioni fra [quadre] cambiano la resa, ad esempio [pausa] o [ride]."),
+      attuale.testo !== t.testo ? h("p", { class: "nota" }, "Il copione è cambiato dopo il montaggio: qui vedi il testo attuale.") : null,
+      h("h3", {}, "Cosa succede dopo"),
+      h("p", {}, `Il copione passa alla versione ${copione.version + 1} e va riapprovato. Poi si rigenera solo questa battuta (la stima mostra il costo prima di confermare) e si rimonta l'episodio. Le altre restano identiche.`),
+      h("div", { class: "riga-azioni" },
+        h("button", { type: "button", class: "pulsante pulsante-primario", onclick: async () => {
+          pulisciErrore(box);
+          const { corpo: r } = await modifica(`/api/episodi/${seg(run)}/copione/battute/${t.n}`, { testo: area.value, versione_attesa: copione.version });
+          if (r.ok) {
+            location.hash = `#/episodi/${seg(run)}/4`;
+            conferma(`Copione salvato · versione ${r.dati.version}. Approvalo per rigenerare la battuta ${t.n}.`);
+          } else mostraErrore(box, r);
+        } }, "Salva e vai all'approvazione")),
+      box);
+  }
+
+  // "Come è detta" (retake): A5, blocco successivo.
+  function comeEDetta(t, corpo) {
+    sostituisci(corpo, h("p", { class: "nota" }, "I nuovi take arrivano a breve."));
+  }
 
   if (audio) {
     // Evidenzia la battuta in ascolto.
@@ -78,9 +137,15 @@ export async function mostraEpisodio(pagina, { run }) {
     finale ? sezione("Ascolta", barraSezioni, audio,
       h("div", { class: "riga-azioni" }, h("a", { class: "pulsante pulsante-primario", href: url(finale.nome, true), download: finale.nome }, `Scarica ${(finale.formato || "mp3").toUpperCase()}`))) : null,
     ep.tempi_non_disponibili ? h("p", { class: "nota" }, ep.tempi_non_disponibili.messaggio) : null,
-    sezione("Trascrizione", trascrizione),
+    h("div", { class: "colonne" },
+      h("div", { class: "colonna-principale" }, sezione("Trascrizione", h("p", { class: "nota" }, "Scegli una battuta per ascoltarla e correggerla."), trascrizione)),
+      h("aside", { class: "colonna-laterale" }, pannello)),
     altri.length ? sezione("File dell'episodio", h("ul", { class: "file" }, altri.map((f) => h("li", {},
       h("a", { href: url(f.nome, true), download: f.nome }, f.nome), h("span", { class: "nota" }, ` · ${Math.max(1, Math.round((f.dimensione_bytes || 0) / 1024))} KB`))))) : null,
-    sezione("Correzioni", h("p", { class: "nota" }, "«Come è detta» (nuovi take), «Cosa dice» (correzione del testo) e «Cambia musiche» arrivano in una fase successiva. Per correggere il testo oggi: modifica la battuta al passo 4, riapprova e rigenera (si pagano solo le battute cambiate).")),
     piede(h("a", { class: "pulsante", href: "#/archivio" }, "Torna all'archivio")));
+}
+
+function orario(secondi) {
+  const s = Math.max(0, Math.round(Number(secondi) || 0));
+  return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`;
 }

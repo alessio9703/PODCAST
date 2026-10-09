@@ -41,7 +41,8 @@ TIPO_JSON = "application/json"
 TIPO_BINARIO = "application/octet-stream"
 # Le sole rotte che ricevono un corpo binario (caricamenti, con il loro limite in
 # streaming). Altrove si accetta solo JSON, con il limite di CORPO_JSON_MAX.
-CARICAMENTI = frozenset({("POST", "/api/documenti")})
+CARICAMENTI = frozenset({("POST", "/api/documenti"), ("POST", "/api/voci"), ("POST", "/api/musiche/intro"),
+                         ("POST", "/api/musiche/outro"), ("POST", "/api/musiche/sottofondo")})
 SENZA_INGRESSO = frozenset({"/salute"})
 # Corpo massimo delle richieste non binarie (JSON): i caricamenti hanno il loro limite.
 CORPO_JSON_MAX = 256 * 1024

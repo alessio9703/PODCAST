@@ -220,3 +220,28 @@ progress { width: 100%; height: 12px; accent-color: var(--primario); }
 .battuta-ascolta:hover { background: var(--sfondo); }
 .in-ascolto .battuta-ascolta { background: var(--presentatore-sfondo); }
 .file { padding-left: 20px; margin: 0; }
+
+/* Confronto versioni */
+.diff-aggiunto { background: var(--aggiunto-sfondo); color: var(--aggiunto-testo); text-decoration: none; border-radius: 3px; padding: 0 2px; }
+.diff-rimosso { background: var(--rimosso-sfondo); color: var(--rimosso-testo); text-decoration: line-through; border-radius: 3px; padding: 0 2px; }
+.diff-invariate { padding: 8px 0; border-bottom: 1px solid var(--bordo-tenue); text-align: center; }
+.diff-rimossa .battuta-testo { color: var(--testo-tenue); }
+
+/* Passo 7 · correzioni di una battuta */
+.scelta-correzione .battuta-ascolta { outline: 2px solid var(--focus); outline-offset: -2px; }
+.scelta-estesa { display: flex; flex-direction: column; align-items: flex-start; gap: 2px; text-align: left; }
+
+/* Librerie */
+.anteprima-testo { white-space: pre-wrap; max-height: 320px; overflow: auto; background: var(--superficie-tenue); padding: var(--spazio); border-radius: var(--raggio); }
+.griglia-voci { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: var(--spazio); }
+.scheda-voce-testa { display: flex; align-items: baseline; gap: 8px; }
+.scheda-voce-testa h2 { margin: 0; }
+.scheda-voce-testa .menu-azioni { margin-left: auto; }
+.menu-azioni { position: relative; }
+.menu-azioni summary { list-style: none; cursor: pointer; min-width: var(--altezza-tocco); min-height: var(--altezza-tocco); display: flex; align-items: center; justify-content: center; border-radius: var(--raggio); }
+.menu-azioni summary::-webkit-details-marker { display: none; }
+.menu-azioni[open] summary { background: var(--superficie-tenue); }
+.menu-azioni-voci { position: absolute; right: 0; z-index: 5; display: flex; flex-direction: column; align-items: flex-start; min-width: 240px; padding: 8px; background: var(--superficie); border: 1px solid var(--bordo); border-radius: var(--raggio); }
+.lettore-piccolo { height: 36px; max-width: 220px; }
+.dettaglio-brano { display: grid; grid-template-columns: 1fr 1fr; gap: var(--spazio); }
+@media (max-width: 800px) { .dettaglio-brano { grid-template-columns: 1fr; } }

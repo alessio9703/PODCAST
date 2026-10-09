@@ -36,6 +36,34 @@ def firma_documento(estensione: str, inizio: bytes) -> bool:
     return estensione in ESTENSIONI_TESTO  # il testo si controlla per intero (UTF-8, niente NUL)
 
 
+# Firma dei primi byte per le registrazioni e i brani (contratto, "Caricamenti").
+def _firma_mp3(b: bytes) -> bool:
+    return b.startswith(b"ID3") or (len(b) >= 2 and b[0] == 0xFF and (b[1] & 0xE0) == 0xE0)
+
+
+FIRME_AUDIO: dict[str, Callable[[bytes], bool]] = {
+    ".wav": lambda b: b[:4] == b"RIFF" and b[8:12] == b"WAVE",
+    ".mp3": _firma_mp3,
+    ".m4a": lambda b: b[4:8] == b"ftyp",
+    ".flac": lambda b: b.startswith(b"fLaC"),
+    ".ogg": lambda b: b.startswith(b"OggS"),
+    ".opus": lambda b: b.startswith(b"OggS"),
+    ".webm": lambda b: b.startswith(b"\x1a\x45\xdf\xa3"),
+}
+
+
+def firma_audio(estensione: str, inizio: bytes) -> bool:
+    controllo = FIRME_AUDIO.get(estensione)
+    return controllo is not None and controllo(inizio)
+
+
+def estensioni_audio(impostazioni: dict) -> tuple[str, ...]:
+    """Le estensioni di `audio.accepted_extensions` dell'agente per cui il controller
+    sa controllare la firma; mai `.json`, `.lock`, `.tmp`."""
+    accettate = (impostazioni.get("audio") or {}).get("accepted_extensions") or []
+    return tuple(sorted({e.lower() for e in accettate if isinstance(e, str)} & set(FIRME_AUDIO) - ESTENSIONI_VIETATE))
+
+
 @dataclass
 class Caricato:
     nome: str

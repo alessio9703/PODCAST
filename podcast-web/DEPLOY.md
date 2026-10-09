@@ -122,7 +122,8 @@ ruoli. La tabella è in `app/servizi/permessi_default.json` e si può sostituire
   `X-LIL-Gettone` (confermare la sostituzione di un file già presente), `Range` (ascolto
   dell'audio), `Last-Event-ID` (ripresa dello SSE). Tutti gli altri `X-LIL-*` del browser si
   tolgono (§1).
-- **Rotte con corpo binario**: oggi solo `POST /api/documenti` (in A5 anche voci e brani).
+- **Rotte con corpo binario**: `POST /api/documenti` (20 MB), `POST /api/voci` (20 MB),
+  `POST /api/musiche/intro|outro|sottofondo` (50 MB).
   Tutte le altre accettano solo `application/json`, al massimo 256 KB.
 - **Timeout del proxy** (lettura della risposta): almeno **300 s** per le API (l'estrazione
   di un documento lungo arriva a 240 s; in A5 il rimontaggio fino a 900 s), **senza limite

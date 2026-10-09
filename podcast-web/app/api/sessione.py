@@ -5,6 +5,8 @@ from __future__ import annotations
 from fastapi import APIRouter, Depends, Request
 from fastapi.responses import JSONResponse
 
+from app.file.caricamenti import estensioni_audio
+from app.file.nomi import ESTENSIONI_DOCUMENTI
 from app.ingresso import Utente, utente_corrente
 from app.servizi.azioni import contesto
 
@@ -19,6 +21,8 @@ async def io(request: Request, utente: Utente = Depends(utente_corrente)) -> JSO
         "nome": utente.nome,
         "ruoli": sorted(utente.ruoli),
         "permessi": sorted(ctx.permessi.di(utente)),
+        # Formati che il controller accetta nei caricamenti (per l'attributo accept).
+        "formati": {"documenti": list(ESTENSIONI_DOCUMENTI), "audio": list(estensioni_audio(ctx.impostazioni))},
     }})
 
 

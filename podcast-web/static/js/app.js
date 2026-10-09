@@ -12,9 +12,15 @@ import { mostraCopione } from "./schermate/copione.js";
 import { mostraStima } from "./schermate/stima.js";
 import { mostraGenerazione } from "./schermate/generazione.js";
 import { mostraEpisodio } from "./schermate/episodio.js";
+import { mostraConfronto } from "./schermate/confronto.js";
+import { mostraDocumenti } from "./schermate/documenti.js";
+import { mostraVoci } from "./schermate/voci.js";
+import { mostraBrani } from "./schermate/brani.js";
 
 
 const PASSI = { 1: mostraDocumento, 2: mostraCast, 3: mostraMusiche, 4: mostraCopione, 5: mostraStima, 6: mostraGenerazione, 7: mostraEpisodio };
+
+const LIBRERIE = { documenti: mostraDocumenti, voci: mostraVoci, musiche: mostraBrani };
 
 const contenuto = document.getElementById("contenuto");
 let chiudiSchermata = null;
@@ -46,12 +52,17 @@ async function instrada() {
       chiudiSchermata = await mostraArchivio(pagina);
     } else if (parti[0] === "nuovo") {
       menu = "nuovo";
-      chiudiSchermata = await mostraDocumento(pagina, { run: null });
+      chiudiSchermata = await mostraDocumento(pagina, { run: null, documento: parti[1] || null });
+    } else if (LIBRERIE[parti[0]]) {
+      chiudiSchermata = await LIBRERIE[parti[0]](pagina);
+    } else if (parti[0] === "episodi" && parti[1] && parti[2] === "confronto") {
+      menu = "archivio";
+      chiudiSchermata = await mostraConfronto(pagina, { run: parti[1], da: parti[3] });
     } else if (parti[0] === "episodi" && parti[1] && PASSI[parti[2]]) {
       menu = "archivio";
       chiudiSchermata = await PASSI[parti[2]](pagina, { run: parti[1] });
-    } else if (["documenti", "voci", "musiche", "lezioni", "impostazioni", "diagnostica"].includes(parti[0])) {
-      sostituisci(contenuto, nonDisponibile({ documenti: "Documenti", voci: "Voci", musiche: "Musiche", lezioni: "Lezioni", impostazioni: "Impostazioni", diagnostica: "Diagnostica" }[parti[0]]));
+    } else if (["lezioni", "impostazioni", "diagnostica"].includes(parti[0])) {
+      sostituisci(contenuto, nonDisponibile({ lezioni: "Lezioni", impostazioni: "Impostazioni", diagnostica: "Diagnostica" }[parti[0]]));
     } else {
       sostituisci(contenuto, nonDisponibile("Pagina non trovata"));
     }
@@ -74,6 +85,7 @@ async function avvia() {
     sessione.utente = corpo.dati.utente;
     sessione.nome = corpo.dati.nome;
     sessione.permessi = new Set(corpo.dati.permessi);
+    if (corpo.dati.formati) sessione.formati = corpo.dati.formati;
     document.getElementById("utente").textContent = corpo.dati.nome;
   } else {
     const box = h("div", {});

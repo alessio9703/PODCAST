@@ -165,6 +165,21 @@ async def ripristina(run: str, corpo: Ripristino, request: Request, utente: Uten
                                {"run": run, "versione": corpo.versione, "versione_attesa": corpo.versione_attesa})
 
 
+# --- Pannello Confronto versioni (A5) ---------------------------------------
+
+@router.get("/episodi/{run}/copione/versioni/{n}")
+async def mostra_versione(run: str, n: int, request: Request, utente: Utente = Depends(utente_corrente)) -> JSONResponse:
+    return await esegui_azione(request, utente, "mostra_versione", {"run": run, "versione": n})
+
+
+@router.get("/episodi/{run}/copione/confronto")
+async def confronta_versioni(run: str, request: Request, da: int, a: int | None = None, solo_modifiche: int = 0,
+                             utente: Utente = Depends(utente_corrente)) -> JSONResponse:
+    """`da` contro `a`, o contro la versione corrente se `a` manca (`--diff N [M]`)."""
+    return await esegui_azione(request, utente, "confronta_versioni", _senza_none(
+        run=run, versioni=[da] if a is None else [da, a], solo_modifiche=True if solo_modifiche else None))
+
+
 # --- Passo 5 · Stima -------------------------------------------------------
 
 @router.get("/episodi/{run}/stima")

@@ -12,7 +12,7 @@ import { puo } from "../sessione.js";
 const TIPI = ".pdf,.docx,.txt,.md,.markdown,.rst,.text";
 const VISIBILI = 3;
 
-export async function mostraDocumento(pagina, { run }) {
+export async function mostraDocumento(pagina, { run, documento = null }) {
   let configurazione = null;
   let stato = null;
   if (run) {
@@ -21,7 +21,7 @@ export async function mostraDocumento(pagina, { run }) {
     configurazione = c.corpo.dati;
     stato = s;
   }
-  let scelto = configurazione?.documento?.nome || null;
+  let scelto = configurazione?.documento?.nome || documento || null;
   let tuttiVisibili = false;
 
   const erroreFile = boxErrore();
