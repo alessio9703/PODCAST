@@ -58,6 +58,7 @@ const TITOLI = {
   FileTroppoGrande: "File troppo grande",
   LavoroGiaInCorso: "C'è già un lavoro in corso su questo episodio",
   StimaCambiata: "La stima è cambiata",
+  ConsensoDopoRevoca: "Il consenso era stato revocato",
   CodaPiena: "Troppi lavori in attesa",
   Timeout: "Operazione troppo lunga",
   NonTrovato: "Elemento non trovato",

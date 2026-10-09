@@ -7,6 +7,7 @@ import { leggi, invia, seg, aspettaLavoro } from "../api.js";
 import { intestazionePasso, statoRun, boxErrore, piede, sezione, pulsanteIndietro } from "../componenti.js";
 import { mostraErrore, pulisciErrore, conferma, domanda, titolo as titoloEsito } from "../stati.js";
 import { puo } from "../sessione.js";
+import { confermaDopoRevoca, testoRevoca } from "./voci.js";
 
 const FORMATI = { conversazione: "Conversazione", intervista: "Intervista" };
 const RUOLI = { presentatore: "Presentatore", intervistatore: "Intervistatore", ospite: "Ospite", voce_a: "Voce A", voce_b: "Voce B", voce: "Voce" };
@@ -77,12 +78,16 @@ export async function mostraStima(pagina, { run }) {
       const input = h("input", { type: "checkbox", id, disabled: !puo("voce_consenso"), onchange: async (e) => {
         if (!e.target.checked) return;
         pulisciErrore(box);
+        // Registrazione revocata: conferma esplicita e separata (un nuovo consenso toglie la revoca).
+        const revocata = v.consenso?.stato === "revocato" || v.consenso?.revoca_nel_registro === true;
+        if (revocata && !(await confermaDopoRevoca(nome, v.consenso))) { e.target.checked = false; return; }
         e.target.disabled = true;
-        const { corpo: r } = await invia(`/api/voci/${seg(v.speaker)}/consenso`, { audio_sha256: v.consenso?.audio_sha256, revisione: v.consenso?.revisione });
+        const { corpo: r } = await invia(`/api/voci/${seg(v.speaker)}/consenso`,
+          { audio_sha256: v.consenso?.audio_sha256, revisione: v.consenso?.revisione, dopo_revoca: revocata });
         if (r.ok) { conferma(`Consenso registrato per ${v.speaker}`); ricarica(); return; }
         e.target.checked = false;
         e.target.disabled = false;
-        if (["RecordingChanged", "RevokedMeanwhile"].includes(r.error_type)) {
+        if (["RecordingChanged", "RevokedMeanwhile", "ConsensoDopoRevoca"].includes(r.error_type)) {
           await domanda({ titolo: titoloEsito(r), testo: `${r.messaggio} Ricarico lo stato aggiornato: se confermi di nuovo, vale la situazione nuova.`,
             opzioni: [{ testo: "Ricarica", valore: true, primaria: true }] });
           ricarica();
@@ -94,7 +99,7 @@ export async function mostraStima(pagina, { run }) {
         h("label", { for: id }, `Confermo che ${nome} ha dato il consenso a clonare la propria voce e a fargli dire questo copione.`),
         v.consenso?.da_confermare ? h("p", { class: "nota" }, "Voce già clonata, ma il consenso non era mai stato registrato.") : null,
         v.consenso?.stato === "superato" ? h("p", { class: "nota" }, "La registrazione è cambiata dopo il consenso: va confermato di nuovo.") : null,
-        v.consenso?.stato === "revocato" ? h("p", { class: "nota nota-errore" }, "Il consenso è stato revocato.") : null,
+        v.consenso?.stato === "revocato" ? h("p", { class: "nota nota-errore" }, testoRevoca(v.consenso)) : null,
         !puo("voce_consenso") ? h("p", { class: "nota" }, "Il consenso lo registra chi gestisce le voci.") : null);
     }
     return h("li", { class: "voce-episodio" },

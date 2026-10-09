@@ -257,15 +257,39 @@ class Consenso(BaseModel):
     model_config = ConfigDict(extra="forbid")
     audio_sha256: str
     revisione: str
+    # Conferma esplicita e separata quando la registrazione era stata revocata (A5 MEDIA-1,
+    # C7-sicurezza-3 BASSA-1): un nuovo consenso toglie la revoca di quella registrazione
+    # e dei suoi voice_id, quindi non deve mai partire "di passaggio".
+    dopo_revoca: bool = False
+
+
+def _revocata(consenso: Any) -> bool:
+    return isinstance(consenso, dict) and (consenso.get("stato") == "revocato" or consenso.get("revoca_nel_registro") is True)
 
 
 @router.post("/voci/{nome}/consenso")
 async def registra_consenso(nome: str, corpo: Consenso, request: Request,
                             utente: Utente = Depends(utente_corrente)) -> JSONResponse:
     """"Confermo che ... ha dato il consenso": sha256 e revisione sono quelli che la
-    pagina ha mostrato (stima o stato della voce)."""
-    return await esegui_azione(request, utente, "registra_consenso",
-                               {"nome": nome, "audio_sha256": corpo.audio_sha256, "revisione": corpo.revisione})
+    pagina ha mostrato (stima o stato della voce). Se la registrazione risulta revocata
+    serve `dopo_revoca: true`, che la pagina manda solo dopo aver mostrato la revoca e
+    avuto una conferma a parte; altrimenti 409 `ConsensoDopoRevoca`, niente registrato."""
+    ctx = contesto(request)
+    ctx.permessi.richiedi(utente, "voce_consenso")
+    stato, corpo_stato, _ = await esegui_e_valuta(ctx, utente, "stato_voce", {"nome": nome})
+    if stato != 200:
+        return JSONResponse(corpo_stato, status_code=stato)
+    consenso = corpo_stato["dati"].get("consenso")
+    revocata = _revocata(consenso)
+    if revocata and not corpo.dopo_revoca:
+        ctx.registro.scrivi(utente=utente, azione="registra_consenso", esito="ConsensoDopoRevoca", http=409,
+                            dettagli={"nome": nome, "motivo": "registrazione revocata: serve una conferma esplicita"})
+        raise ErroreController("ConsensoDopoRevoca", details={
+            "campo": "dopo_revoca", "revocato_da": consenso.get("revocato_da"), "revocato_il": consenso.get("revocato_il")})
+    stato, risposta, _ = await esegui_e_valuta(ctx, utente, "registra_consenso",
+                                               {"nome": nome, "audio_sha256": corpo.audio_sha256, "revisione": corpo.revisione},
+                                               risposta_a="ConsensoDopoRevoca" if revocata else None)
+    return JSONResponse(risposta, status_code=stato)
 
 
 @router.delete("/voci/{nome}/consenso")

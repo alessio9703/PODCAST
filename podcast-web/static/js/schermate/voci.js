@@ -14,6 +14,19 @@ const FILTRI = [["", "Tutte"], ["clonate", "Già clonate"], ["da_clonare", "Da c
 const CONSENSO = { registrato: "Registrato", mancante: "Mancante", superato: "Da confermare: registrazione cambiata", revocato: "Revocato" };
 const NOTA_SOSTITUZIONE = "Il consenso va confermato di nuovo per la nuova registrazione, e alla prossima produzione la voce viene clonata di nuovo (a pagamento).";
 
+export function testoRevoca(c) {
+  return `Il consenso per questa registrazione era stato revocato${c?.revocato_da ? ` da ${c.revocato_da}` : ""}${c?.revocato_il ? ` il ${dataOra(c.revocato_il)}` : ""}.`;
+}
+
+// Consenso su una registrazione revocata (A5 MEDIA-1, C7-sicurezza-3 BASSA-1): mai
+// automatico, sempre con questa domanda a parte che mostra la revoca e cosa succede.
+export function confermaDopoRevoca(nome, consenso) {
+  return domanda({ titolo: "Registrare di nuovo il consenso?",
+    testo: `${testoRevoca(consenso)} Registrarlo di nuovo toglie la revoca: la voce di ${nome} torna utilizzabile in produzioni, retake e rimontaggi.`,
+    nota: "Conferma solo se la persona ti ha dato di nuovo il consenso. Resta nel registro attività con il tuo nome.",
+    opzioni: [{ testo: "Annulla", valore: false }, { testo: "Confermo: la persona ha dato di nuovo il consenso", valore: true, primaria: true }] });
+}
+
 export async function mostraVoci(pagina) {
   let filtro = "";
   let cerca = "";
@@ -67,6 +80,7 @@ export async function mostraVoci(pagina) {
     const nome = v.nome_pronunciato || v.spoken_name || v.name;
     const fuoriDurata = typeof v.durata_campione_seconds === "number" && (v.durata_campione_seconds < 10 || v.durata_campione_seconds > 30);
     const serveConsenso = c.stato !== "registrato" || c.da_confermare;
+    const revocata = c.stato === "revocato" || c.revoca_nel_registro === true;
     const audioId = nuovoId("campione");
     return h("article", { class: "scheda scheda-voce" },
       h("div", { class: "scheda-voce-testa" },
@@ -84,8 +98,10 @@ export async function mostraVoci(pagina) {
         h("dt", {}, "Usata in"), h("dd", {}, v.usata_in ? `${v.usata_in} ${v.usata_in === 1 ? "episodio" : "episodi"}` : "Mai usata")),
       v.file ? h("div", {}, h("label", { for: audioId, class: "etichetta" }, "Ascolta il campione"),
         h("audio", { id: audioId, controls: true, preload: "none", src: `/api/voci/${seg(v.name)}/campione`, class: "lettore" })) : null,
-      serveConsenso && c.stato !== "revocato" && puo("voce_consenso") && c.audio_sha256 ? h("button", { type: "button", class: "pulsante pulsante-primario",
+      serveConsenso && !revocata && puo("voce_consenso") && c.audio_sha256 ? h("button", { type: "button", class: "pulsante pulsante-primario",
         onclick: () => registraConsenso(v, nome, box) }, "Registra il consenso") : null,
+      revocata && puo("voce_consenso") && c.audio_sha256 ? h("button", { type: "button", class: "pulsante",
+        onclick: () => registraConsenso(v, nome, box, { dopoRevoca: true }) }, "Registra di nuovo il consenso") : null,
       serveConsenso && !puo("voce_consenso") ? h("p", { class: "nota" }, "Il consenso lo registra chi gestisce le voci.") : null,
       box);
   }
@@ -103,15 +119,21 @@ export async function mostraVoci(pagina) {
       h("div", { class: "menu-azioni-voci" }, voci));
   }
 
-  async function registraConsenso(v, nome, box) {
+  async function registraConsenso(v, nome, box, { dopoRevoca = false } = {}) {
     pulisciErrore(box);
-    const si = await domanda({ titolo: "Registrare il consenso?",
+    const si = dopoRevoca ? await confermaDopoRevoca(nome, v.consenso) : await domanda({ titolo: "Registrare il consenso?",
       testo: `Confermo che ${nome} ha dato il consenso a clonare la propria voce per gli episodi.`,
       nota: "Il consenso vale per questa registrazione e viene scritto nel registro attività con il tuo nome.",
       opzioni: [{ testo: "Annulla", valore: false }, { testo: "Confermo il consenso", valore: true, primaria: true }] });
     if (!si) return;
-    const { corpo: r } = await invia(`/api/voci/${seg(v.name)}/consenso`, { audio_sha256: v.consenso.audio_sha256, revisione: v.consenso.revisione });
+    const { corpo: r } = await invia(`/api/voci/${seg(v.name)}/consenso`,
+      { audio_sha256: v.consenso.audio_sha256, revisione: v.consenso.revisione, dopo_revoca: dopoRevoca });
     if (r.ok) { conferma(`Consenso registrato per ${v.name}`); carica(); return; }
+    if (r.error_type === "ConsensoDopoRevoca") {
+      await carica();
+      mostraErrore(errore, { ...r, messaggio: "Nel frattempo la registrazione risulta revocata: niente registrato. Controlla la scheda e, se serve, conferma di nuovo." });
+      return;
+    }
     if (r.error_type === "RecordingChanged" || r.error_type === "RevokedMeanwhile") {
       await carica();
       mostraErrore(errore, { ...r, messaggio: r.error_type === "RevokedMeanwhile" ? "Nel frattempo il consenso è stato revocato: niente registrato." : "La registrazione è cambiata: ascoltala e conferma di nuovo." });
@@ -233,12 +255,29 @@ export async function mostraVoci(pagina) {
       // sha256 e revisione come li mostra l'agente: il consenso vale per QUESTA registrazione.
       const { corpo: s } = await leggi(`/api/voci/${seg(voce)}/consenso`);
       if (!s.ok) { mostraErrore(box, s); carica(); return; }
-      if (s.dati.consenso?.audio_sha256 !== corpo.dati.sha256) {
+      const c = s.dati.consenso || {};
+      if (c.audio_sha256 !== corpo.dati.sha256) {
         mostraErrore(box, { error_type: "RecordingChanged", messaggio: "La registrazione è cambiata subito dopo il caricamento: controlla e registra il consenso dalla scheda." });
         carica();
         return;
       }
-      const { corpo: r } = await invia(`/api/voci/${seg(voce)}/consenso`, { audio_sha256: s.dati.consenso.audio_sha256, revisione: s.dati.consenso.revisione });
+      // Il consenso si concatena SOLO per una registrazione nuova senza storia: mai se era
+      // stata revocata (stesso sha256 nel registro delle revoche) e mai su una sostituzione.
+      // In quei casi la scheda mostra la situazione e serve una conferma a parte.
+      if (c.stato === "revocato" || c.revoca_nel_registro === true) {
+        sostituisci(nuova);
+        await carica();
+        mostraErrore(errore, { error_type: "ConsensoDopoRevoca",
+          messaggio: `Voce salvata: ${voce}. ${testoRevoca(c)} Il consenso NON è stato registrato: se la persona lo ha dato di nuovo, usa «Registra di nuovo il consenso» nella sua scheda.` });
+        return;
+      }
+      if ((corpo.dati.sostituiti || []).length || !["mancante", "superato"].includes(c.stato)) {
+        sostituisci(nuova);
+        await carica();
+        conferma(`Voce salvata: ${voce}. La registrazione ne ha sostituita una esistente: registra il consenso dalla scheda.`);
+        return;
+      }
+      const { corpo: r } = await invia(`/api/voci/${seg(voce)}/consenso`, { audio_sha256: c.audio_sha256, revisione: c.revisione });
       if (!r.ok) { mostraErrore(box, r); carica(); return; }
     }
     sostituisci(nuova);

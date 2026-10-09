@@ -410,3 +410,75 @@ def test_diagnostica_anche_quando_un_controllo_non_passa(client, agente):
 def test_impostazioni(client, agente):
     r = client.get("/api/impostazioni")
     assert r.status_code == 200 and "impostazioni" in r.json()["dati"]
+
+
+# --- Consenso su una registrazione revocata (A5 MEDIA-1, C7-sicurezza-3 BASSA-1) ---------
+
+REVOCATA = {"exit": 0, "json": {"ok": True, "voce": "Luca Bianchi", "file": "Luca Bianchi.wav", "consenso": {
+    "stato": "revocato", "audio_sha256": "sha256:aa", "revisione": "rev:1", "revocato_da": "Carla", "revocato_il": "2026-10-01T10:00:00",
+    "revoca_nel_registro": True}}}
+CONSENSO = {"audio_sha256": "sha256:aa", "revisione": "rev:1"}
+
+
+def _consenso_registrato(agente):
+    return [c["argv"] for c in agente.chiamate("voice_meta.py") if "--consent" in c["argv"]]
+
+
+def test_consenso_dopo_revoca_non_parte_senza_conferma_esplicita(client, agente, ambiente):
+    agente.scenario("voice_meta.py", REVOCATA)
+    r = client.post("/api/voci/Luca Bianchi/consenso", json=CONSENSO)
+    assert r.status_code == 409 and r.json()["error_type"] == "ConsensoDopoRevoca"
+    assert r.json()["details"]["revocato_da"] == "Carla"
+    assert _consenso_registrato(agente) == []
+    riga = righe_registro(ambiente)[-1]
+    assert riga["azione"] == "registra_consenso" and riga["esito"] == "ConsensoDopoRevoca"
+
+
+def test_revoca_solo_nel_registro_vale_come_revoca(client, agente):
+    # stesso sha256 di una registrazione revocata e poi cancellata: lo stato puo' dire "revocato"
+    # o solo `revoca_nel_registro: true`
+    dati = {**REVOCATA["json"], "consenso": {**REVOCATA["json"]["consenso"], "stato": "mancante"}}
+    agente.scenario("voice_meta.py", {"exit": 0, "json": dati})
+    assert client.post("/api/voci/Luca Bianchi/consenso", json=CONSENSO).status_code == 409
+    assert _consenso_registrato(agente) == []
+
+
+def test_consenso_dopo_revoca_con_conferma_esplicita(client, agente, ambiente):
+    agente.scenario("voice_meta.py", REVOCATA)
+    r = client.post("/api/voci/Luca Bianchi/consenso", json={**CONSENSO, "dopo_revoca": True})
+    assert r.status_code == 200, r.text
+    assert _consenso_registrato(agente) == [["--name=Luca Bianchi", "--expect-sha256=sha256:aa", "--expect-revision=rev:1",
+                                             "--consent", "--by=Utente Demo"]]
+    riga = righe_registro(ambiente)[-1]
+    assert riga["azione"] == "registra_consenso" and riga["esito"] == "ok"
+    assert riga["dettagli"]["risposta_a"] == "ConsensoDopoRevoca"
+
+
+def test_consenso_su_voce_non_revocata_resta_com_era(client, agente, ambiente):
+    agente.scenario("voice_meta.py", {"exit": 0, "json": {"ok": True, "consenso": {"stato": "mancante", "revoca_nel_registro": False}}})
+    assert client.post("/api/voci/Anna Neri/consenso", json=CONSENSO).status_code == 200
+    assert len(_consenso_registrato(agente)) == 1
+    assert "risposta_a" not in righe_registro(ambiente)[-1]["dettagli"]
+
+
+def test_consenso_vuole_il_permesso_prima_di_leggere_lo_stato(ambiente, agente):
+    from tests.conftest import header_firmati, SEGRETO
+    amb = {**ambiente, "AUTH_MODE": "cms", "LIL_SEGRETO": SEGRETO}
+    url = "/api/voci/Luca%20Bianchi/consenso"
+    with client_per(amb) as c:
+        h = {**header_firmati("POST", url, ruoli="autore"), "X-LIL-Richiesta": "1"}
+        assert c.post(url, json={**CONSENSO, "dopo_revoca": True}, headers=h).status_code == 403
+    assert agente.chiamate("voice_meta.py") == []
+
+
+def test_nuova_voce_non_concatena_il_consenso_su_una_revoca():
+    """La pagina: il consenso dopo il caricamento solo per stato mancante/superato, senza
+    revoca nel registro e senza sostituzione; altrimenti la conferma separata."""
+    from pathlib import Path
+    js = (Path(__file__).resolve().parents[1] / "static" / "js" / "schermate" / "voci.js").read_text()
+    salva = js[js.index("async function salvaNuova"):]
+    assert salva.index('c.stato === "revocato" || c.revoca_nel_registro === true') < salva.index("/consenso`, { audio_sha256: c.audio_sha256")
+    assert "corpo.dati.sostituiti" in salva and "dopo_revoca" not in salva.split("async function", 2)[1]
+    assert "confermaDopoRevoca" in js and "dopo_revoca: dopoRevoca" in js
+    stima = (Path(__file__).resolve().parents[1] / "static" / "js" / "schermate" / "stima.js").read_text()
+    assert "confermaDopoRevoca" in stima and "dopo_revoca: revocata" in stima

@@ -376,13 +376,31 @@ tunnel, percorso del clone, `REGISTRO_FILE`, abilitazione del sito nginx).
   permessi aggiunti in futuro (NOTA-9); il CMS finto firma il percorso del browser e non quello
   normalizzato dal suo client (fallisce in modo sicuro, NOTA-1).
 
-### Dopo A5
+### Dalla revisione di A5
 
-- [ ] **Revisione di sicurezza delle aggiunte di A5** (non prevista dal piano, che ne fa
-  una a fine A1, A2 e A4): caricamento di registrazioni e brani (`POST /api/voci`,
-  `/api/musiche/<categoria>`), ascolto dei campioni, anteprime dei take servite da
-  sottocartelle della run (`app/file/nomi.py`, `apri_percorso_relativo`), retake e proposte
-  di lezioni legati alla stima, lezioni e diagnostica.
+Rapporto: `docs/avanzamento/A5-sicurezza.md` (0 alte, 1 media corretta: consenso su una
+registrazione revocata solo con una conferma esplicita, `ConsensoDopoRevoca`).
+
+- [ ] **Proposte di lezioni senza controllo dei doppioni in coda** (BASSA-1): due conferme
+  ravvicinate fanno due chiamate al modello. Un solo lavoro `lezioni_proponi` alla volta.
+- [ ] **Registro più ricco** (BASSA-2): per accettazione e rifiuto delle lezioni scrivere
+  id, testo accettato, motivo e `remove_id`; per la scelta del take battuta e take; per i
+  metadati dei brani categoria e campi cambiati.
+- [ ] **Brano sostituito** (BASSA-3): licenza, parlato e trascrizione del brano vecchio
+  restano; chiedere conferma di licenza e parlato dopo una sostituzione.
+- [ ] **Un processo dell'agente per ogni anteprima** (BASSA-4): ogni richiesta (anche
+  `Range`) lancia `retake.py --list`; limitare i processi brevi contemporanei o tenere
+  l'elenco delle anteprime per qualche secondo.
+- [ ] **nginx a 900 s** (BASSA-5) per rimontaggio, forma d'onda e anteprime con musica
+  (`deploy/nginx-vps.conf` è ancora a 300 s per le API).
+- [ ] **Prezzi del modello delle lezioni** in `config.yaml`
+  (`lessons.input/output_cost_per_million_tokens_usd`, NOTA-2): senza, la proposta parte con
+  «costo non noto» e la riga del registro resta senza costo.
+- [ ] Note da valutare: impronta del retake con `run` e versione approvata (NOTA-1);
+  doppioni anche fra estensioni senza firma nota (NOTA-3); rifiutare i nomi di voce di sole
+  cifre (NOTA-4); permesso dedicato e registro per scaricare i campioni delle voci (NOTA-5);
+  percorsi con spazi nella diagnostica (NOTA-6); la richiesta di revisione si vede nel
+  confronto da tutti gli utenti (NOTA-7, decisione da scrivere).
 - [ ] **Cancellare voci, brani e documenti** non si fa dall'interfaccia (non c'è un comando
   dell'agente): per una voce prima si revoca il consenso dalla libreria, poi si tolgono a
   mano registrazione e `.json` (contratto, "Caricamenti").
