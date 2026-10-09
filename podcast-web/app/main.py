@@ -15,13 +15,14 @@ from typing import Any, AsyncIterator
 
 from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
-from fastapi.responses import JSONResponse
+from fastapi.responses import FileResponse, JSONResponse
+from fastapi.staticfiles import StaticFiles
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from app.agente.tabella import verifica_tabella
 from app.api import conferme, episodi, lavori, librerie, sessione
 from app.lavori.coda import Coda
-from app.config import Config, carica_config
+from app.config import RADICE_WEB, Config, carica_config
 from app.ingresso import crea_ingresso
 from app.registro import Registro
 from app.servizi.avvio import StatoSalute, verifica_avvio
@@ -33,6 +34,7 @@ from app.servizi.permessi import RUOLI_INIZIALI, Permessi
 
 log = logging.getLogger("podcast_web")
 
+STATICI = RADICE_WEB / "static"
 METODI_CHE_CAMBIANO = frozenset({"POST", "PUT", "PATCH", "DELETE"})
 HEADER_RICHIESTA = "x-lil-richiesta"
 TIPO_JSON = "application/json"
@@ -214,4 +216,12 @@ def crea_app(config: Config | None = None, *, router_extra: list[Any] | None = N
     app.include_router(lavori.router)
     for router in router_extra or []:
         app.include_router(router)
+
+    # Interfaccia: pagina unica e file statici, dietro lo stesso ingresso delle API.
+    @app.get("/", include_in_schema=False)
+    async def pagina() -> FileResponse:
+        return FileResponse(STATICI / "index.html", media_type="text/html; charset=utf-8",
+                            headers={"Cache-Control": "no-cache"})
+
+    app.mount("/static", StaticFiles(directory=STATICI, follow_symlink=False), name="static")
     return app

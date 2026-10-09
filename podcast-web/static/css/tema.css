@@ -1,0 +1,39 @@
+/* Tema di LIL Podcast: TUTTI i colori, i caratteri e le misure dell'interfaccia.
+   Per applicare il marchio LIFE basta cambiare (o sostituire) questo file.
+   Valori di partenza dal wireframe (docs/wireframe/wireframe/). */
+:root {
+  /* caratteri (il wireframe usa IBM Plex Sans: caricarlo da 'self' quando ci sara' il marchio) */
+  --carattere: "IBM Plex Sans", system-ui, -apple-system, "Segoe UI", "Helvetica Neue", Arial, sans-serif;
+  --carattere-mono: "IBM Plex Mono", ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  --testo-base: 15px;
+  --testo-piccolo: 13px;
+  --titolo-grande: 32px;
+  --titolo-medio: 20px;
+
+  /* colori */
+  --sfondo: #f5f5f3;
+  --superficie: #ffffff;
+  --superficie-tenue: #ececea;
+  --bordo: #d5d5d1;
+  --bordo-tenue: #ececea;
+  --testo: #1c1d1f;
+  --testo-tenue: #5b5d61;
+  --primario: #1c1d1f;
+  --su-primario: #ffffff;
+  --focus: #1f5fd1;
+
+  --ok-sfondo: #e3f1e5;   --ok-testo: #245a2e;
+  --attenzione-sfondo: #fdf3d3; --attenzione-testo: #6b5000;
+  --incorso-sfondo: #fbeae1; --incorso-testo: #8a3714;
+  --errore-sfondo: #fbe6e6; --errore-testo: #8f1c1c;
+  --neutro-sfondo: #ececea; --neutro-testo: #3d3f42;
+  --presentatore-sfondo: #e4ecfa; --presentatore-testo: #1d3f7a;
+  --tag-sfondo: #f1ecfb; --tag-testo: #4b2a8a;
+
+  /* forme e spazi */
+  --raggio: 8px;
+  --raggio-grande: 12px;
+  --spazio: 16px;
+  --altezza-tocco: 44px;
+  --larghezza-menu: 240px;
+}

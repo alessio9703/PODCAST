@@ -14,82 +14,25 @@ battuta 3 -> ripresa (SSE) -> episodio -> download con Range -> Archivio -> regi
 
 from __future__ import annotations
 
-import json
-import math
-import shutil
-import struct
 import time
-import wave
 from pathlib import Path
 from typing import Any
 
 import pytest
 
 from app.ingresso.cms import codifica_header
+from strumenti.demo import prepara
 from tests.conftest import client_per, righe_registro
 
 AGENTE = Path(__file__).resolve().parents[2] / "podcast-agent"
 PRESENTATORE, INTERVISTATORE, OSPITE = "Anna Neri", "Mario Rossi", "Giulia Bianchi"
-INTERVISTA = {
-    "titolo": "Il trimestre in tre minuti",
-    "turni": [
-        {"speaker": PRESENTATORE, "testo": "[caldo] Benvenuti. Oggi con noi Mario Rossi, giornalista economico, e Giulia Bianchi, analista finanziaria."},
-        {"speaker": INTERVISTATORE, "testo": "[curioso] Giulia, cosa dice il report sui ricavi del trimestre?"},
-        {"speaker": OSPITE, "testo": "Che sono cresciuti, e in modo netto rispetto all'anno scorso."},
-        {"speaker": INTERVISTATORE, "testo": "E perché è successo, secondo te?"},
-        {"speaker": OSPITE, "testo": "[enfasi] Soprattutto per le vendite all'estero, che hanno trainato tutto."},
-    ],
-}
 
 pytestmark = pytest.mark.skipif(not (AGENTE / ".venv" / "bin" / "python").exists(), reason="manca la .venv dell'agente")
 
 
-def wav(percorso: Path, secondi: float, freq: int) -> None:
-    rate = 22050
-    dati = b"".join(struct.pack("<h", int(8000 * math.sin(2 * math.pi * freq * i / rate))) for i in range(int(rate * secondi)))
-    with wave.open(str(percorso), "wb") as out:
-        out.setnchannels(1)
-        out.setsampwidth(2)
-        out.setframerate(rate)
-        out.writeframes(dati)
-
-
 def copia_agente(radice: Path) -> Path:
-    ignora = shutil.ignore_patterns("__pycache__", "*.pyc")
-    for nome in ("src", "tools", "prompts"):
-        shutil.copytree(AGENTE / nome, radice / nome, ignore=ignora)
-    shutil.copy2(AGENTE / "VERSION", radice / "VERSION")
-    (radice / "tests").mkdir()
-    for nome in ("__init__.py", "fake_provider.py", "fake_anthropic.py"):
-        shutil.copy2(AGENTE / "tests" / nome, radice / "tests" / nome)
-    (radice / ".venv").symlink_to(AGENTE / ".venv")
-    (radice / "voci").mkdir()
-    for nome, freq in ((PRESENTATORE, 260), (INTERVISTATORE, 220), (OSPITE, 330)):
-        wav(radice / "voci" / f"{nome}.wav", 1.0, freq)
-    (radice / "documenti").mkdir()
-    (radice / "musiche" / "intro").mkdir(parents=True)
-    wav(radice / "musiche" / "intro" / "Piano calmo.wav", 0.5, 440)
-    (radice / "output").mkdir()
-    (radice / "anthropic_risposte.json").write_text(json.dumps([{"json": INTERVISTA}], ensure_ascii=False))
-    opzioni = {
-        "seconds_per_100_chars": 2.0, "voices_file": str(radice / "fake_voices.json"),
-        "clone_log_file": str(radice / "clonazioni.log"), "tts_log_file": str(radice / "tts.log"),
-        "tts_delay_seconds": 0.2, "hold_file": str(radice / "fermo-sintesi"), "hold_after": 2,
-    }
-    righe = "".join(f"      {k}: {json.dumps(v)}\n" for k, v in opzioni.items())
-    (radice / "config.yaml").write_text(
-        "active_provider: fake\nproviders:\n  fake:\n    class: tests.fake_provider:FakeProvider\n    options:\n"
-        + righe + "    clone_cost_usd: 0.5\n"
-        "currency:\n  eur_per_usd: 0.9\n  rate_date: \"2026-10-01\"\n"
-        f"paths:\n  documents_dir: {radice / 'documenti'}\n  voices_dir: {radice / 'voci'}\n"
-        f"  registry_file: {radice / 'voices_registry.json'}\n  output_dir: {radice / 'output'}\n  music_dir: {radice / 'musiche'}\n"
-        "audio:\n  pause_between_turns_ms: 400\n  lead_in_ms: 200\n  lead_out_ms: 400\n  accepted_extensions: ['.wav', '.mp3']\n"
-        "script:\n  model: claude-opus-5\n  api_key_env: ANTHROPIC_API_KEY\n  max_tokens: 16000\n  words_per_minute: 150\n"
-        "  target_minutes: 3\n  client_factory: tests.fake_anthropic:build\n  client_options:\n"
-        f"    responses_file: {radice / 'anthropic_risposte.json'}\n    log_file: {radice / 'anthropic_richieste.jsonl'}\n",
-        encoding="utf-8",
-    )
-    return radice
+    # La stessa copia della demo (strumenti/demo.py), con il fermo per l'interruzione.
+    return prepara(radice, tts_delay=0.2, hold=True, documento=False)
 
 
 @pytest.fixture

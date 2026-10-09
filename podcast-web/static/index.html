@@ -1,0 +1,41 @@
+<!doctype html>
+<html lang="it">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>LIL Podcast</title>
+<link rel="stylesheet" href="/static/css/tema.css">
+<link rel="stylesheet" href="/static/css/app.css">
+<script type="module" src="/static/js/app.js"></script>
+</head>
+<body>
+<a class="salta" href="#contenuto">Vai al contenuto</a>
+<div class="struttura">
+  <nav class="menu" aria-label="Menu principale">
+    <p class="marchio">LIL Podcast</p>
+    <a class="pulsante pulsante-primario menu-nuovo" href="#/nuovo" data-menu="nuovo">Nuovo episodio</a>
+    <ul class="menu-voci">
+      <li><a href="#/archivio" data-menu="archivio">Archivio</a></li>
+    </ul>
+    <p class="menu-gruppo">Librerie</p>
+    <ul class="menu-voci">
+      <li><a href="#/documenti" data-menu="documenti">Documenti</a></li>
+      <li><a href="#/voci" data-menu="voci">Voci</a></li>
+      <li><a href="#/musiche" data-menu="musiche">Musiche</a></li>
+    </ul>
+    <p class="menu-gruppo">Avanzate</p>
+    <ul class="menu-voci">
+      <li><a href="#/lezioni" data-menu="lezioni">Lezioni</a></li>
+      <li><a href="#/impostazioni" data-menu="impostazioni">Impostazioni</a></li>
+      <li><a href="#/diagnostica" data-menu="diagnostica">Diagnostica</a></li>
+    </ul>
+    <p class="menu-utente"><span class="solo-lettori">Utente: </span><span id="utente"></span></p>
+  </nav>
+  <main id="contenuto" class="contenuto" tabindex="-1">
+    <p class="nota">Caricamento…</p>
+  </main>
+</div>
+<div id="avvisi" class="avvisi" aria-live="polite"></div>
+<noscript><p class="pagina">Questa interfaccia richiede JavaScript.</p></noscript>
+</body>
+</html>

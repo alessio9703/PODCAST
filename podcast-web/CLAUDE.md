@@ -78,3 +78,7 @@ AUTH_MODE=demo AGENT_DIR=/percorso/podcast-agent AGENT_VERSIONE_ATTESA=1.0-web .
 - `app/api/` rotte · `app/lavori/` coda e eventi · `app/file/` caricamenti e download
 - `app/registro.py` registro attività · `static/` interfaccia · `deploy/` esempi di installazione
 - `tests/agente_finto.py` lo script che fa la parte dei tool nei test
+- `strumenti/demo.py` copia dell'agente con i servizi finti, per provare l'interfaccia in locale
+- `static/` interfaccia senza build: `css/tema.css` (solo variabili, per il marchio), `js/dom.js`
+  (DOM senza markup in stringa), `js/stati.js` (esiti di Stati.dc.html), `js/schermate/` (un file per passo).
+  Niente script, stili o gestori inline (CSP `'self'`): lo controlla `tests/test_interfaccia.py`.
