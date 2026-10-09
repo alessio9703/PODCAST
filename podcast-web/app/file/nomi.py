@@ -77,3 +77,31 @@ def apri_cartella(percorso: Path) -> int:
         return os.open(percorso, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
     except OSError:
         raise ErroreController("NonTrovato") from None
+
+
+def apri_percorso_relativo(radice: Path, percorso: str, prefisso: str) -> tuple[int, str]:
+    """Un percorso relativo dato dall'agente (`output/<run>/segmenti/anteprime/x.wav`):
+    deve cominciare con `prefisso` (`output/<run>/`), poi ogni componente e' un nome
+    semplice (niente `..`, punto iniziale, separatori strani) e ogni cartella si apre
+    senza seguire link, a partire da `radice` (la cartella della run).
+
+    Restituisce (descrittore della cartella che contiene il file, nome del file): chi
+    chiama chiude il descrittore."""
+    if not isinstance(percorso, str) or not percorso.startswith(prefisso) or "\\" in percorso or _CONTROLLO.search(percorso):
+        raise ErroreController("NonTrovato")
+    parti = percorso[len(prefisso):].split("/")
+    if not parti or len(parti) > 6 or any(not p or p.startswith(".") or p in ("..", ".") for p in parti):
+        raise ErroreController("NonTrovato")
+    fd = apri_cartella(radice)
+    try:
+        for cartella in parti[:-1]:
+            try:
+                nuovo = os.open(cartella, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=fd)
+            except OSError:
+                raise ErroreController("NonTrovato") from None
+            os.close(fd)
+            fd = nuovo
+    except BaseException:
+        os.close(fd)
+        raise
+    return fd, parti[-1]

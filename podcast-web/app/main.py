@@ -20,7 +20,7 @@ from fastapi.staticfiles import StaticFiles
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from app.agente.tabella import verifica_tabella
-from app.api import conferme, episodi, lavori, librerie, sessione
+from app.api import conferme, correzioni, episodi, lavori, librerie, sessione
 from app.lavori.coda import Coda
 from app.config import RADICE_WEB, Config, carica_config
 from app.ingresso import crea_ingresso
@@ -216,6 +216,7 @@ def crea_app(config: Config | None = None, *, router_extra: list[Any] | None = N
     app.include_router(episodi.router)
     app.include_router(librerie.router)
     app.include_router(lavori.router)
+    app.include_router(correzioni.router)
     for router in router_extra or []:
         app.include_router(router)
 

@@ -1,12 +1,15 @@
-// Passo 7 · Episodio (07-Episodio.dc.html): intestazione, lettore con le sezioni,
-// trascrizione cliccabile, file da scaricare, correzioni di una battuta: "Cosa dice"
-// (correggi il testo: nuova versione da approvare, poi si rigenera solo quella battuta).
+// Passo 7 · Episodio (07-Episodio.dc.html): intestazione, lettore con le sezioni e la
+// forma d'onda, trascrizione cliccabile, file da scaricare, correzioni di una battuta:
+// "Come è detta" (retake, `retake.js`) e "Cosa dice" (correggi il testo: nuova versione
+// da approvare, poi si rigenera solo quella battuta); rimontaggio e cambio delle musiche.
 
 import { h, sostituisci, durata, giorno, nuovoId } from "../dom.js";
 import { leggi, modifica, seg } from "../api.js";
 import { intestazionePasso, statoRun, boxErrore, sezione, badgeStato, piede } from "../componenti.js";
 import { mostraErrore, pulisciErrore, conferma } from "../stati.js";
 import { puo } from "../sessione.js";
+import { comeEDetta, rimonta } from "./retake.js";
+import { formaOnda } from "./forma-onda.js";
 
 const FORMATI = { conversazione: "Conversazione", intervista: "Intervista" };
 const SEZIONI = { intro: "Intro", parlato: "Parlato", outro: "Outro" };
@@ -53,7 +56,8 @@ export async function mostraEpisodio(pagina, { run }) {
         h("button", { type: "button", class: "scelta scelta-estesa", "aria-pressed": String(quale === "cosa"), onclick: () => scegli("cosa") },
           h("span", { class: "forte" }, "Cosa dice"), h("span", { class: "nota" }, "Correggi il testo · nuova approvazione")));
       if (quale === "cosa") cosaDice(t, corpo);
-      else if (quale === "come") comeEDetta(t, corpo);
+      else if (quale === "come") comeEDetta(run, t, corpo, { vaiACosaDice: () => scegli("cosa"), suRimontato: ricarica,
+        registraChiusura: (f) => chiusure.push(f) });
       else sostituisci(corpo);
     };
     scegli(null);
@@ -91,10 +95,9 @@ export async function mostraEpisodio(pagina, { run }) {
       box);
   }
 
-  // "Come è detta" (retake): A5, blocco successivo.
-  function comeEDetta(t, corpo) {
-    sostituisci(corpo, h("p", { class: "nota" }, "I nuovi take arrivano a breve."));
-  }
+  const chiusure = [];
+  // Si ridisegna passando dal router, che chiude la schermata attuale (timer, osservatori).
+  const ricarica = () => window.dispatchEvent(new HashChangeEvent("hashchange"));
 
   if (audio) {
     // Evidenzia la battuta in ascolto.
@@ -117,6 +120,12 @@ export async function mostraEpisodio(pagina, { run }) {
       return li;
     })) : null;
 
+  const onda = audio && (ep.trascrizione || []).length ? formaOnda(run, audio, ep.trascrizione, seleziona) : null;
+  if (onda) chiusure.push(onda.chiudi);
+  const motivi = ep.motivi || [];
+  const soloRimontaggio = ep.stato === "da_aggiornare" && motivi.length && motivi.every((m) => m === "take" || m === "musiche");
+  const boxRimonta = boxErrore();
+
   const altri = (ep.file || []).filter((f) => f.interno === false && f.nome !== finale?.nome);
 
   sostituisci(pagina,
@@ -125,16 +134,20 @@ export async function mostraEpisodio(pagina, { run }) {
     h("div", { class: "testa-episodio" },
       s ? badgeStato(s) : null,
       h("p", { class: "nota" }, [FORMATI[ep.formato] || "—", ep.durata_label || durata(ep.durata_seconds),
-        `${ep.numero_voci ?? "—"} voci`, ep.montato_il ? `montato il ${giorno(ep.montato_il)}` : null].filter(Boolean).join(" · "))),
+        `${ep.numero_voci ?? "—"} voci`, ep.montato_il ? `montato il ${giorno(ep.montato_il)}` : null].filter(Boolean).join(" · ")),
+      puo("episodio_modifica") && ep.stato !== "non_prodotto" ? h("a", { class: "pulsante pulsante-piccolo", href: `#/episodi/${seg(run)}/3` }, "Cambia musiche") : null),
     ep.stato === "da_aggiornare" ? h("div", { class: "messaggio messaggio-attenzione" },
       h("p", { class: "messaggio-titolo" }, "L'episodio va aggiornato"),
       h("p", {}, `Dopo il montaggio ${(ep.motivi || []).map((m) => MOTIVI[m] || m).join(", ")}.`),
-      (ep.motivi || []).includes("non_approvato") || (ep.motivi || []).includes("copione")
-        ? h("a", { class: "pulsante", href: `#/episodi/${seg(run)}/4` }, "Vai al copione") : null) : null,
+      motivi.includes("non_approvato") || motivi.includes("copione")
+        ? h("a", { class: "pulsante", href: `#/episodi/${seg(run)}/4` }, "Vai al copione") : null,
+      soloRimontaggio && puo("episodio_modifica") ? h("div", {},
+        h("button", { type: "button", class: "pulsante pulsante-primario", onclick: () => { pulisciErrore(boxRimonta); rimonta(boxRimonta, run, ricarica); } }, "Rimonta l'episodio"),
+        h("p", { class: "nota" }, "Rimonta dai segmenti già pronti: nessuna sintesi, non costa."), boxRimonta) : null) : null,
     ep.stato === "non_prodotto" ? h("div", { class: "messaggio messaggio-attenzione" },
       h("p", { class: "messaggio-titolo" }, "L'episodio non è ancora stato prodotto"),
       h("a", { class: "pulsante", href: `#/episodi/${seg(run)}/5` }, "Vai alla stima")) : null,
-    finale ? sezione("Ascolta", barraSezioni, audio,
+    finale ? sezione("Ascolta", barraSezioni, onda?.elemento, audio,
       h("div", { class: "riga-azioni" }, h("a", { class: "pulsante pulsante-primario", href: url(finale.nome, true), download: finale.nome }, `Scarica ${(finale.formato || "mp3").toUpperCase()}`))) : null,
     ep.tempi_non_disponibili ? h("p", { class: "nota" }, ep.tempi_non_disponibili.messaggio) : null,
     h("div", { class: "colonne" },
@@ -143,6 +156,7 @@ export async function mostraEpisodio(pagina, { run }) {
     altri.length ? sezione("File dell'episodio", h("ul", { class: "file" }, altri.map((f) => h("li", {},
       h("a", { href: url(f.nome, true), download: f.nome }, f.nome), h("span", { class: "nota" }, ` · ${Math.max(1, Math.round((f.dimensione_bytes || 0) / 1024))} KB`))))) : null,
     piede(h("a", { class: "pulsante", href: "#/archivio" }, "Torna all'archivio")));
+  return () => { for (const f of chiusure) f(); };
 }
 
 function orario(secondi) {

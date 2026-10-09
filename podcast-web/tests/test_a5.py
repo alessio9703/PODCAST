@@ -213,3 +213,116 @@ def test_anteprima_del_documento_come_testo(client, agente):
     assert dati["anteprima"] == "I ricavi crescono" and "path" not in dati and "preview" not in dati
     agente.scenario("doc_extract.py", {"exit": 0, "json": {"ok": True, "name": "r.txt", "preview": "/srv/agente/documenti/r.txt"}})
     assert "anteprima" not in client.get("/api/documenti/r.txt/anteprima").json()["dati"]
+
+
+# --- Retake, forma d'onda, rimontaggio -----------------------------------------
+
+from app.servizi.stima import impronta_retake  # noqa: E402
+from tests.test_lavori import aspetta, finito  # noqa: E402
+
+STIMA_RETAKE = {"ok": True, "turn": 2, "speaker": "Mario Rossi", "takes": 2, "chars": 122,
+                "indicazioni": ["Più calmo"], "cost_usd": 0.0012, "cost_eur": 0.0011, "dry_run": True}
+
+
+def test_stima_retake_con_impronta(client, agente):
+    agente.scenario("retake.py", {"exit": 0, "json": STIMA_RETAKE})
+    r = client.get("/api/episodi/run-uno/retake/stima?battuta=2&take=2&indicazioni=Più calmo&indicazioni=Più lento")
+    assert r.status_code == 200 and r.json()["dati"]["impronta"] == impronta_retake(STIMA_RETAKE)
+    assert argv(agente, "retake.py") == ["--run-dir=run-uno", "--turn=2", "--takes=2", "--direction=Più calmo",
+                                         "--direction=Più lento", "--dry-run"]
+
+
+@pytest.mark.parametrize("q", ["battuta=2&take=4", "battuta=2&take=1&indicazioni=Pronuncia diversa",
+                               "battuta=2&take=1&indicazioni=--by=x", "battuta=0&take=1"])
+def test_stima_retake_argomenti_rifiutati(client, agente, q):
+    assert client.get(f"/api/episodi/run-uno/retake/stima?{q}").status_code in (400, 422)
+    assert agente.chiamate("retake.py") == []
+
+
+def test_retake_in_coda_legato_alla_stima(client, agente, ambiente):
+    agente.scenario("retake.py", [{"exit": 0, "json": STIMA_RETAKE},
+                                  {"exit": 0, "json": {"ok": True, "turn": 2, "takes": [2, 3]}}])
+    corpo = {"battuta": 2, "take": 2, "indicazioni": ["Più calmo"], "impronta": impronta_retake(STIMA_RETAKE)}
+    r = client.post("/api/episodi/run-uno/retake", json=corpo)
+    assert r.status_code == 202, r.text
+    aspetta(client, finito(r.json()["dati"]["lavoro"]))
+    chiamate = [c["argv"] for c in agente.chiamate("retake.py")]
+    assert chiamate[0][-1] == "--dry-run"
+    assert chiamate[1] == ["--run-dir=run-uno", "--turn=2", "--takes=2", "--direction=Più calmo", "--by=Utente Demo"]
+    accodato = [x for x in righe_registro(ambiente) if x["azione"] == "genera_retake" and x["esito"] == "accodato"][-1]
+    assert accodato["costo_stimato_usd"] == 0.0012
+
+
+def test_retake_con_stima_cambiata_non_parte(client, agente, ambiente):
+    agente.scenario("retake.py", {"exit": 0, "json": {**STIMA_RETAKE, "chars": 500, "cost_usd": 0.01}})
+    corpo = {"battuta": 2, "take": 2, "indicazioni": ["Più calmo"], "impronta": impronta_retake(STIMA_RETAKE)}
+    r = client.post("/api/episodi/run-uno/retake", json=corpo)
+    assert r.status_code == 409 and r.json()["error_type"] == "StimaCambiata"
+    assert all("--dry-run" in c["argv"] for c in agente.chiamate("retake.py"))
+    assert righe_registro(ambiente)[-1]["esito"] == "StimaCambiata"
+
+
+def test_retake_vuole_il_permesso_produrre(ambiente, agente):
+    from tests.conftest import header_firmati, SEGRETO
+    amb = {**ambiente, "AUTH_MODE": "cms", "LIL_SEGRETO": SEGRETO}
+    url = "/api/episodi/run-uno/retake"
+    with client_per(amb) as c:
+        h = {**header_firmati("POST", url, ruoli="autore"), "X-LIL-Richiesta": "1"}
+        r = c.post(url, json={"battuta": 2, "take": 1, "impronta": "x"}, headers=h)
+    assert r.status_code == 403 and agente.chiamate("retake.py") == []
+
+
+def _take_list(run="run-uno"):
+    return {"exit": 0, "json": {"ok": True, "turn": 2, "take_list": [
+        {"take": 1, "label": "Take originale", "scelto": True,
+         "file": f"output/{run}/segmenti/a_t1.wav", "preview": f"output/{run}/segmenti/anteprime/turno-002_t1.wav",
+         "preview_with_music": f"output/{run}/segmenti/anteprime/turno-002_t1_m.wav"},
+        {"take": 2, "label": "Take 1", "scelto": False, "preview": f"output/{run}/../altro/x.wav"},
+        {"take": 3, "label": "Take 2", "scelto": False, "preview": f"output/{run}/segmenti/anteprime/link.wav"},
+    ]}}
+
+
+def test_take_senza_percorsi_e_anteprime(client, agente):
+    anteprime = agente.radice / "output" / "run-uno" / "segmenti" / "anteprime"
+    anteprime.mkdir(parents=True)
+    (anteprime / "turno-002_t1.wav").write_bytes(WAV)
+    (anteprime / "link.wav").symlink_to(anteprime / "turno-002_t1.wav")
+    agente.scenario("retake.py", _take_list())
+    r = client.get("/api/episodi/run-uno/retake/2?musica=1")
+    testo = r.text
+    assert r.status_code == 200 and "output/" not in testo and "segmenti" not in testo
+    take = r.json()["dati"]["take_list"]
+    assert take[0]["anteprima"] == "/api/episodi/run-uno/retake/2/take/1/anteprima"
+    assert take[0]["anteprima_musica"].endswith("?musica=1")
+    assert argv(agente, "retake.py") == ["--run-dir=run-uno", "--list=2", "--with-music"]
+    a = client.get("/api/episodi/run-uno/retake/2/take/1/anteprima")
+    assert a.status_code == 200 and a.content == WAV
+    # fuori dalla run, link simbolico, take inesistente
+    for k in (2, 3, 9):
+        assert client.get(f"/api/episodi/run-uno/retake/2/take/{k}/anteprima").status_code == 404, k
+
+
+def test_scelta_del_take_e_rimontaggio(client, agente, ambiente):
+    assert client.post("/api/episodi/run-uno/retake/scelta", json={"battuta": 2, "take": 3}).status_code == 200
+    assert argv(agente, "retake.py") == ["--run-dir=run-uno", "--choose=2=3"]
+    assert client.post("/api/episodi/run-uno/retake/scelta", json={"battuta": 2, "take": "3; x"}).status_code in (400, 422)
+    agente.scenario("mix.py", [
+        {"exit": 3, "json": {"ok": False, "error_type": "MusicChanged", "error": "brano cambiato", "details": {}}},
+        {"exit": 0, "json": {"ok": True, "output": "output/run-uno/x.mp3", "file": "x.mp3"}}])
+    r = client.post("/api/episodi/run-uno/rimontaggio")
+    assert r.status_code == 409 and r.json()["error_type"] == "MusicChanged"
+    assert "--accept-changed-music" not in argv(agente, "mix.py")
+    r = client.post(f"/api/conferme/{r.json()['gettone']}", json={})
+    assert r.status_code == 200 and "output" not in r.json()["dati"]
+    assert argv(agente, "mix.py") == ["--run-dir=run-uno", "--accept-changed-music"]
+    assert [x["azione"] for x in righe_registro(ambiente)][-3:] == ["scegli_take", "rimonta", "rimonta"]
+
+
+def test_forma_onda_e_battuta_al_tempo(client, agente):
+    assert client.get("/api/episodi/run-uno/forma-onda?punti=400").status_code == 200
+    assert argv(agente, "waveform.py") == ["--run-dir=run-uno", "--points=400"]
+    assert client.get("/api/episodi/run-uno/forma-onda?punti=401").status_code == 400
+    assert client.get("/api/episodi/run-uno/battuta?al=4:12").status_code == 200
+    assert argv(agente, "turn_at.py") == ["--run-dir=run-uno", "--at=4:12"]
+    for al in ("-1", "4:12; x", "--by=x", "a"):
+        assert client.get(f"/api/episodi/run-uno/battuta?al={al}").status_code == 400, al

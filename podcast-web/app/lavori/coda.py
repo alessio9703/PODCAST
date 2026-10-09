@@ -34,7 +34,7 @@ from app.agente.tabella import TABELLA
 from app.ingresso import Utente
 from app.registro import adesso_iso
 from app.servizi.errori import ErroreController
-from app.servizi.stima import impronta_stima
+from app.servizi.stima import STIME
 
 log = logging.getLogger("podcast_web.lavori")
 
@@ -163,30 +163,32 @@ class Coda:
         ctx = self._ctx
 
         costo_usd = costo_eur = None
-        if azione == "produci":
-            # Stima subito prima della produzione: il costo nel registro viene
-            # dall'agente, mai dal browser. Senza un costo la produzione non parte
-            # (A2 BASSA-7): si risponde con l'esito della stima.
+        if azione in STIME:
+            # Stima subito prima di accodare: il costo nel registro viene dall'agente,
+            # mai dal browser, e deve essere quello che l'utente ha confermato (A4
+            # MEDIA-1). Senza un costo il lavoro non parte (A2 BASSA-7): si risponde con
+            # l'esito della stima.
             from app.servizi.esiti import valuta
 
-            stima = await esecutore.esegui(ctx.config, "stima", {"run": run})
+            azione_stima, parametri_stima, calcola = STIME[azione]
+            stima = await esecutore.esegui(ctx.config, azione_stima, parametri_stima(parametri))
             if not stima.ok:
                 stato, corpo = valuta(stima, ctx.pulitore)
                 corpo.pop("gettone", None)
                 ctx.registro.scrivi(utente=utente, azione=azione, run=run, esito=corpo.get("error_type", "ErroreInterno"),
-                                    http=stato, dettagli={"motivo": "stima non riuscita: produzione non accodata"})
+                                    http=stato, dettagli={"motivo": "stima non riuscita: lavoro non accodato"})
                 return JSONResponse(corpo, status_code=stato)
-            if not impronta or impronta_stima(stima.json) != impronta:
+            if not impronta or calcola(stima.json) != impronta:
                 ctx.registro.scrivi(utente=utente, azione=azione, run=run, esito="StimaCambiata", http=409,
-                                    dettagli={"motivo": "stima diversa da quella confermata: produzione non accodata"})
+                                    dettagli={"motivo": "stima diversa da quella confermata: lavoro non accodato"})
                 raise ErroreController("StimaCambiata")
             costo_usd = _numero(stima.json.get("cost_usd"))
             costo_eur = _numero(stima.json.get("cost_eur"))
             if costo_usd is None:
-                log.error("stima senza cost_usd per %s: produzione non accodata", run)
+                log.error("stima senza cost_usd per %s (%s): lavoro non accodato", run, azione)
                 ctx.registro.scrivi(utente=utente, azione=azione, run=run, esito="ErroreInterno", http=500,
-                                    dettagli={"motivo": "stima senza costo: produzione non accodata"})
-                raise ErroreController("ErroreInterno", "La stima non ha dato un costo: la produzione non e' partita.")
+                                    dettagli={"motivo": "stima senza costo: lavoro non accodato"})
+                raise ErroreController("ErroreInterno", "La stima non ha dato un costo: il lavoro non e' partito.")
 
         lavoro = Lavoro(id=secrets.token_hex(8), azione=azione, run=run, utente=utente, parametri=dict(parametri),
                         flag_conferme=flag_conferme, risposta_a=risposta_a, impronta=impronta)
